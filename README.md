@@ -65,16 +65,23 @@ uv run mypy src
 uv run ruff check .
 ```
 
-## PyInstaller
+## 配布用ビルド
 
-フロントをビルドしてから、単体バンドルを作成します。
+### macOS App (.app)
 
 ```sh
-cd frontend
-npm run build
-cd ..
-uv run pyinstaller soma.spec
+./scripts/build-app.sh
 ```
+
+成果物: `dist/SOMA.app`
+
+### macOS DMG
+
+```sh
+./scripts/build-dmg.sh
+```
+
+成果物: `dist/SOMA-YYYYMMDD.dmg`
 
 ## Audio Preview (Dev)
 
