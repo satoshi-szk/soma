@@ -8,6 +8,7 @@ import { StatusBar } from './components/StatusBar'
 import { DEFAULT_SETTINGS } from './app/constants'
 import type { AnalysisSettings, AudioInfo, Partial, PartialPoint, SpectrogramPreview, ToolId } from './app/types'
 import { formatDuration, formatNote, toPartial } from './app/utils'
+import { isPywebviewApiAvailable, pywebviewApi } from './app/pywebviewApi'
 import { useApiStatus } from './hooks/useApiStatus'
 
 function App() {
@@ -82,8 +83,8 @@ function App() {
   useEffect(() => {
     if (!isPlaying) return
     const interval = window.setInterval(async () => {
-      const api = window.pywebview?.api
-      if (!api?.status) return
+      const api = isPywebviewApiAvailable() ? pywebviewApi : null
+      if (!api) return
       const result = await api.status()
       if (result?.status === 'ok') {
         if (typeof result.position === 'number') {
@@ -101,8 +102,8 @@ function App() {
     if (analysisState !== 'analyzing') return
     let alive = true
     const poll = async () => {
-      const api = window.pywebview?.api
-      if (!api?.analysis_status) return
+      const api = isPywebviewApiAvailable() ? pywebviewApi : null
+      if (!api) return
       const result = await api.analysis_status()
       if (!alive || result?.status !== 'ok') return
       if (result.state === 'ready' && result.preview) {
@@ -134,7 +135,7 @@ function App() {
   const handleMenuAction = async (label: string) => {
     setMenuOpen(false)
     setStatusNote(null)
-    const api = window.pywebview?.api
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api) {
       reportError(label, 'API not available')
       return
@@ -247,7 +248,7 @@ function App() {
   const openAudio = async () => {
     setMenuOpen(false)
     setStatusNote(null)
-    const api = window.pywebview?.api
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.open_audio) {
       setAnalysisState('error')
       setAnalysisError('Pywebview API is not available.')
@@ -268,10 +269,14 @@ function App() {
         setStatusNote('Audio loaded')
       } else if (result.status === 'cancelled') {
         setAnalysisState('idle')
-      } else {
+      } else if (result.status === 'error') {
         setAnalysisState('error')
         setAnalysisError(result.message ?? 'Failed to load audio.')
         reportError('Open Audio', result.message ?? 'Failed to load audio.')
+      } else {
+        setAnalysisState('error')
+        setAnalysisError('Unexpected response from API.')
+        reportError('Open Audio', 'Unexpected response from API.')
       }
     } catch (error) {
       setAnalysisState('error')
@@ -282,7 +287,7 @@ function App() {
   }
 
   const applySettings = async () => {
-    const api = window.pywebview?.api
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.update_settings) {
       reportError('Settings', 'API not available')
       return
@@ -305,7 +310,7 @@ function App() {
   }
 
   const handleTraceCommit = async (trace: Array<[number, number]>) => {
-    const api = window.pywebview?.api
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.trace_partial) {
       reportError('Trace', 'API not available')
       return false
@@ -327,7 +332,7 @@ function App() {
   }
 
   const handleEraseCommit = async (trace: Array<[number, number]>) => {
-    const api = window.pywebview?.api
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.erase_partial) {
       reportError('Erase', 'API not available')
       return
@@ -352,7 +357,7 @@ function App() {
     freq_start: number
     freq_end: number
   }) => {
-    const api = window.pywebview?.api
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.select_in_box) {
       reportError('Select', 'API not available')
       return
@@ -370,7 +375,7 @@ function App() {
   }
 
   const handleHitTestCommit = async (point: { time: number; freq: number }) => {
-    const api = window.pywebview?.api
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.hit_test) {
       reportError('HitTest', 'API not available')
       return
@@ -388,13 +393,16 @@ function App() {
   }
 
   const handleUpdatePartial = async (id: string, points: PartialPoint[]) => {
-    const api = window.pywebview?.api
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.update_partial) {
       reportError('Update', 'API not available')
       return
     }
     try {
-      const payload = { id, points: points.map((point) => [point.time, point.freq, point.amp]) }
+      const payload = {
+        id,
+        points: points.map((point) => [point.time, point.freq, point.amp] as [number, number, number]),
+      }
       const result = await api.update_partial(payload)
       if (result.status === 'ok') {
         setPartials((prev) => prev.map((item) => (item.id === result.partial.id ? toPartial(result.partial) : item)))
@@ -408,7 +416,7 @@ function App() {
   }
 
   const handleConnectPick = async (point: { time: number; freq: number }) => {
-    const api = window.pywebview?.api
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.hit_test) {
       reportError('Connect', 'API not available')
       return
@@ -441,7 +449,7 @@ function App() {
 
   const handlePartialMute = async () => {
     if (selection.length !== 1) return
-    const api = window.pywebview?.api
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.toggle_mute) {
       reportError('Mute', 'API not available')
       return
@@ -461,7 +469,7 @@ function App() {
 
   const handlePartialDelete = async () => {
     if (selection.length === 0) return
-    const api = window.pywebview?.api
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.delete_partials) {
       reportError('Delete', 'API not available')
       return
@@ -481,7 +489,7 @@ function App() {
   }
 
   const undo = useCallback(async () => {
-    const api = window.pywebview?.api
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.undo) {
       reportError('Undo', 'API not available')
       return
@@ -500,7 +508,7 @@ function App() {
   }, [reportError, reportException])
 
   const redo = useCallback(async () => {
-    const api = window.pywebview?.api
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.redo) {
       reportError('Redo', 'API not available')
       return
@@ -541,7 +549,7 @@ function App() {
 
   const handlePlayToggle = async () => {
     if (analysisState === 'analyzing') return
-    const api = window.pywebview?.api
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.play || !api?.pause) {
       reportError('Playback', 'API not available')
       return
@@ -568,7 +576,7 @@ function App() {
   }
 
   const handleStop = async () => {
-    const api = window.pywebview?.api
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.stop) {
       reportError('Stop', 'API not available')
       return
@@ -587,7 +595,7 @@ function App() {
   }
 
   const handleExport = async () => {
-    const api = window.pywebview?.api
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api) {
       reportError('Export', 'API not available')
       return
