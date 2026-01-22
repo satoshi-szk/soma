@@ -2,12 +2,22 @@ import type { AnalysisSettings, Partial } from './types'
 
 export const formatDuration = (seconds: number) => {
   const total = Math.max(0, Math.floor(seconds))
-  const minutes = Math.floor(total / 60)
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
   const secs = total % 60
   const millis = Math.floor((seconds % 1) * 1000)
-  return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${millis
+  return `${hours.toString().padStart(2, '0')}:${minutes
     .toString()
-    .padStart(3, '0')}`
+    .padStart(2, '0')}:${secs.toString().padStart(2, '0')}.${millis.toString().padStart(3, '0')}`
+}
+
+export const formatNote = (freq: number) => {
+  if (!Number.isFinite(freq) || freq <= 0) return '--'
+  const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+  const midi = Math.round(69 + 12 * Math.log2(freq / 440))
+  const name = noteNames[((midi % 12) + 12) % 12]
+  const octave = Math.floor(midi / 12) - 1
+  return `${name}${octave}`
 }
 
 export const toPartial = (raw: { id: string; is_muted: boolean; points: number[][] }): Partial => ({
