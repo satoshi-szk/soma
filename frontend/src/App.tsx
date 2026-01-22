@@ -24,6 +24,7 @@ function App() {
   const [activeTool, setActiveTool] = useState<ToolId>('trace')
   const [isPlaying, setIsPlaying] = useState(false)
   const [isLooping, setIsLooping] = useState(false)
+  const [isSnapping, setIsSnapping] = useState(false)
   const [mixValue, setMixValue] = useState(55)
   const [statusNote, setStatusNote] = useState<string | null>(null)
   const [playbackPosition, setPlaybackPosition] = useState(0)
@@ -315,6 +316,7 @@ function App() {
       reportError('Trace', 'API not available')
       return false
     }
+    setIsSnapping(true)
     try {
       const result = await api.trace_partial({ trace })
       if (result.status === 'ok') {
@@ -327,6 +329,8 @@ function App() {
       }
     } catch (error) {
       reportException('Trace', error)
+    } finally {
+      setIsSnapping(false)
     }
     return false
   }
@@ -688,6 +692,7 @@ function App() {
                 selectedInfo={selectedInfo}
                 activeTool={activeTool}
                 analysisState={analysisState}
+                isSnapping={isSnapping}
                 zoom={zoom}
                 pan={pan}
                 playbackPosition={playbackPosition}

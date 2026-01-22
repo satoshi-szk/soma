@@ -25,6 +25,7 @@ export type WorkspaceProps = {
   selectedInfo: Partial | null
   activeTool: ToolId
   analysisState: 'idle' | 'analyzing' | 'error'
+  isSnapping: boolean
   zoom: number
   pan: { x: number; y: number }
   playbackPosition: number
@@ -50,6 +51,7 @@ export function Workspace({
   selectedInfo,
   activeTool,
   analysisState,
+  isSnapping,
   zoom,
   pan,
   playbackPosition,
@@ -89,6 +91,7 @@ export function Workspace({
     }
     return () => observer.disconnect()
   }, [])
+
 
   const previewImage = useMemo(() => {
     if (!preview) return null
@@ -371,6 +374,28 @@ export function Workspace({
     return max > 0 ? max : 1
   }, [partials])
 
+  const committedTracePath = useMemo(() => {
+    if (committedTrace.length < 2 || !preview) return ''
+    return committedTrace
+      .map((point, index) => {
+        const x = pan.x + contentOffset.x + timeToX(point.time) * scale.x
+        const y = pan.y + contentOffset.y + freqToY(point.freq) * scale.y
+        return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`
+      })
+      .join(' ')
+  }, [committedTrace, preview, pan, contentOffset, timeToX, freqToY, scale])
+
+  const tracePathD = useMemo(() => {
+    if (tracePath.length < 2 || !preview) return ''
+    return tracePath
+      .map((point, index) => {
+        const x = pan.x + contentOffset.x + timeToX(point.time) * scale.x
+        const y = pan.y + contentOffset.y + freqToY(point.freq) * scale.y
+        return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`
+      })
+      .join(' ')
+  }, [tracePath, preview, pan, contentOffset, timeToX, freqToY, scale])
+
   const ampToLaneY = useCallback(
     (amp: number) => {
       const normalized = Math.min(1, Math.max(0, amp / maxAmp))
@@ -488,20 +513,6 @@ export function Workspace({
         <Layer>
           <Group x={pan.x + contentOffset.x} y={pan.y + contentOffset.y} scaleX={scale.x} scaleY={scale.y}>
             <Shape sceneFunc={(ctx, shape) => { drawPartials(ctx); ctx.fillStrokeShape(shape) }} />
-            {tracePath.length > 1 ? (
-              <Line
-                points={tracePath.flatMap((point) => [timeToX(point.time), freqToY(point.freq)])}
-                stroke="#f59f8b"
-                strokeWidth={1.5}
-              />
-            ) : null}
-            {committedTrace.length > 1 ? (
-              <Line
-                points={committedTrace.flatMap((point) => [timeToX(point.time), freqToY(point.freq)])}
-                stroke="rgba(245, 159, 139, 0.5)"
-                strokeWidth={1.25}
-              />
-            ) : null}
             {renderPartials.map((partial) => (
               <Line
                 key={partial.id}
@@ -593,6 +604,25 @@ export function Workspace({
           ) : null}
         </Layer>
       </Stage>
+      {tracePathD || committedTracePath ? (
+        <svg
+          className="pointer-events-none absolute inset-4"
+          width={stageSize.width}
+          height={stageSize.height}
+          viewBox={`0 0 ${stageSize.width} ${stageSize.height}`}
+        >
+          {tracePathD ? (
+            <path d={tracePathD} fill="none" stroke="#7feeff" strokeWidth={3.75} />
+          ) : null}
+          <path
+            d={committedTracePath}
+            fill="none"
+            stroke={isSnapping ? '#7feeff' : 'rgba(245, 159, 139, 0.5)'}
+            strokeWidth={isSnapping ? 3.75 : 1.25}
+            className={isSnapping ? 'animate-pulse' : ''}
+          />
+        </svg>
+      ) : null}
       {!preview ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center text-white/70">
           <div className="text-xs uppercase tracking-[0.3em]">No Audio Loaded</div>

@@ -102,17 +102,18 @@ def snap_trace(
     trace: Sequence[tuple[float, float]],
     window_ms: float = 200.0,
     freq_window_octaves: float = 0.5,
-    max_points: int = 128,
+    max_points: int | None = None,
     amp_reference: float | None = None,
 ) -> list[PartialPoint]:
     if not trace or audio.size == 0:
         return []
 
-    use_fast_mode = len(trace) > max_points
-    effective_max_points = max_points
-    if use_fast_mode:
-        effective_max_points = min(max_points, 96)
-    trace_points = _decimate_trace(trace, max_points=effective_max_points)
+    resampled = _resample_trace(trace, settings.time_resolution_ms)
+    trace_points = list(resampled)
+    use_fast_mode = len(trace_points) > 256
+    if max_points is not None and len(trace_points) > max_points:
+        trace_points = _decimate_trace(trace_points, max_points=max_points)
+        use_fast_mode = True
     effective_bins = settings.bins_per_octave
     effective_window_ms = window_ms
     if use_fast_mode:
@@ -172,6 +173,20 @@ def _decimate_trace(trace: Sequence[tuple[float, float]], max_points: int) -> li
         return list(trace)
     indices = np.linspace(0, len(trace) - 1, max_points, dtype=int)
     return [trace[idx] for idx in indices]
+
+
+def _resample_trace(trace: Sequence[tuple[float, float]], time_resolution_ms: float) -> list[tuple[float, float]]:
+    if len(trace) < 2 or time_resolution_ms <= 0:
+        return list(trace)
+    sorted_trace = sorted(trace, key=lambda item: item[0])
+    times = np.array([item[0] for item in sorted_trace], dtype=np.float64)
+    freqs = np.array([item[1] for item in sorted_trace], dtype=np.float64)
+    if np.allclose(times[0], times[-1]):
+        return list(trace)
+    step = time_resolution_ms / 1000.0
+    resampled_times = np.arange(times[0], times[-1] + step * 0.5, step, dtype=np.float64)
+    resampled_freqs = np.interp(resampled_times, times, freqs)
+    return list(zip(resampled_times.tolist(), resampled_freqs.tolist(), strict=True))
 
 
 def _to_float32(audio: np.ndarray) -> np.ndarray:
