@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import threading
+import wave
 from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
@@ -77,6 +78,47 @@ def _log_api_call(method: Any) -> Any:
     return wrapper
 
 
+def _get_wav_duration_sec(path: Path) -> float:
+    with wave.open(str(path), "rb") as handle:
+        frames = handle.getnframes()
+        sample_rate = handle.getframerate()
+    if sample_rate <= 0:
+        raise ValueError("Invalid sample rate")
+    return frames / float(sample_rate)
+
+
+def _check_audio_duration(window: webview.Window, path: Path) -> dict[str, Any] | None:
+    try:
+        duration_sec = _get_wav_duration_sec(path)
+    except Exception:
+        logger.exception("Failed to read audio header: %s", path)
+        return {"status": "error", "message": "オーディオファイルを読み込めませんでした。"}
+
+    if duration_sec >= 30.0:
+        window.create_confirmation_dialog(
+            "Error",
+            "30秒以上のオーディオファイルは読み込みに非常に時間がかかるため読み込めません。\n"
+            "ファイルを分割して読み込むことを推奨します。",
+        )
+        return {
+            "status": "error",
+            "message": (
+                "30秒以上のオーディオファイルは読み込みに非常に時間がかかるため読み込めません。"
+                "ファイルを分割して読み込むことを推奨します。"
+            ),
+        }
+
+    if duration_sec >= 10.0:
+        ok = window.create_confirmation_dialog(
+            "Warning",
+            "この音声ファイルは読み込みに時間がかかる可能性があります。\n読み込みますか？",
+        )
+        if not ok:
+            return {"status": "cancelled"}
+
+    return None
+
+
 def _validated_payload[PayloadT: PayloadBase](
     model: type[PayloadT],
     payload: dict[str, Any],
@@ -117,6 +159,9 @@ class SomaApi:
         if selection is None:
             return {"status": "cancelled"}
         path = Path(selection)
+        duration_check = _check_audio_duration(window, path)
+        if duration_check is not None:
+            return duration_check
         try:
             info = self._doc.load_audio(path)
             self._doc.start_preview_async()
