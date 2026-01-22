@@ -78,6 +78,15 @@ class ExportAudioPayload(PayloadBase):
     output_type: str = "sine"
 
 
+class RequestViewportPreviewPayload(PayloadBase):
+    time_start: float
+    time_end: float
+    freq_min: float
+    freq_max: float
+    width: int
+    height: int
+
+
 def _format_validation_error(exc: ValidationError) -> str:
     parts: list[str] = []
     for item in exc.errors():

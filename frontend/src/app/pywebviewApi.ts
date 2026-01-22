@@ -55,6 +55,9 @@ export const pywebviewApi = {
   stop: () => callApi('stop'),
   export_mpe: (payload: PayloadFor<'export_mpe'>) => callApi('export_mpe', payload),
   export_audio: (payload: PayloadFor<'export_audio'>) => callApi('export_audio', payload),
+  request_viewport_preview: (payload: PayloadFor<'request_viewport_preview'>) =>
+    callApi('request_viewport_preview', payload),
+  viewport_preview_status: () => callApi('viewport_preview_status'),
 }
 
 export const isPywebviewApiAvailable = (): boolean => Boolean(getRawApi())

@@ -4,6 +4,7 @@ import logging
 import os
 import sys
 import threading
+import wave
 from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
@@ -22,6 +23,7 @@ from soma.api_schema import (
     MergePartialsPayload,
     PayloadBase,
     PlayPayload,
+    RequestViewportPreviewPayload,
     SelectInBoxPayload,
     ToggleMutePayload,
     TracePartialPayload,
@@ -76,6 +78,47 @@ def _log_api_call(method: Any) -> Any:
     return wrapper
 
 
+def _get_wav_duration_sec(path: Path) -> float:
+    with wave.open(str(path), "rb") as handle:
+        frames = handle.getnframes()
+        sample_rate = handle.getframerate()
+    if sample_rate <= 0:
+        raise ValueError("Invalid sample rate")
+    return frames / float(sample_rate)
+
+
+def _check_audio_duration(window: webview.Window, path: Path) -> dict[str, Any] | None:
+    try:
+        duration_sec = _get_wav_duration_sec(path)
+    except Exception:
+        logger.exception("Failed to read audio header: %s", path)
+        return {"status": "error", "message": "オーディオファイルを読み込めませんでした。"}
+
+    if duration_sec >= 30.0:
+        window.create_confirmation_dialog(
+            "Error",
+            "30秒以上のオーディオファイルは読み込みに非常に時間がかかるため読み込めません。\n"
+            "ファイルを分割して読み込むことを推奨します。",
+        )
+        return {
+            "status": "error",
+            "message": (
+                "30秒以上のオーディオファイルは読み込みに非常に時間がかかるため読み込めません。"
+                "ファイルを分割して読み込むことを推奨します。"
+            ),
+        }
+
+    if duration_sec >= 10.0:
+        ok = window.create_confirmation_dialog(
+            "Warning",
+            "この音声ファイルは読み込みに時間がかかる可能性があります。\n読み込みますか？",
+        )
+        if not ok:
+            return {"status": "cancelled"}
+
+    return None
+
+
 def _validated_payload[PayloadT: PayloadBase](
     model: type[PayloadT],
     payload: dict[str, Any],
@@ -116,6 +159,9 @@ class SomaApi:
         if selection is None:
             return {"status": "cancelled"}
         path = Path(selection)
+        duration_check = _check_audio_duration(window, path)
+        if duration_check is not None:
+            return duration_check
         try:
             info = self._doc.load_audio(path)
             self._doc.start_preview_async()
@@ -385,6 +431,36 @@ class SomaApi:
         return {
             "status": "ok",
             "state": state,
+            "preview": preview.to_dict() if preview else None,
+            "message": error,
+        }
+
+    def request_viewport_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            parsed = _validated_payload(RequestViewportPreviewPayload, payload, "request_viewport_preview")
+            if isinstance(parsed, dict):
+                return parsed
+            request_id = self._doc.start_viewport_preview_async(
+                time_start=parsed.time_start,
+                time_end=parsed.time_end,
+                freq_min=parsed.freq_min,
+                freq_max=parsed.freq_max,
+                width=parsed.width,
+                height=parsed.height,
+            )
+            if not request_id:
+                return {"status": "error", "message": "No audio loaded."}
+            return {"status": "processing", "request_id": request_id}
+        except Exception as exc:
+            logger.exception("request_viewport_preview failed")
+            return {"status": "error", "message": str(exc)}
+
+    def viewport_preview_status(self) -> dict[str, Any]:
+        state, preview, error, request_id = self._doc.get_viewport_preview_status()
+        return {
+            "status": "ok",
+            "state": state,
+            "request_id": request_id,
             "preview": preview.to_dict() if preview else None,
             "message": error,
         }

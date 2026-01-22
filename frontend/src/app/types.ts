@@ -30,6 +30,16 @@ export type SpectrogramPreview = {
   duration_sec: number
 }
 
+export type ViewportPreview = {
+  width: number
+  height: number
+  data: number[]
+  time_start: number
+  time_end: number
+  freq_min: number
+  freq_max: number
+}
+
 export type PartialPoint = {
   time: number
   freq: number
