@@ -46,7 +46,7 @@ def make_spectrogram_preview(
     settings: AnalysisSettings,
     width: int = 768,
     height: int = 320,
-) -> SpectrogramPreview:
+) -> tuple[SpectrogramPreview, float]:
     if audio.size == 0:
         return SpectrogramPreview(
             width=width,
@@ -55,7 +55,7 @@ def make_spectrogram_preview(
             freq_min=settings.freq_min,
             freq_max=settings.freq_max,
             duration_sec=0.0,
-        )
+        ), 1.0
 
     original_duration = audio.shape[0] / float(sample_rate)
     preview_freq_max = min(settings.preview_freq_max, settings.freq_max)
@@ -74,6 +74,7 @@ def make_spectrogram_preview(
     )
     frequencies = _build_frequencies(preview_settings, max_freq=preview_freq_max)
     cwt_matrix = _cwt_magnitude(audio, sample_rate, frequencies)
+    amp_reference = float(np.max(cwt_matrix)) if cwt_matrix.size else 1.0
 
     magnitude = _normalize_cwt(cwt_matrix)
     time_resampled = resample(magnitude, width, axis=1)
@@ -91,7 +92,7 @@ def make_spectrogram_preview(
         freq_min=settings.freq_min,
         freq_max=preview_freq_max,
         duration_sec=duration_sec,
-    )
+    ), amp_reference
 
 
 def snap_trace(
@@ -102,6 +103,7 @@ def snap_trace(
     window_ms: float = 200.0,
     freq_window_octaves: float = 0.5,
     max_points: int = 128,
+    amp_reference: float | None = None,
 ) -> list[PartialPoint]:
     if not trace or audio.size == 0:
         return []
@@ -156,7 +158,8 @@ def snap_trace(
         peak_freq = float(frequencies[peak_index])
         peak_amp = float(spectrum[peak_index])
         window_max = float(np.max(magnitude))
-        normalized_amp = float(peak_amp / (window_max + 1e-8))
+        normalizer = amp_reference if amp_reference and amp_reference > 0 else window_max
+        normalized_amp = float(np.clip(peak_amp / (normalizer + 1e-8), 0.0, 1.0))
         points.append(PartialPoint(time=time_sec, freq=peak_freq, amp=normalized_amp))
 
     return points

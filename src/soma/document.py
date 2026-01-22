@@ -84,6 +84,7 @@ class SomaDocument:
         self.audio_data: np.ndarray | None = None
         self.settings = AnalysisSettings()
         self.preview: SpectrogramPreview | None = None
+        self._amp_reference: float | None = None
         self.preview_state = "idle"
         self.preview_error: str | None = None
         self._preview_thread: threading.Thread | None = None
@@ -102,6 +103,7 @@ class SomaDocument:
         self.audio_data = None
         self.settings = AnalysisSettings()
         self.preview = None
+        self._amp_reference = None
         self.store = PartialStore()
         self.project_path = None
         self.source_info = None
@@ -121,6 +123,7 @@ class SomaDocument:
             md5_hash=compute_md5(path),
         )
         self.preview = None
+        self._amp_reference = None
         self.preview_state = "idle"
         self.preview_error = None
         self.synth.reset(sample_rate=info.sample_rate, duration_sec=info.duration_sec)
@@ -142,7 +145,13 @@ class SomaDocument:
     def snap_partial(self, trace: list[tuple[float, float]]) -> Partial | None:
         if self.audio_data is None or self.audio_info is None:
             return None
-        snapped = snap_trace(self.audio_data, self.audio_info.sample_rate, self.settings, trace)
+        snapped = snap_trace(
+            self.audio_data,
+            self.audio_info.sample_rate,
+            self.settings,
+            trace,
+            amp_reference=self._amp_reference,
+        )
         if len(snapped) < 2:
             return None
         partial_id = str(uuid.uuid4())
@@ -292,7 +301,7 @@ class SomaDocument:
 
         def _worker() -> None:
             try:
-                preview = make_spectrogram_preview(audio, sample_rate, settings)
+                preview, amp_reference = make_spectrogram_preview(audio, sample_rate, settings)
             except Exception as exc:  # pragma: no cover - surface in UI via status
                 self._logger.exception("preview generation failed")
                 with self._lock:
@@ -301,6 +310,7 @@ class SomaDocument:
                 return
             with self._lock:
                 self.preview = preview
+                self._amp_reference = amp_reference
                 self.preview_state = "ready"
 
         thread = threading.Thread(target=_worker, name="soma-preview", daemon=True)
@@ -406,9 +416,11 @@ class SomaDocument:
         if state.settings is not None:
             self.settings = state.settings
             if self.audio_data is not None and self.audio_info is not None:
-                self.preview = make_spectrogram_preview(
+                preview, amp_reference = make_spectrogram_preview(
                     self.audio_data, self.audio_info.sample_rate, self.settings
                 )
+                self.preview = preview
+                self._amp_reference = amp_reference
         if state.partials is None:
             return
         for partial_id, snapshot in state.partials.items():

@@ -50,8 +50,8 @@ def test_export_mpe_amp_db_mapping(tmp_path: Path) -> None:
         Partial(
             id="p1",
             points=[
-                PartialPoint(time=0.0, freq=440.0, amp=1.0),
-                PartialPoint(time=0.5, freq=440.0, amp=0.01),
+                PartialPoint(time=0.0, freq=440.0, amp=0.2),
+                PartialPoint(time=0.5, freq=440.0, amp=0.1),
             ],
         )
     ]
@@ -62,7 +62,7 @@ def test_export_mpe_amp_db_mapping(tmp_path: Path) -> None:
     aftertouch = [msg.value for msg in midi.tracks[1] if msg.type == "aftertouch"]
     assert len(aftertouch) >= 2
     expected_full = 127
-    db = max(-60.0, 20.0 * math.log10(0.01))
+    db = max(-60.0, 20.0 * math.log10(0.5))
     normalized = (db + 60.0) / 60.0
     expected_low = int(round(max(0.0, min(1.0, normalized)) * 127))
     assert aftertouch[0] == expected_full

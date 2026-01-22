@@ -50,13 +50,14 @@ def test_make_spectrogram_preview() -> None:
     audio = (0.2 * np.sin(2 * math.pi * 220.0 * t)).astype(np.float32)
     settings = AnalysisSettings()
 
-    preview = make_spectrogram_preview(audio, sample_rate, settings)
+    preview, amp_reference = make_spectrogram_preview(audio, sample_rate, settings)
 
     assert preview.width == 768
     assert preview.height == 320
     assert len(preview.data) == preview.width * preview.height
     assert preview.duration_sec > 0.0
     assert preview.freq_max >= 10000.0
+    assert amp_reference > 0.0
 
 
 def test_make_spectrogram_preview_flips_vertical(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -84,7 +85,7 @@ def test_make_spectrogram_preview_flips_vertical(monkeypatch: pytest.MonkeyPatch
     audio = np.array([0.1], dtype=np.float32)
     settings = AnalysisSettings()
 
-    preview = analysis.make_spectrogram_preview(audio, 1000, settings, width=2, height=2)
+    preview, _amp_reference = analysis.make_spectrogram_preview(audio, 1000, settings, width=2, height=2)
 
     assert preview.data == [127, 255, 0, 63]
 
@@ -103,6 +104,34 @@ def test_snap_trace_returns_points() -> None:
     for point in points:
         assert 400.0 < point.freq < 500.0
         assert 0.0 <= point.amp <= 1.0
+
+
+def test_snap_trace_uses_amp_reference(monkeypatch: pytest.MonkeyPatch) -> None:
+    from soma import analysis
+
+    def fake_build_frequencies(_: AnalysisSettings, max_freq: float | None = None) -> np.ndarray:
+        return np.array([100.0, 200.0], dtype=np.float32)
+
+    def fake_cwt_magnitude(
+        _audio: np.ndarray, _sample_rate: float, _frequencies: np.ndarray
+    ) -> np.ndarray:
+        return np.array([[1.0, 1.0, 1.0, 1.0, 1.0], [2.0, 2.0, 2.0, 2.0, 2.0]], dtype=np.float32)
+
+    def fake_preview_sample_rate(sample_rate: int, _freq_max: float) -> int:
+        return sample_rate
+
+    monkeypatch.setattr(analysis, "_build_frequencies", fake_build_frequencies)
+    monkeypatch.setattr(analysis, "_cwt_magnitude", fake_cwt_magnitude)
+    monkeypatch.setattr(analysis, "_preview_sample_rate", fake_preview_sample_rate)
+
+    audio = np.ones(1000, dtype=np.float32)
+    settings = AnalysisSettings()
+    trace = [(0.1, 150.0)]
+
+    points = analysis.snap_trace(audio, 1000, settings, trace, amp_reference=4.0)
+
+    assert len(points) == 1
+    assert points[0].amp == pytest.approx(0.5)
 
 
 def test_snap_trace_decimates_points() -> None:

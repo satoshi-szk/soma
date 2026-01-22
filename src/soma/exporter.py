@@ -82,9 +82,10 @@ def _build_mpe_file(partials: list[Partial], settings: MpeExportSettings) -> Mid
     midi.tracks.append(master)
 
     events: list[tuple[float, Message]] = []
+    amp_reference = _max_amp(partials)
     for idx, partial in enumerate(partials):
         channel = (idx % 15) + 1
-        events.extend(_partial_events(partial, channel, settings))
+        events.extend(_partial_events(partial, channel, settings, amp_reference))
 
     track = MidiTrack()
     track.extend(_pitch_bend_rpn_messages(0, settings.pitch_bend_range))
@@ -103,28 +104,34 @@ def _build_mpe_file(partials: list[Partial], settings: MpeExportSettings) -> Mid
     return midi
 
 
-def _partial_events(partial: Partial, channel: int, settings: MpeExportSettings) -> list[tuple[float, Message]]:
+def _partial_events(
+    partial: Partial,
+    channel: int,
+    settings: MpeExportSettings,
+    amp_reference: float,
+) -> list[tuple[float, Message]]:
     points = sorted(partial.points, key=lambda p: p.time)
     if not points:
         return []
     events: list[tuple[float, Message]] = []
     current_note = _freq_to_midi(points[0].freq)
-    velocity = _amp_to_velocity(points[0].amp)
+    velocity = _amp_to_velocity(_normalize_amp(points[0].amp, amp_reference))
     events.append((points[0].time, Message("note_on", note=current_note, velocity=velocity, channel=channel)))
 
     for point in points:
         if _needs_retrigger(point.freq, current_note, settings.pitch_bend_range):
             events.append((point.time, Message("note_off", note=current_note, velocity=0, channel=channel)))
             current_note = _freq_to_midi(point.freq)
-            velocity = _amp_to_velocity(point.amp)
+            velocity = _amp_to_velocity(_normalize_amp(point.amp, amp_reference))
             events.append((point.time, Message("note_on", note=current_note, velocity=velocity, channel=channel)))
         pitch_bend = _freq_to_pitch_bend(point.freq, current_note, settings.pitch_bend_range)
+        normalized_amp = _normalize_amp(point.amp, amp_reference)
         events.append((point.time, Message("pitchwheel", pitch=pitch_bend, channel=channel)))
         if settings.amplitude_mapping == "pressure":
-            events.append((point.time, Message("aftertouch", value=_amp_to_cc(point.amp), channel=channel)))
+            events.append((point.time, Message("aftertouch", value=_amp_to_cc(normalized_amp), channel=channel)))
         elif settings.amplitude_mapping == "cc74":
             events.append(
-                (point.time, Message("control_change", control=74, value=_amp_to_cc(point.amp), channel=channel))
+                (point.time, Message("control_change", control=74, value=_amp_to_cc(normalized_amp), channel=channel))
             )
     events.append((points[-1].time, Message("note_off", note=current_note, velocity=0, channel=channel)))
     return events
@@ -169,6 +176,19 @@ def _pitch_bend_rpn_messages(channel: int, semitone_range: int) -> list[Message]
 
 def _freq_to_midi(freq: float) -> int:
     return int(np.clip(np.round(69 + 12 * np.log2(freq / 440.0)), 0, 127))
+
+
+def _max_amp(partials: list[Partial]) -> float:
+    max_amp = 0.0
+    for partial in partials:
+        for point in partial.points:
+            if point.amp > max_amp:
+                max_amp = point.amp
+    return max_amp if max_amp > 0 else 1.0
+
+
+def _normalize_amp(amp: float, amp_reference: float) -> float:
+    return float(np.clip(amp / amp_reference, 0.0, 1.0)) if amp_reference > 0 else 0.0
 
 
 def _needs_retrigger(freq: float, midi_note: int, pitch_bend_range: int) -> bool:
