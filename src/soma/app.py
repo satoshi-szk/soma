@@ -7,12 +7,28 @@ import threading
 from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 import webview
 
 from soma.analysis import resample_audio
+from soma.api_schema import (
+    DeletePartialsPayload,
+    ErasePartialPayload,
+    ExportAudioPayload,
+    ExportMpePayload,
+    HitTestPayload,
+    MergePartialsPayload,
+    PayloadBase,
+    PlayPayload,
+    SelectInBoxPayload,
+    ToggleMutePayload,
+    TracePartialPayload,
+    UpdatePartialPayload,
+    UpdateSettingsPayload,
+    parse_payload,
+)
 from soma.document import SomaDocument
 from soma.exporter import AudioExportSettings, MpeExportSettings, export_audio, export_mpe
 from soma.logging_utils import configure_logging, get_session_log_dir
@@ -58,6 +74,21 @@ def _log_api_call(method: Any) -> Any:
         return result
 
     return wrapper
+
+
+def _validated_payload[PayloadT: PayloadBase](
+    model: type[PayloadT],
+    payload: dict[str, Any],
+    method_name: str,
+) -> PayloadT | dict[str, str]:
+    parsed, error = parse_payload(model, payload)
+    if error:
+        logger.warning("api request %s invalid payload: %s", method_name, error)
+        return {"status": "error", "message": error}
+    if parsed is None:
+        return {"status": "error", "message": "Invalid payload."}
+    return cast(PayloadT, parsed)
+
 
 class SomaApi:
     def __init__(self) -> None:
@@ -187,17 +218,10 @@ class SomaApi:
         return {"status": "ok", "path": str(path)}
 
     def update_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
-        settings = AnalysisSettings(
-            freq_min=float(payload.get("freq_min", 20.0)),
-            freq_max=float(payload.get("freq_max", 20000.0)),
-            bins_per_octave=int(payload.get("bins_per_octave", 48)),
-            time_resolution_ms=float(payload.get("time_resolution_ms", 10.0)),
-            preview_freq_max=float(payload.get("preview_freq_max", 12000.0)),
-            preview_bins_per_octave=int(payload.get("preview_bins_per_octave", 12)),
-            color_map=str(payload.get("color_map", "magma")),
-            brightness=float(payload.get("brightness", 0.0)),
-            contrast=float(payload.get("contrast", 1.0)),
-        )
+        parsed = _validated_payload(UpdateSettingsPayload, payload, "update_settings")
+        if isinstance(parsed, dict):
+            return parsed
+        settings = AnalysisSettings(**parsed.model_dump())
         self._doc.set_settings(settings)
         return {
             "status": "processing",
@@ -207,8 +231,10 @@ class SomaApi:
 
     def trace_partial(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
-            trace = payload.get("trace", [])
-            points = [(float(t), float(f)) for t, f in trace]
+            parsed = _validated_payload(TracePartialPayload, payload, "trace_partial")
+            if isinstance(parsed, dict):
+                return parsed
+            points = [(point[0], point[1]) for point in parsed.trace]
             partial = self._doc.snap_partial(points)
             if partial is None:
                 return {"status": "error", "message": "Failed to create partial."}
@@ -219,9 +245,11 @@ class SomaApi:
 
     def erase_partial(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
-            trace = payload.get("trace", [])
-            radius = float(payload.get("radius_hz", 40.0))
-            points = [(float(t), float(f)) for t, f in trace]
+            parsed = _validated_payload(ErasePartialPayload, payload, "erase_partial")
+            if isinstance(parsed, dict):
+                return parsed
+            points = [(point[0], point[1]) for point in parsed.trace]
+            radius = parsed.radius_hz
             self._doc.erase_path(points, radius_hz=radius)
             return {"status": "ok", "partials": [p.to_dict() for p in self._doc.store.all()]}
         except Exception as exc:  # pragma: no cover - surface errors to UI
@@ -230,12 +258,11 @@ class SomaApi:
 
     def update_partial(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
-            partial_id = payload.get("id")
-            if not isinstance(partial_id, str):
-                return {"status": "error", "message": "Partial id missing."}
-            points_raw = payload.get("points", [])
-            points = [PartialPoint(time=float(p[0]), freq=float(p[1]), amp=float(p[2])) for p in points_raw]
-            partial = self._doc.update_partial_points(partial_id, points)
+            parsed = _validated_payload(UpdatePartialPayload, payload, "update_partial")
+            if isinstance(parsed, dict):
+                return parsed
+            points = [PartialPoint(time=p[0], freq=p[1], amp=p[2]) for p in parsed.points]
+            partial = self._doc.update_partial_points(parsed.id, points)
             if partial is None:
                 return {"status": "error", "message": "Partial not found."}
             return {"status": "ok", "partial": partial.to_dict()}
@@ -245,11 +272,10 @@ class SomaApi:
 
     def merge_partials(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
-            first_id = payload.get("first")
-            second_id = payload.get("second")
-            if not isinstance(first_id, str) or not isinstance(second_id, str):
-                return {"status": "error", "message": "Partial ids missing."}
-            partial = self._doc.merge_partials(first_id, second_id)
+            parsed = _validated_payload(MergePartialsPayload, payload, "merge_partials")
+            if isinstance(parsed, dict):
+                return parsed
+            partial = self._doc.merge_partials(parsed.first, parsed.second)
             if partial is None:
                 return {"status": "error", "message": "Failed to merge partials."}
             return {"status": "ok", "partial": partial.to_dict()}
@@ -259,8 +285,10 @@ class SomaApi:
 
     def delete_partials(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
-            ids = payload.get("ids", [])
-            self._doc.delete_partials(ids)
+            parsed = _validated_payload(DeletePartialsPayload, payload, "delete_partials")
+            if isinstance(parsed, dict):
+                return parsed
+            self._doc.delete_partials(parsed.ids)
             return {"status": "ok"}
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("delete_partials failed")
@@ -268,10 +296,10 @@ class SomaApi:
 
     def toggle_mute(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
-            partial_id = payload.get("id")
-            if not isinstance(partial_id, str):
-                return {"status": "error", "message": "Partial id missing."}
-            partial = self._doc.toggle_mute(partial_id)
+            parsed = _validated_payload(ToggleMutePayload, payload, "toggle_mute")
+            if isinstance(parsed, dict):
+                return parsed
+            partial = self._doc.toggle_mute(parsed.id)
             if partial is None:
                 return {"status": "error", "message": "Partial not found."}
             return {"status": "ok", "partial": partial.to_dict()}
@@ -281,10 +309,10 @@ class SomaApi:
 
     def hit_test(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
-            time_sec = float(payload.get("time", 0.0))
-            freq_hz = float(payload.get("freq", 0.0))
-            tolerance = float(payload.get("tolerance", 0.05))
-            result = self._doc.hit_test(time_sec, freq_hz, tolerance)
+            parsed = _validated_payload(HitTestPayload, payload, "hit_test")
+            if isinstance(parsed, dict):
+                return parsed
+            result = self._doc.hit_test(parsed.time, parsed.freq, parsed.tolerance)
             return {"status": "ok", "id": result}
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("hit_test failed")
@@ -292,11 +320,14 @@ class SomaApi:
 
     def select_in_box(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
+            parsed = _validated_payload(SelectInBoxPayload, payload, "select_in_box")
+            if isinstance(parsed, dict):
+                return parsed
             ids = self._doc.select_in_box(
-                time_start=float(payload.get("time_start", 0.0)),
-                time_end=float(payload.get("time_end", 0.0)),
-                freq_start=float(payload.get("freq_start", 0.0)),
-                freq_end=float(payload.get("freq_end", 0.0)),
+                time_start=parsed.time_start,
+                time_end=parsed.time_end,
+                freq_start=parsed.freq_start,
+                freq_end=parsed.freq_end,
             )
             return {"status": "ok", "ids": ids}
         except Exception as exc:  # pragma: no cover - surface errors to UI
@@ -321,9 +352,10 @@ class SomaApi:
 
     def play(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
-            mix_ratio = float(payload.get("mix_ratio", 0.5))
-            loop = bool(payload.get("loop", False))
-            self._doc.play(mix_ratio, loop)
+            parsed = _validated_payload(PlayPayload, payload, "play")
+            if isinstance(parsed, dict):
+                return parsed
+            self._doc.play(parsed.mix_ratio, parsed.loop)
             return {"status": "ok"}
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("play failed")
@@ -390,10 +422,13 @@ class SomaApi:
         selection = _normalize_dialog_result(result)
         if selection is None:
             return {"status": "cancelled"}
+        parsed = _validated_payload(ExportMpePayload, payload, "export_mpe")
+        if isinstance(parsed, dict):
+            return parsed
         settings = MpeExportSettings(
-            pitch_bend_range=int(payload.get("pitch_bend_range", 48)),
-            amplitude_mapping=str(payload.get("amplitude_mapping", "velocity")),
-            bpm=float(payload.get("bpm", 120.0)),
+            pitch_bend_range=parsed.pitch_bend_range,
+            amplitude_mapping=parsed.amplitude_mapping,
+            bpm=parsed.bpm,
         )
         paths = export_mpe(self._doc.store.all(), Path(selection), settings)
         return {"status": "ok", "paths": [str(p) for p in paths]}
@@ -414,10 +449,14 @@ class SomaApi:
         selection = _normalize_dialog_result(result)
         if selection is None:
             return {"status": "cancelled"}
+        parsed = _validated_payload(ExportAudioPayload, payload, "export_audio")
+        if isinstance(parsed, dict):
+            return parsed
+        sample_rate = parsed.sample_rate if parsed.sample_rate is not None else self._doc.audio_info.sample_rate
         settings = AudioExportSettings(
-            sample_rate=int(payload.get("sample_rate", self._doc.audio_info.sample_rate)),
-            bit_depth=int(payload.get("bit_depth", 16)),
-            output_type=str(payload.get("output_type", "sine")),
+            sample_rate=sample_rate,
+            bit_depth=parsed.bit_depth,
+            output_type=parsed.output_type,
         )
         buffer = self._doc.synth.get_mix_buffer().astype(np.float32)
         if settings.sample_rate != self._doc.audio_info.sample_rate:

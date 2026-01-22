@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import type { ApiStatus } from '../app/types'
+import { isPywebviewApiAvailable, pywebviewApi } from '../app/pywebviewApi'
 
 export const useApiStatus = () => {
   const [apiStatus, setApiStatus] = useState<ApiStatus>('checking')
@@ -8,8 +9,8 @@ export const useApiStatus = () => {
     let alive = true
 
     const checkApi = async () => {
-      const api = window.pywebview?.api
-      if (!api?.health) {
+      const api = isPywebviewApiAvailable() ? pywebviewApi : null
+      if (!api) {
         if (alive) setApiStatus('disconnected')
         return
       }
