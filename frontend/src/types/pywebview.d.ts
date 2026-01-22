@@ -30,6 +30,8 @@ declare global {
         playback_state: () => Promise<unknown>
         export_mpe: (payload: unknown) => Promise<unknown>
         export_audio: (payload: unknown) => Promise<unknown>
+        request_viewport_preview: (payload: unknown) => Promise<unknown>
+        viewport_preview_status: () => Promise<unknown>
       }
     }
   }

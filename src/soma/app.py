@@ -22,6 +22,7 @@ from soma.api_schema import (
     MergePartialsPayload,
     PayloadBase,
     PlayPayload,
+    RequestViewportPreviewPayload,
     SelectInBoxPayload,
     ToggleMutePayload,
     TracePartialPayload,
@@ -385,6 +386,36 @@ class SomaApi:
         return {
             "status": "ok",
             "state": state,
+            "preview": preview.to_dict() if preview else None,
+            "message": error,
+        }
+
+    def request_viewport_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            parsed = _validated_payload(RequestViewportPreviewPayload, payload, "request_viewport_preview")
+            if isinstance(parsed, dict):
+                return parsed
+            request_id = self._doc.start_viewport_preview_async(
+                time_start=parsed.time_start,
+                time_end=parsed.time_end,
+                freq_min=parsed.freq_min,
+                freq_max=parsed.freq_max,
+                width=parsed.width,
+                height=parsed.height,
+            )
+            if not request_id:
+                return {"status": "error", "message": "No audio loaded."}
+            return {"status": "processing", "request_id": request_id}
+        except Exception as exc:
+            logger.exception("request_viewport_preview failed")
+            return {"status": "error", "message": str(exc)}
+
+    def viewport_preview_status(self) -> dict[str, Any]:
+        state, preview, error, request_id = self._doc.get_viewport_preview_status()
+        return {
+            "status": "ok",
+            "state": state,
+            "request_id": request_id,
             "preview": preview.to_dict() if preview else None,
             "message": error,
         }

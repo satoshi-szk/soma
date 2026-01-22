@@ -10,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from soma.analysis import make_spectrogram_preview, snap_trace
+from soma.analysis import make_spectrogram_preview, make_viewport_spectrogram, snap_trace
 from soma.models import (
     AnalysisSettings,
     AudioInfo,
@@ -18,6 +18,7 @@ from soma.models import (
     PartialPoint,
     SourceInfo,
     SpectrogramPreview,
+    ViewportPreview,
     generate_bright_color,
 )
 from soma.partial_store import PartialStore
@@ -97,6 +98,10 @@ class SomaDocument:
         self._lock = threading.Lock()
         self._is_resynthesizing = False
         self._logger = logging.getLogger(__name__)
+        self._viewport_request_id: str | None = None
+        self._viewport_preview: ViewportPreview | None = None
+        self._viewport_state: str = "idle"
+        self._viewport_error: str | None = None
 
     def new_project(self) -> None:
         self.audio_info = None
@@ -109,6 +114,10 @@ class SomaDocument:
         self.source_info = None
         self.undo_manager.clear()
         self.synth.reset(sample_rate=44100, duration_sec=0.0)
+        self._viewport_request_id = None
+        self._viewport_preview = None
+        self._viewport_state = "idle"
+        self._viewport_error = None
 
     def load_audio(self, path: Path, max_duration_sec: float | None = None) -> AudioInfo:
         from soma.analysis import load_audio
@@ -321,6 +330,74 @@ class SomaDocument:
     def get_preview_status(self) -> tuple[str, SpectrogramPreview | None, str | None]:
         with self._lock:
             return self.preview_state, self.preview, self.preview_error
+
+    def start_viewport_preview_async(
+        self,
+        time_start: float,
+        time_end: float,
+        freq_min: float,
+        freq_max: float,
+        width: int,
+        height: int,
+    ) -> str:
+        if self.audio_data is None or self.audio_info is None:
+            return ""
+        request_id = str(uuid.uuid4())
+
+        with self._lock:
+            self._viewport_request_id = request_id
+            self._viewport_state = "processing"
+            self._viewport_preview = None
+            self._viewport_error = None
+
+            audio = self.audio_data
+            sample_rate = self.audio_info.sample_rate
+            settings = self.settings
+
+        def _worker() -> None:
+            with self._lock:
+                if self._viewport_request_id != request_id:
+                    return
+
+            try:
+                preview = make_viewport_spectrogram(
+                    audio,
+                    sample_rate,
+                    settings,
+                    time_start,
+                    time_end,
+                    freq_min,
+                    freq_max,
+                    width,
+                    height,
+                )
+            except Exception as exc:
+                self._logger.exception("viewport preview generation failed")
+                with self._lock:
+                    if self._viewport_request_id != request_id:
+                        return
+                    self._viewport_state = "error"
+                    self._viewport_error = str(exc)
+                return
+
+            with self._lock:
+                if self._viewport_request_id != request_id:
+                    return
+                self._viewport_preview = preview
+                self._viewport_state = "ready"
+
+        thread = threading.Thread(target=_worker, name="soma-viewport-preview", daemon=True)
+        thread.start()
+        return request_id
+
+    def get_viewport_preview_status(self) -> tuple[str, ViewportPreview | None, str | None, str | None]:
+        with self._lock:
+            return (
+                self._viewport_state,
+                self._viewport_preview,
+                self._viewport_error,
+                self._viewport_request_id,
+            )
 
     def play(self, mix_ratio: float, loop: bool) -> None:
         if self.audio_info is None:

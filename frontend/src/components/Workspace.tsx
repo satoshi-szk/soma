@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Circle, Group, Layer, Line, Rect, Shape, Stage, Image as KonvaImage, Text } from 'react-konva'
-import type { AnalysisSettings, Partial, PartialPoint, SpectrogramPreview, ToolId } from '../app/types'
+import type { AnalysisSettings, Partial, PartialPoint, SpectrogramPreview, ToolId, ViewportPreview } from '../app/types'
 import { mapColor } from '../app/utils'
 import { SelectionHud } from './SelectionHud'
 import type { KonvaEventObject } from 'konva/lib/Node'
@@ -19,6 +19,7 @@ const hexToRgba = (hex: string, alpha: number) => {
 
 export type WorkspaceProps = {
   preview: SpectrogramPreview | null
+  viewportPreview: ViewportPreview | null
   settings: AnalysisSettings
   partials: Partial[]
   selectedIds: string[]
@@ -31,6 +32,7 @@ export type WorkspaceProps = {
   playbackPosition: number
   onZoomChange: (zoom: number) => void
   onPanChange: (pan: { x: number; y: number }) => void
+  onStageSizeChange: (size: { width: number; height: number }) => void
   onTraceCommit: (trace: Array<[number, number]>) => Promise<boolean>
   onEraseCommit: (trace: Array<[number, number]>) => void
   onSelectBoxCommit: (selection: { time_start: number; time_end: number; freq_start: number; freq_end: number }) => void
@@ -45,6 +47,7 @@ export type WorkspaceProps = {
 
 export function Workspace({
   preview,
+  viewportPreview,
   settings,
   partials,
   selectedIds,
@@ -57,6 +60,7 @@ export function Workspace({
   playbackPosition,
   onZoomChange,
   onPanChange,
+  onStageSizeChange,
   onTraceCommit,
   onEraseCommit,
   onSelectBoxCommit,
@@ -84,13 +88,14 @@ export function Workspace({
       for (const entry of entries) {
         const { width, height } = entry.contentRect
         setStageSize({ width, height })
+        onStageSizeChange({ width, height })
       }
     })
     if (containerRef.current) {
       observer.observe(containerRef.current)
     }
     return () => observer.disconnect()
-  }, [])
+  }, [onStageSizeChange])
 
 
   const previewImage = useMemo(() => {
@@ -116,6 +121,29 @@ export function Workspace({
     return canvas
   }, [preview, settings])
 
+  const viewportPreviewImage = useMemo(() => {
+    if (!viewportPreview) return null
+    const canvas = document.createElement('canvas')
+    canvas.width = viewportPreview.width
+    canvas.height = viewportPreview.height
+    const ctx = canvas.getContext('2d')
+    if (!ctx) return null
+    const image = ctx.createImageData(viewportPreview.width, viewportPreview.height)
+    for (let i = 0; i < viewportPreview.data.length; i += 1) {
+      const normalized = viewportPreview.data[i] / 255
+      const adjusted = Math.min(1, Math.max(0, (normalized - 0.5) * settings.contrast + 0.5 + settings.brightness))
+      const value = Math.round(adjusted * 255)
+      const color = mapColor(settings.color_map, value)
+      const offset = i * 4
+      image.data[offset] = color[0]
+      image.data[offset + 1] = color[1]
+      image.data[offset + 2] = color[2]
+      image.data[offset + 3] = 255
+    }
+    ctx.putImageData(image, 0, 0)
+    return canvas
+  }, [viewportPreview, settings])
+
   const contentOffset = useMemo(() => ({ x: 0, y: 28 }), [])
   const spectrogramAreaHeight = Math.max(1, stageSize.height - automationLaneHeight)
   const automationContentHeight = Math.max(1, automationLaneHeight - automationPadding.top - automationPadding.bottom)
@@ -135,6 +163,22 @@ export function Workspace({
   const duration = preview?.duration_sec ?? 1
   const freqMin = preview?.freq_min ?? settings.freq_min
   const freqMax = preview?.freq_max ?? settings.freq_max
+
+  const viewportPosition = useMemo(() => {
+    if (!viewportPreview || !preview) return null
+    const logMin = Math.log(freqMin)
+    const logMax = Math.log(freqMax)
+    const vpLogMin = Math.log(viewportPreview.freq_min)
+    const vpLogMax = Math.log(viewportPreview.freq_max)
+    const yTop = ((logMax - vpLogMax) / (logMax - logMin)) * preview.height
+    const yBottom = ((logMax - vpLogMin) / (logMax - logMin)) * preview.height
+    return {
+      x: (viewportPreview.time_start / duration) * preview.width,
+      y: yTop,
+      width: ((viewportPreview.time_end - viewportPreview.time_start) / duration) * preview.width,
+      height: yBottom - yTop,
+    }
+  }, [viewportPreview, preview, duration, freqMin, freqMax])
 
   const timeToX = useCallback(
     (time: number) => {
@@ -475,6 +519,16 @@ export function Workspace({
           <Group x={pan.x + contentOffset.x} y={pan.y + contentOffset.y} scaleX={scale.x} scaleY={scale.y}>
             {previewImage ? (
               <KonvaImage image={previewImage} width={preview?.width} height={preview?.height} opacity={0.85} />
+            ) : null}
+            {viewportPreviewImage && viewportPosition ? (
+              <KonvaImage
+                image={viewportPreviewImage}
+                x={viewportPosition.x}
+                y={viewportPosition.y}
+                width={viewportPosition.width}
+                height={viewportPosition.height}
+                opacity={0.95}
+              />
             ) : null}
           </Group>
         </Layer>

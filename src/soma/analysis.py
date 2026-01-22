@@ -9,7 +9,7 @@ import pywt
 from scipy.io import wavfile
 from scipy.signal import resample, resample_poly
 
-from soma.models import AnalysisSettings, AudioInfo, PartialPoint, SpectrogramPreview
+from soma.models import AnalysisSettings, AudioInfo, PartialPoint, SpectrogramPreview, ViewportPreview
 
 
 def load_audio(path: Path, max_duration_sec: float | None = 30.0) -> tuple[AudioInfo, np.ndarray]:
@@ -93,6 +93,86 @@ def make_spectrogram_preview(
         freq_max=preview_freq_max,
         duration_sec=duration_sec,
     ), amp_reference
+
+
+def make_viewport_spectrogram(
+    audio: np.ndarray,
+    sample_rate: int,
+    settings: AnalysisSettings,
+    time_start: float,
+    time_end: float,
+    freq_min: float,
+    freq_max: float,
+    width: int,
+    height: int,
+) -> ViewportPreview:
+    """Generate a high-resolution spectrogram for the specified viewport region."""
+    if audio.size == 0 or time_end <= time_start:
+        return ViewportPreview(
+            width=width,
+            height=height,
+            data=[0] * (width * height),
+            time_start=time_start,
+            time_end=time_end,
+            freq_min=freq_min,
+            freq_max=freq_max,
+        )
+
+    duration = audio.shape[0] / float(sample_rate)
+    time_start = max(0.0, min(time_start, duration))
+    time_end = max(time_start, min(time_end, duration))
+
+    start_sample = int(time_start * sample_rate)
+    end_sample = int(time_end * sample_rate)
+    audio_segment = audio[start_sample:end_sample]
+
+    if audio_segment.size < 32:
+        return ViewportPreview(
+            width=width,
+            height=height,
+            data=[0] * (width * height),
+            time_start=time_start,
+            time_end=time_end,
+            freq_min=freq_min,
+            freq_max=freq_max,
+        )
+
+    effective_freq_min = max(freq_min, settings.freq_min, 1.0)
+    effective_freq_max = min(freq_max, settings.freq_max)
+    effective_freq_max = max(effective_freq_max, effective_freq_min * 1.001)
+
+    target_rate = _preview_sample_rate(sample_rate, effective_freq_max)
+    if target_rate < sample_rate:
+        audio_segment, _ = resample_audio(audio_segment, sample_rate, target_rate)
+        sample_rate = target_rate
+
+    effective_freq_max = min(effective_freq_max, sample_rate * 0.5)
+
+    viewport_settings = AnalysisSettings(
+        freq_min=effective_freq_min,
+        freq_max=effective_freq_max,
+        bins_per_octave=settings.bins_per_octave,
+    )
+    frequencies = _build_frequencies(viewport_settings, max_freq=effective_freq_max)
+    cwt_matrix = _cwt_magnitude(audio_segment, sample_rate, frequencies)
+    magnitude = _normalize_cwt(cwt_matrix)
+
+    time_resampled = resample(magnitude, width, axis=1)
+    resized = resample(time_resampled, height, axis=0)
+    resized = resample(resized, width, axis=1)
+    normalized = np.clip(resized, 0.0, 1.0)
+    normalized = np.flipud(normalized)
+
+    data = (normalized * 255).astype(np.uint8).flatten().tolist()
+    return ViewportPreview(
+        width=width,
+        height=height,
+        data=data,
+        time_start=time_start,
+        time_end=time_end,
+        freq_min=effective_freq_min,
+        freq_max=effective_freq_max,
+    )
 
 
 def snap_trace(
