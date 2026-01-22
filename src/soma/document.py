@@ -11,7 +11,15 @@ from typing import Any
 import numpy as np
 
 from soma.analysis import make_spectrogram_preview, snap_trace
-from soma.models import AnalysisSettings, AudioInfo, Partial, PartialPoint, SourceInfo, SpectrogramPreview
+from soma.models import (
+    AnalysisSettings,
+    AudioInfo,
+    Partial,
+    PartialPoint,
+    SourceInfo,
+    SpectrogramPreview,
+    generate_bright_color,
+)
 from soma.partial_store import PartialStore
 from soma.persistence import (
     build_project_payload,
@@ -138,7 +146,7 @@ class SomaDocument:
         if len(snapped) < 2:
             return None
         partial_id = str(uuid.uuid4())
-        partial = Partial(id=partial_id, points=snapped)
+        partial = Partial(id=partial_id, points=snapped, color=generate_bright_color())
         before = self._snapshot_state(partial_ids=[partial_id])
         self.store.add(partial)
         self.synth.apply_partial(partial)
@@ -202,7 +210,7 @@ class SomaDocument:
         if partial is None:
             return None
         before = self._snapshot_state(partial_ids=[partial_id])
-        updated = Partial(id=partial_id, points=points, is_muted=partial.is_muted)
+        updated = Partial(id=partial_id, points=points, is_muted=partial.is_muted, color=partial.color)
         self.store.update(updated)
         self.synth.apply_partial(updated)
         after = self._snapshot_state(partial_ids=[partial_id])
@@ -218,7 +226,7 @@ class SomaDocument:
         tracked_ids = [first_id, second_id, merged_id]
         before = self._snapshot_state(partial_ids=tracked_ids)
         merged_points = sorted(first.points + second.points, key=lambda p: p.time)
-        merged = Partial(id=merged_id, points=merged_points)
+        merged = Partial(id=merged_id, points=merged_points, color=generate_bright_color())
         self.store.remove(first_id)
         self.store.remove(second_id)
         self.synth.remove_partial(first_id)
@@ -429,6 +437,7 @@ class SomaDocument:
                         id=partial.id,
                         points=list(partial.points),
                         is_muted=partial.is_muted,
+                        color=partial.color,
                     )
         return ProjectState(
             audio_info=self.audio_info,
@@ -473,5 +482,5 @@ def _split_partial(
     for segment in segments:
         if len(segment) < 2:
             continue
-        result.append(Partial(id=str(uuid.uuid4()), points=segment))
+        result.append(Partial(id=str(uuid.uuid4()), points=segment, color=generate_bright_color()))
     return result

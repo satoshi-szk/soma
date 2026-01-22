@@ -39,6 +39,7 @@ export type PartialPoint = {
 export type Partial = {
   id: string
   is_muted: boolean
+  color: string
   points: PartialPoint[]
 }
 

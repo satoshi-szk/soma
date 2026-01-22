@@ -20,9 +20,10 @@ export const formatNote = (freq: number) => {
   return `${name}${octave}`
 }
 
-export const toPartial = (raw: { id: string; is_muted: boolean; points: number[][] }): Partial => ({
+export const toPartial = (raw: { id: string; is_muted: boolean; color?: string; points: number[][] }): Partial => ({
   id: raw.id,
   is_muted: raw.is_muted,
+  color: normalizeHexColor(raw.color),
   points: raw.points.map((point) => ({ time: point[0], freq: point[1], amp: point[2] })),
 })
 
@@ -66,4 +67,14 @@ const interpolateColor = (value: number, stops: number[][]): [number, number, nu
   const g = Math.round(start[1] + (end[1] - start[1]) * frac)
   const b = Math.round(start[2] + (end[2] - start[2]) * frac)
   return [r, g, b]
+}
+
+const normalizeHexColor = (value?: string): string => {
+  if (typeof value === 'string') {
+    const trimmed = value.trim()
+    if (/^#?[0-9a-fA-F]{6}$/.test(trimmed)) {
+      return trimmed.startsWith('#') ? trimmed : `#${trimmed}`
+    }
+  }
+  return '#f8d19a'
 }

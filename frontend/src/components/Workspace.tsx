@@ -6,6 +6,17 @@ import { SelectionHud } from './SelectionHud'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import type { Context } from 'konva/lib/Context'
 
+const hexToRgba = (hex: string, alpha: number) => {
+  const cleaned = hex.trim().replace('#', '')
+  if (!/^[0-9a-fA-F]{6}$/.test(cleaned)) {
+    return `rgba(248, 209, 154, ${alpha})`
+  }
+  const r = parseInt(cleaned.slice(0, 2), 16)
+  const g = parseInt(cleaned.slice(2, 4), 16)
+  const b = parseInt(cleaned.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
 export type WorkspaceProps = {
   preview: SpectrogramPreview | null
   settings: AnalysisSettings
@@ -316,7 +327,7 @@ export function Workspace({
       ctx.lineWidth = 1
       for (const partial of partials) {
         if (partial.points.length < 2) continue
-        ctx.strokeStyle = partial.is_muted ? 'rgba(248, 209, 154, 0.3)' : '#f8d19a'
+        ctx.strokeStyle = hexToRgba(partial.color, partial.is_muted ? 0.25 : 0.6)
         ctx.beginPath()
         partial.points.forEach((point, index) => {
           const x = timeToX(point.time)
@@ -437,7 +448,7 @@ export function Workspace({
               <Line
                 key={partial.id}
                 points={partial.points.flatMap((point) => [timeToX(point.time), freqToY(point.freq)])}
-                stroke="#fdf5d3"
+                stroke={hexToRgba(partial.color, partial.is_muted ? 0.35 : 0.95)}
                 strokeWidth={2}
               />
             ))}
@@ -449,7 +460,7 @@ export function Workspace({
                     x={timeToX(renderPartials[0].points[index].time)}
                     y={freqToY(renderPartials[0].points[index].freq)}
                     radius={4}
-                    fill="#f59f8b"
+                    fill={hexToRgba(renderPartials[0].color, 0.95)}
                     draggable
                     onDragMove={(event) => {
                       const { x, y } = event.target.position()
