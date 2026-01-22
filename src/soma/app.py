@@ -485,12 +485,60 @@ def resolve_frontend_url() -> str:
     return "http://localhost:5173"
 
 
+CONSOLE_HOOK_JS = r"""
+(function () {
+  function safeToString(v) {
+    try {
+      if (typeof v === 'string') return v;
+      return JSON.stringify(v);
+    } catch (e) {
+      try { return String(v); } catch (_) { return '[unstringifiable]'; }
+    }
+  }
+
+  function send(level, args) {
+    try {
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.frontend_log) {
+        const msg = args.map(safeToString).join(' ');
+        window.pywebview.api.frontend_log(level, msg);
+      }
+    } catch (e) {
+      // 送信失敗しても落とさない
+    }
+  }
+
+  ['log', 'info', 'warn', 'error', 'debug'].forEach(function (level) {
+    const orig = console[level];
+    console[level] = function (...args) {
+      send(level, args);
+      return orig.apply(console, args);
+    };
+  });
+
+  window.addEventListener('error', function (e) {
+    const msg = (e && e.message ? e.message : 'Unknown error')
+      + (e && e.filename ? ` @ ${e.filename}:${e.lineno}:${e.colno}` : '');
+    const stack = (e && e.error && e.error.stack) ? ("\n" + e.error.stack) : "";
+    send('error', [msg + stack]);
+  });
+
+  window.addEventListener('unhandledrejection', function (e) {
+    const r = e && e.reason;
+    const msg = r && r.stack ? r.stack : safeToString(r);
+    send('error', ['UnhandledRejection: ' + msg]);
+  });
+
+  console.log('[ConsoleHook] Initialized');
+})();
+"""
+
+
 def main() -> None:
     configure_logging()
     force_dev = os.environ.get("SOMA_DEV", "").lower() in {"1", "true", "yes"}
     url = resolve_frontend_url()
     api = SomaApi()
-    webview.create_window(
+    window = webview.create_window(
         "SOMA",
         url=url,
         js_api=api,
@@ -499,6 +547,11 @@ def main() -> None:
         min_size=(960, 600),
         background_color="#f4f1ed",
     )
+
+    def inject_console_hook() -> None:
+        window.evaluate_js(CONSOLE_HOOK_JS)
+
+    window.events.loaded += inject_console_hook
     webview.start(debug=force_dev)
 
 
