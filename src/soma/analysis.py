@@ -155,7 +155,8 @@ def snap_trace(
         peak_index = int(np.argmax(spectrum))
         peak_freq = float(frequencies[peak_index])
         peak_amp = float(spectrum[peak_index])
-        normalized_amp = float(peak_amp / (np.max(spectrum) + 1e-8))
+        window_max = float(np.max(magnitude))
+        normalized_amp = float(peak_amp / (window_max + 1e-8))
         points.append(PartialPoint(time=time_sec, freq=peak_freq, amp=normalized_amp))
 
     return points

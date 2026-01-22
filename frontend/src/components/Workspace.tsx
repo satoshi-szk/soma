@@ -74,6 +74,8 @@ export function Workspace({
   const [selectionBox, setSelectionBox] = useState<null | { x: number; y: number; w: number; h: number }>(null)
   const [draggedPartial, setDraggedPartial] = useState<Partial | null>(null)
   const [hudPosition, setHudPosition] = useState({ x: 16, y: 16 })
+  const automationLaneHeight = 120
+  const automationPadding = { top: 18, bottom: 16 }
 
   useEffect(() => {
     const observer = new ResizeObserver((entries) => {
@@ -111,13 +113,19 @@ export function Workspace({
     return canvas
   }, [preview, settings])
 
+  const contentOffset = useMemo(() => ({ x: 0, y: 28 }), [])
+  const spectrogramAreaHeight = Math.max(1, stageSize.height - automationLaneHeight)
+  const automationContentHeight = Math.max(1, automationLaneHeight - automationPadding.top - automationPadding.bottom)
+  const automationTop = spectrogramAreaHeight
+  const automationContentTop = automationTop + automationPadding.top
+
   const baseScale = useMemo(() => {
     if (!preview) return { x: 1, y: 1 }
     return {
       x: stageSize.width / preview.width,
-      y: stageSize.height / preview.height,
+      y: Math.max(1, spectrogramAreaHeight - contentOffset.y) / preview.height,
     }
-  }, [preview, stageSize])
+  }, [preview, stageSize, spectrogramAreaHeight, contentOffset])
 
   const scale = useMemo(() => ({ x: baseScale.x * zoom, y: baseScale.y * zoom }), [baseScale, zoom])
 
@@ -156,8 +164,6 @@ export function Workspace({
     }
     return marks
   }, [preview, freqMin, freqMax])
-
-  const contentOffset = useMemo(() => ({ x: 0, y: 28 }), [])
 
   const positionToTimeFreq = useCallback(
     (x: number, y: number) => {
@@ -215,7 +221,7 @@ export function Workspace({
     if (!stage) return
     const pointer = stage.getPointerPosition()
     if (!pointer) return
-    if (pointer.y < rulerHeight) return
+    if (pointer.y < rulerHeight || pointer.y > spectrogramAreaHeight) return
     if (activeTool === 'trace' || activeTool === 'erase') {
       const { time, freq } = positionToTimeFreq(pointer.x, pointer.y)
       setTracePath([{ time, freq, amp: 0.5 }])
@@ -233,7 +239,7 @@ export function Workspace({
     if (!stage) return
     const pointer = stage.getPointerPosition()
     if (!pointer) return
-    if (pointer.y < rulerHeight) return
+    if (pointer.y < rulerHeight || pointer.y > spectrogramAreaHeight) return
     const cursor = positionToTimeFreq(pointer.x, pointer.y)
     onCursorMove({ time: cursor.time, freq: cursor.freq, amp: null })
     setHudPosition((prev) => {
@@ -300,7 +306,7 @@ export function Workspace({
     if (!stage) return
     const pointer = stage.getPointerPosition()
     if (!pointer) return
-    if (pointer.y < rulerHeight) return
+    if (pointer.y < rulerHeight || pointer.y > spectrogramAreaHeight) return
     const { time, freq } = positionToTimeFreq(pointer.x, pointer.y)
     if (activeTool === 'connect') {
       onConnectPick({ time, freq })
@@ -352,6 +358,26 @@ export function Workspace({
 
   const rulerWidth = 72
   const rulerHeight = contentOffset.y
+
+  const maxAmp = useMemo(() => {
+    let max = 0
+    for (const partial of partials) {
+      for (const point of partial.points) {
+        if (point.amp > max) {
+          max = point.amp
+        }
+      }
+    }
+    return max > 0 ? max : 1
+  }, [partials])
+
+  const ampToLaneY = useCallback(
+    (amp: number) => {
+      const normalized = Math.min(1, Math.max(0, amp / maxAmp))
+      return automationContentHeight - normalized * automationContentHeight
+    },
+    [automationContentHeight, maxAmp],
+  )
 
   const visibleRange = useMemo(() => {
     if (!preview) return { start: 0, end: 0 }
@@ -425,6 +451,38 @@ export function Workspace({
             {previewImage ? (
               <KonvaImage image={previewImage} width={preview?.width} height={preview?.height} opacity={0.85} />
             ) : null}
+          </Group>
+        </Layer>
+        <Layer>
+          <Rect
+            x={0}
+            y={automationTop}
+            width={stageSize.width}
+            height={automationLaneHeight}
+            fill="rgba(10, 14, 20, 0.82)"
+          />
+          <Line
+            points={[0, automationTop, stageSize.width, automationTop]}
+            stroke="rgba(248, 209, 154, 0.25)"
+            strokeWidth={1}
+          />
+          <Text
+            x={12}
+            y={automationTop + 6}
+            text="Partial Amplitude"
+            fontSize={9}
+            fill="rgba(248, 209, 154, 0.7)"
+            fontFamily="monospace"
+          />
+          <Group x={pan.x + contentOffset.x} y={automationContentTop} scaleX={scale.x}>
+            {partials.map((partial) => (
+              <Line
+                key={`amp-${partial.id}`}
+                points={partial.points.flatMap((point) => [timeToX(point.time), ampToLaneY(point.amp)])}
+                stroke={hexToRgba(partial.color, partial.is_muted ? 0.25 : 0.85)}
+                strokeWidth={1.25}
+              />
+            ))}
           </Group>
         </Layer>
         <Layer>
