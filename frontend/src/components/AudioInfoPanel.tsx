@@ -9,7 +9,7 @@ export type AudioInfoPanelProps = {
 
 export function AudioInfoPanel({ audioInfo, analysisError, statusNote }: AudioInfoPanelProps) {
   return (
-    <div className="panel rounded-2xl px-4 py-3 text-sm text-[var(--muted)]">
+    <div className="panel rounded-none px-4 py-3 text-sm text-[var(--muted)]">
       <div className="text-[10px] uppercase tracking-[0.22em] text-[var(--muted)]">Audio Info</div>
       <div className="mt-3 flex flex-col gap-2 text-[11px]">
         <span className="font-semibold text-[var(--ink)]">{audioInfo ? audioInfo.name : 'No file'}</span>

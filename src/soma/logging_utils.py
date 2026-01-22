@@ -7,6 +7,7 @@ import threading
 import warnings
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
+from typing import BinaryIO
 
 
 def configure_logging(app_name: str = "soma") -> None:
@@ -65,7 +66,7 @@ def _attach_stdout_stderr(log_path: Path) -> None:
     _tee_initialized = True
 
 
-def _tee_fd(target_fd: int, log_handle) -> None:
+def _tee_fd(target_fd: int, log_handle: BinaryIO) -> None:
     read_fd, write_fd = os.pipe()
     os.set_inheritable(read_fd, False)
     os.set_inheritable(write_fd, False)

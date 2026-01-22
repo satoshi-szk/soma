@@ -58,3 +58,17 @@ def test_snap_trace_returns_points() -> None:
     for point in points:
         assert 400.0 < point.freq < 500.0
         assert 0.0 <= point.amp <= 1.0
+
+
+def test_snap_trace_decimates_points() -> None:
+    sample_rate = 8000
+    duration = 0.6
+    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+    audio = (0.5 * np.sin(2 * math.pi * 330.0 * t)).astype(np.float32)
+    settings = AnalysisSettings()
+    trace = [(time, 340.0) for time in np.linspace(0.05, 0.55, 200)]
+
+    points = snap_trace(audio, sample_rate, settings, trace, max_points=20)
+
+    assert 1 <= len(points) <= 20
+

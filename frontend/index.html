@@ -7,10 +7,8 @@
     <title>SOMA</title>
     <script>
       (function () {
-        const isDev = window.location.protocol === 'http:' || window.location.protocol === 'https:'
-        if (!isDev) {
-          return
-        }
+        const isWeb = window.location.protocol === 'http:' || window.location.protocol === 'https:'
+        const useBridge = !isWeb
         const queue = []
         const original = {}
         const safeString = (value) => {
@@ -30,7 +28,7 @@
           const message = args.map(safeString).join(' ')
           if (window.pywebview?.api?.frontend_log) {
             window.pywebview.api.frontend_log(level, message)
-          } else {
+          } else if (useBridge) {
             queue.push({ level, message })
           }
         }

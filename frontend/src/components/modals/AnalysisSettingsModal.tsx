@@ -10,7 +10,7 @@ export type AnalysisSettingsModalProps = {
 export function AnalysisSettingsModal({ settings, onChange, onCancel, onApply }: AnalysisSettingsModalProps) {
   return (
     <div className="modal-backdrop">
-      <div className="modal">
+      <div className="modal square">
         <h2 className="modal-title">Analysis Settings</h2>
         <div className="modal-grid">
           <label>

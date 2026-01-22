@@ -10,21 +10,21 @@ export type SelectionHudProps = {
 
 export function SelectionHud({ selected, canMute, canDelete, onMute, onDelete }: SelectionHudProps) {
   return (
-    <div className="panel rounded-2xl px-4 py-3 text-sm text-[var(--muted)]">
+    <div className="panel rounded-none px-4 py-3 text-sm text-[var(--muted)]">
       <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.22em] text-[var(--muted)]">
         <span>Selection HUD</span>
         <span className="font-mono text-[10px]">{selected ? selected.id : 'None'}</span>
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <button
-          className="rounded-full border border-[var(--panel-border)] px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--accent-strong)]"
+          className="rounded-none border border-[var(--panel-border)] px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--accent-strong)]"
           onClick={onMute}
           disabled={!canMute}
         >
           Mute
         </button>
         <button
-          className="rounded-full border border-[var(--panel-border)] px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--accent-warm)]"
+          className="rounded-none border border-[var(--panel-border)] px-4 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--accent-warm)]"
           onClick={onDelete}
           disabled={!canDelete}
         >

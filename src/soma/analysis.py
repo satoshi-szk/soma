@@ -103,16 +103,28 @@ def snap_trace(
     trace: Sequence[tuple[float, float]],
     window_ms: float = 200.0,
     freq_window_octaves: float = 0.5,
+    max_points: int = 128,
 ) -> list[PartialPoint]:
     if not trace or audio.size == 0:
         return []
 
-    window_samples = int(sample_rate * window_ms / 1000.0)
+    use_fast_mode = len(trace) > max_points
+    effective_max_points = max_points
+    if use_fast_mode:
+        effective_max_points = min(max_points, 96)
+    trace_points = _decimate_trace(trace, max_points=effective_max_points)
+    effective_bins = settings.bins_per_octave
+    effective_window_ms = window_ms
+    if use_fast_mode:
+        effective_bins = max(8, settings.bins_per_octave // 3)
+        effective_window_ms = min(window_ms, 80.0)
+
+    window_samples = int(sample_rate * effective_window_ms / 1000.0)
     window_samples = max(32, window_samples)
     half_window = window_samples // 2
 
     points: list[PartialPoint] = []
-    for time_sec, freq_in in trace:
+    for time_sec, freq_in in trace_points:
         center = int(time_sec * sample_rate)
         start = max(0, center - half_window)
         end = min(audio.shape[0], center + half_window)
@@ -123,15 +135,20 @@ def snap_trace(
         window = _to_float32(window)
         local_freq_min = max(1.0, freq_in / (2.0**freq_window_octaves))
         local_freq_max = min(settings.freq_max, freq_in * (2.0**freq_window_octaves))
+        window_sample_rate = sample_rate
+        target_rate = _preview_sample_rate(window_sample_rate, local_freq_max)
+        if target_rate < window_sample_rate:
+            window, _ = resample_audio(window, window_sample_rate, target_rate)
+            window_sample_rate = target_rate
         frequencies = _build_frequencies(
             AnalysisSettings(
                 freq_min=local_freq_min,
                 freq_max=local_freq_max,
-                bins_per_octave=settings.bins_per_octave,
+                bins_per_octave=effective_bins,
             )
         )
 
-        magnitude = _cwt_magnitude(window, sample_rate, frequencies)
+        magnitude = _cwt_magnitude(window, window_sample_rate, frequencies)
         center_idx = min(magnitude.shape[1] - 1, window.shape[0] // 2)
         spectrum = magnitude[:, center_idx]
         if spectrum.size == 0:
@@ -144,6 +161,15 @@ def snap_trace(
         points.append(PartialPoint(time=time_sec, freq=peak_freq, amp=normalized_amp))
 
     return points
+
+
+def _decimate_trace(trace: Sequence[tuple[float, float]], max_points: int) -> list[tuple[float, float]]:
+    if max_points <= 0:
+        return []
+    if len(trace) <= max_points:
+        return list(trace)
+    indices = np.linspace(0, len(trace) - 1, max_points, dtype=int)
+    return [trace[idx] for idx in indices]
 
 
 def _to_float32(audio: np.ndarray) -> np.ndarray:

@@ -14,7 +14,7 @@ export type WorkspaceProps = {
   pan: { x: number; y: number }
   onZoomChange: (zoom: number) => void
   onPanChange: (pan: { x: number; y: number }) => void
-  onTraceCommit: (trace: Array<[number, number]>) => void
+  onTraceCommit: (trace: Array<[number, number]>) => Promise<boolean>
   onEraseCommit: (trace: Array<[number, number]>) => void
   onSelectBoxCommit: (selection: { time_start: number; time_end: number; freq_start: number; freq_end: number }) => void
   onHitTestCommit: (point: { time: number; freq: number }) => void
@@ -46,6 +46,7 @@ export function Workspace({
   const [stageSize, setStageSize] = useState({ width: 900, height: 420 })
   const [tracePath, setTracePath] = useState<PartialPoint[]>([])
   const [isTracing, setIsTracing] = useState(false)
+  const [committedTrace, setCommittedTrace] = useState<PartialPoint[]>([])
   const [selectionBox, setSelectionBox] = useState<null | { x: number; y: number; w: number; h: number }>(null)
   const [draggedPartial, setDraggedPartial] = useState<Partial | null>(null)
 
@@ -139,10 +140,19 @@ export function Workspace({
 
   const onStageWheel = (event: any) => {
     event.evt.preventDefault()
-    const scaleBy = 1.05
     const stage = event.target.getStage()
     const pointer = stage.getPointerPosition()
     if (!pointer) return
+    const isZoomGesture = event.evt.ctrlKey || event.evt.metaKey
+    if (!isZoomGesture) {
+      const nextPan = {
+        x: pan.x - event.evt.deltaX,
+        y: pan.y - event.evt.deltaY,
+      }
+      onPanChange(nextPan)
+      return
+    }
+    const scaleBy = 1.05
     const oldScale = zoom
     const direction = event.evt.deltaY > 0 ? -1 : 1
     const newScale = direction > 0 ? oldScale * scaleBy : oldScale / scaleBy
@@ -171,6 +181,7 @@ export function Workspace({
       const { time, freq } = positionToTimeFreq(pointer.x, pointer.y)
       setTracePath([{ time, freq, amp: 0.5 }])
       setIsTracing(true)
+      setCommittedTrace([])
     }
     if (activeTool === 'select') {
       setSelectionBox({ x: pointer.x, y: pointer.y, w: 0, h: 0 })
@@ -199,9 +210,14 @@ export function Workspace({
     if (!preview) return
     if (activeTool === 'trace' && isTracing) {
       const trace = tracePath.map((point) => [point.time, point.freq] as [number, number])
-      onTraceCommit(trace)
+      setCommittedTrace(tracePath)
       setTracePath([])
       setIsTracing(false)
+      void onTraceCommit(trace).then((ok) => {
+        if (ok) {
+          setCommittedTrace([])
+        }
+      })
       return
     }
 
@@ -282,7 +298,7 @@ export function Workspace({
   }
 
   return (
-    <div ref={containerRef} className="canvas-surface relative rounded-2xl p-4">
+    <div ref={containerRef} className="canvas-surface relative rounded-none p-4 min-h-[520px]">
       <Stage
         width={stageSize.width}
         height={stageSize.height}
@@ -307,6 +323,13 @@ export function Workspace({
                 points={tracePath.flatMap((point) => [timeToX(point.time), freqToY(point.freq)])}
                 stroke="#f59f8b"
                 strokeWidth={1.5}
+              />
+            ) : null}
+            {committedTrace.length > 1 ? (
+              <Line
+                points={committedTrace.flatMap((point) => [timeToX(point.time), freqToY(point.freq)])}
+                stroke="rgba(245, 159, 139, 0.5)"
+                strokeWidth={1.25}
               />
             ) : null}
             {renderPartials.map((partial) => (
@@ -363,7 +386,7 @@ export function Workspace({
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center text-white/70">
           <div className="text-xs uppercase tracking-[0.3em]">No Audio Loaded</div>
           <button
-            className="rounded-full bg-white/90 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-strong)]"
+            className="rounded-none bg-white/90 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-strong)]"
             onClick={onOpenAudio}
           >
             Open Audio

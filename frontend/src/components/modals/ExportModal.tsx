@@ -33,7 +33,7 @@ export function ExportModal({
 }: ExportModalProps) {
   return (
     <div className="modal-backdrop">
-      <div className="modal">
+      <div className="modal square">
         <h2 className="modal-title">Export</h2>
         <div className="modal-tabs">
           <button className={tab === 'mpe' ? 'active' : ''} onClick={() => onTabChange('mpe')}>

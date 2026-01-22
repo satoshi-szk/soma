@@ -64,7 +64,7 @@ select {
 .panel {
   background: var(--panel);
   border: 1px solid var(--panel-border);
-  box-shadow: 0 12px 24px rgba(26, 25, 22, 0.06);
+  box-shadow: none;
 }
 
 .modal-backdrop {
@@ -82,9 +82,13 @@ select {
   width: min(560px, 90vw);
   background: var(--panel);
   border: 1px solid var(--panel-border);
-  border-radius: 20px;
+  border-radius: 0;
   padding: 24px;
   box-shadow: 0 20px 40px rgba(16, 15, 20, 0.2);
+}
+
+.modal.square {
+  border-radius: 0;
 }
 
 .modal-title {
@@ -114,7 +118,7 @@ select {
 .modal-grid input,
 .modal-grid select {
   border: 1px solid var(--panel-border);
-  border-radius: 10px;
+  border-radius: 0;
   padding: 8px 10px;
   font-size: 12px;
   color: var(--ink);
@@ -129,7 +133,7 @@ select {
 }
 
 .modal-actions button {
-  border-radius: 999px;
+  border-radius: 0;
   border: 1px solid var(--panel-border);
   padding: 8px 16px;
   font-size: 11px;
@@ -153,7 +157,7 @@ select {
 
 .modal-tabs button {
   flex: 1;
-  border-radius: 999px;
+  border-radius: 0;
   border: 1px solid var(--panel-border);
   padding: 8px 12px;
   font-size: 11px;
