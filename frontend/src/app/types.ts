@@ -1,0 +1,47 @@
+export type ApiStatus = 'checking' | 'connected' | 'disconnected'
+
+export type AnalysisSettings = {
+  freq_min: number
+  freq_max: number
+  bins_per_octave: number
+  time_resolution_ms: number
+  color_map: string
+  brightness: number
+  contrast: number
+}
+
+export type AudioInfo = {
+  path: string
+  name: string
+  sample_rate: number
+  duration_sec: number
+  channels: number
+  truncated: boolean
+}
+
+export type SpectrogramPreview = {
+  width: number
+  height: number
+  data: number[]
+  freq_min: number
+  freq_max: number
+  duration_sec: number
+}
+
+export type PartialPoint = {
+  time: number
+  freq: number
+  amp: number
+}
+
+export type Partial = {
+  id: string
+  is_muted: boolean
+  points: PartialPoint[]
+}
+
+export type ApiResult<T> = { status: 'ok' } & T
+
+export type ApiError = { status: 'cancelled' | 'error'; message?: string }
+
+export type ToolId = 'select' | 'trace' | 'erase' | 'connect'
