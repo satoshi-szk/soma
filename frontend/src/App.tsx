@@ -645,7 +645,7 @@ function App() {
               <span>Workspace</span>
               <span className="font-mono text-[10px]">Zoom {Math.round(zoom * 100)}%</span>
             </div>
-            <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_72px]">
+            <div className="mt-3">
               <Workspace
                 preview={preview}
                 settings={settings}
@@ -665,17 +665,6 @@ function App() {
                 onConnectPick={handleConnectPick}
                 onOpenAudio={openAudio}
               />
-              <div className="panel flex flex-col items-center justify-between rounded-none px-3 py-4 text-[10px] uppercase tracking-[0.24em] text-[var(--muted)]">
-                <span>Freq</span>
-                <div className="flex flex-col items-center gap-3 font-mono text-[10px] text-[var(--accent-strong)]">
-                  <span>{Math.round((preview?.freq_max ?? settings.freq_max) / 1000)}k</span>
-                  <span>{Math.round((preview?.freq_max ?? settings.freq_max) / 5000)}k</span>
-                  <span>1k</span>
-                  <span>200</span>
-                  <span>50</span>
-                </div>
-                <span>Hz</span>
-              </div>
             </div>
           </section>
 

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Circle, Group, Layer, Line, Rect, Shape, Stage, Image as KonvaImage } from 'react-konva'
+import { Circle, Group, Layer, Line, Rect, Shape, Stage, Image as KonvaImage, Text } from 'react-konva'
 import type { AnalysisSettings, Partial, PartialPoint, SpectrogramPreview, ToolId } from '../app/types'
 import { mapColor } from '../app/utils'
 
@@ -122,6 +122,19 @@ export function Workspace({
     },
     [preview, freqMin, freqMax],
   )
+
+  const freqRulerMarks = useMemo(() => {
+    if (!preview) return []
+    const marks: { freq: number; label: string }[] = []
+    const frequencies = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]
+    for (const freq of frequencies) {
+      if (freq >= freqMin && freq <= freqMax) {
+        const label = freq >= 1000 ? `${freq / 1000}k` : `${freq}`
+        marks.push({ freq, label })
+      }
+    }
+    return marks
+  }, [preview, freqMin, freqMax])
 
   const positionToTimeFreq = useCallback(
     (x: number, y: number) => {
@@ -297,6 +310,8 @@ export function Workspace({
     setDraggedPartial({ ...partial, points: updated })
   }
 
+  const rulerWidth = 72
+
   return (
     <div ref={containerRef} className="canvas-surface relative rounded-none p-4 min-h-[520px]">
       <Stage
@@ -380,6 +395,32 @@ export function Workspace({
               dash={[4, 4]}
             />
           ) : null}
+        </Layer>
+        <Layer>
+          <Group x={stageSize.width - rulerWidth} y={pan.y} scaleY={scale.y}>
+            {freqRulerMarks.map((mark) => {
+              const y = freqToY(mark.freq)
+              return (
+                <Group key={mark.freq}>
+                  <Line
+                    points={[0, y, 8, y]}
+                    stroke="rgba(248, 209, 154, 0.5)"
+                    strokeWidth={1}
+                  />
+                  <Text
+                    x={12}
+                    y={y}
+                    text={mark.label}
+                    fontSize={10}
+                    fill="rgba(248, 209, 154, 0.8)"
+                    fontFamily="monospace"
+                    scaleY={1 / scale.y}
+                    offsetY={5}
+                  />
+                </Group>
+              )
+            })}
+          </Group>
         </Layer>
       </Stage>
       {!preview ? (
