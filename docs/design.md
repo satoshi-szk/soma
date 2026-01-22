@@ -62,9 +62,13 @@ FFTではなく **Continuous Wavelet Transform (CWT)** を採用する。
 
 - **アルゴリズム:** Complex Morlet Wavelet を使用。
 - **理由:** 低域の周波数解像度と高域の時間解像度（過渡特性の捕捉）を両立させるため。また、対数周波数軸との親和性が高い。
-- **スナップ処理 (Peak Snapping):**
-    - 各フレームの局所最大binリストを事前計算
-    - ペン位置binから最近傍の局所最大へスナップ
+- **スナップ処理 (Peak Snapping / Ridge Detection):**
+    - **タイミング:** `MouseUp` 時（描画中は生の軌跡を表示し、操作終了後にバックグラウンドで計算して確定させる）。
+    - **処理フロー:**
+        1. Frontendから軌跡座標 $(t, f_{in})$ のリストを受け取る。
+        2. **JIT解析:** 軌跡の周辺時間（$\pm$ 数100ms）のみ、高解像度 Wavelet 変換を行う。
+        3. **Ridge Detection:** 各時刻において、$f_{in}$ 近傍の局所最大ピーク（Ridge）を探索し、最も確かな成分をつなぎ合わせて Partial を生成する。
+    - **備考:** 描画中のリアルタイムスナップは行わないため、事前計算キャッシュは不要。常に最新・高精度のJIT解析結果を用いる。
 
 ### 3.2 Backend: 合成・再生エンジン (`Synthesizer`)
 
@@ -76,9 +80,12 @@ FFTではなく **Continuous Wavelet Transform (CWT)** を採用する。
     - *※メモリ容量と精度のバランスを考慮し、64bit floatを採用。*
 - **Add / Update Logic:**
     1. パーシャル追加時: サイン波を生成し、Master Buffer に加算 (`+=`)。
-    2. パーシャル削除/編集時: 編集前のパラメータでサイン波を再生成し、Master Buffer から減算 (`=`)。
+    2. パーシャル削除/編集時: 編集前のパラメータでサイン波を再生成し、Master Buffer から減算 (`-=`)。
+    - **補足:** 浮動小数点演算の誤差蓄積による Undo/Redo 時の微細なノイズ残り（非可逆性）は許容する。
 - **Playback:**
     - 再生ボタン押下時、Master Buffer を `float32` にキャストして `SoundDevice` に流すのみ。計算負荷はパーシャル数に依存しない。
+    - 入力音声（原音）と再合成音をミックスして出力する。原音/再合成 は 1ノブで調整可能とする。
+    - 再合成中は再生要求を受け付けず、完了後に再生可能とする（UIで待ち状態を明示）。
 
 ### 3.3 Data Structure (`Partial`)
 
@@ -90,7 +97,6 @@ class PartialPoint:
     time: float       # 秒
     freq: float       # Hz
     amp: float        # 0.0 - 1.0 (Linear amplitude from Wavelet coeff)
-    phase: float      # rad (Option: 再合成時の位相整合用)
 
 @dataclass
 class Partial:
@@ -109,6 +115,9 @@ class Partial:
     - **手法:** `hop_length` を大きく設定（例: 512 samples ≈ 11ms）して間引き計算を行う。
     - **データサイズ:** 1分のオーディオで約 20MB 程度。
     - **タイミング:** プロジェクトロード時に一括計算し、RAMに保持する。ディスクキャッシュは不要。
+    - **Peak List Cache (局所最大リストのキャッシュ)**
+        - **廃止:** スナップ処理は `MouseUp` 時に JIT 計算を行う方針に変更されたため、広域の Peak List 事前計算・キャッシュは行わない。
+        - Visualization Layer は純粋に「背景のスペクトログラム画像」の描画のみを担当する。
 2. **Interaction Layer (編集用・高解像度)**
     - **目的:** 描画時のピークスナップ、詳細解析。
     - **手法:** **On-the-fly (JIT) Computation**。全データをメモリに持たず、カーソル周辺の微小時間（例: $\pm 100\text{ms}$）のみを、ユーザー操作が発生した瞬間に局所的に計算する。
@@ -128,7 +137,7 @@ class Partial:
     - `meta`: バージョン情報
     - `source`: ファイルパス、ハッシュ
     - `analysis_settings`: 再現用パラメータ
-    - `data.partials`: `[t, f, amp, phase]` の配列リスト
+    - `data.partials`: `[t, f, amp]` の配列リスト
 
 ```json
 {
@@ -157,12 +166,12 @@ class Partial:
       {
         "id": "uuid-v4-string",
         "is_muted": false,
-        // [Time(s), Freq(Hz), Amp(0.0-1.0), Phase(rad)]
+        // [Time(s), Freq(Hz), Amp(0.0-1.0)]
         // シンプルな数値配列の羅列
         "points": [
-          [1.00, 440.0, 0.5, 0.0],
-          [1.01, 440.1, 0.5, 0.1],
-          [1.02, 440.2, 0.6, 0.2]
+          [1.00, 440.0, 0.5],
+          [1.01, 440.1, 0.5],
+          [1.02, 440.2, 0.6]
         ]
       },
       // ... 繰り返し
@@ -170,6 +179,23 @@ class Partial:
   }
 }
 ```
+
+### 3.6 Partial Store: Hit Test Index (Selection Acceleration)
+
+- **目的:** Overview上のクリック選択で「最寄りパーシャル」を高速に求める。
+- **方式:** タイムラインを固定幅 Δt（例: 50ms〜200ms）で分割し、各チャンクに「その区間に存在するパーシャルID一覧」を保持する。
+    - `index[chunk_id] -> List[partial_id]`
+- **更新:**
+    - partial追加・削除・分割（Erase後の再セグメンテーション）・延長・クロップのたびに、影響するチャンクのみ再構築する。
+- **ヒットテスト:**
+    - クリック時刻 `t` から該当チャンク `chunk_id` を求め、`index[chunk_id]`（必要に応じて隣接チャンクも）を候補集合として取り出す。
+    - 候補集合の各partialについて、クリック点 `(t,f)` と partial（点列）の **最短距離**を計算し、最小のものをヒットとする。
+- **備考:** これは再生用リアルタイム合成のためではなく、UI選択を高速にするためのインデックスである。
+
+### 3.7 Export: MPE (SMF)
+
+- 同時発音が 16 本以上になる場合は、SMF を自動分割して複数ファイルとして書き出す。
+- ファイル名は同一ベース名に連番を付与する（例: `project_01.mid`, `project_02.mid`）。
 
 ---
 
@@ -179,9 +205,18 @@ class Partial:
 
 「移動」や「ゲイン調整」は排除し、解析結果の抽出に特化する。
 
+0. **選択 (Select / Hit Test):**
+    - Command Name: `hit_test_partial`
+    - **Frontend:**
+        - Overview表示（Konva.Image）上でクリックされた座標を `(time_sec, freq_hz)` に変換し Backend へ送信する。
+    - **Backend:**
+        - クリック点に最も近いパーシャル（点列）を探索し、該当パーシャルIDを返す。
+        - 返されたIDのパーシャルのみを Frontend が Edit Layer（Konva.Line）として生成・表示し、編集可能状態にする。
 1. **新規描画 (Draw):**
     - Command Name: `trace_partial`
-    - ペンシルツールの軌跡をサンプリングし、Backend へ送信。スナップ処理を経て確定。
+    - **Frontend:** ユーザーのマウス軌跡（Raw）を表示。`MouseUp` 時に軌跡座標列を Backend へ送信。
+    - **Backend:** JITスナップ処理を行い、確定した Partial を返す。
+    - **Frontend:** 戻ってきた Partial を表示し、Raw軌跡を消去。
 2. **延長 (Extend):**
     - Command Name: `extend_partial`
     - 端点をドラッグ。
@@ -248,6 +283,75 @@ class Partial:
 
 ---
 
+### 4.3 履歴管理システム (History System)
+
+UX（応答速度）とリソース効率を両立するため、**Delta Transaction Model（差分トランザクションモデル）** を採用する。
+重い計算（JITスナップ、交差判定、再セグメンテーション等）は「操作時」に一度だけ行い、Undo/Redo時にはその結果（差分）だけを適用する。
+
+#### 対象範囲
+
+- Undo/Redo の対象は「ドキュメント（Partial群・解析設定）」の変更のみとする。
+- 選択状態、ズーム/パン、表示モード等の **純UI状態** は Undo/Redo に含めない（必要ならUI専用の別履歴として扱う）。
+
+#### 所有権 (Backend as Source of Truth)
+
+- 履歴（Undo/Redoスタック）とドキュメント状態（Partial Store / Analysis Settings）は Backend が管理する。
+- Frontend はコマンド実行/Undo/Redo要求を送信し、Backend は差分（または更新後の必要情報）を返す。
+    - これにより、非同期処理があっても「UIだけ戻ってBackendが戻らない」不整合を避ける。
+
+#### イベント種別（ハイブリッド方式）
+
+履歴スタックには2種類のイベントを混在させる。
+
+**A. PartialDelta（軽量・高頻度）**
+
+`trace` / `extend` / `erase` / `merge` / `crop` / `mute` 等の編集操作用。計算後に得られた「結果差分」だけを保持する。
+
+```python
+@dataclass(frozen=True)
+class PartialDelta:
+    event_type: str = "delta"
+    added_partials: tuple[Partial, ...]
+    removed_partials: tuple[Partial, ...]  # 復元用
+```
+
+**B. GlobalSnapshot（重量・低頻度）**
+
+解析設定変更など、全体を無効化/置換する操作用。
+
+```python
+@dataclass(frozen=True)
+class GlobalSnapshot:
+    event_type: str = "snapshot"
+    settings: AnalysisSettings
+    partials: dict[str, Partial]  # 全データ（不変を前提に保持）
+```
+
+#### 処理フロー
+
+**Do / Commit（操作実行）**
+
+1. Logic Phase: JIT解析や幾何計算を実行し、`added` / `removed` を決定する。
+2. Commit Phase: `PartialDelta`（または`GlobalSnapshot`）を Undo スタックに積み、Partial Store を更新する。
+    - 新しい操作が入った時点で Redo スタックは破棄する。
+
+**Undo（逆適用）**
+
+- Delta: `added` を削除し、`removed` を復元する（計算は行わない）。処理時間は「変更されたPartial数 k」に比例する。
+- Snapshot: スナップショット内容で丸ごと置換し、必要に応じて再解析/再合成をトリガーする。
+
+**Redo（順適用）**
+
+- Delta: `removed` を削除し、`added` を追加する。
+- Snapshot: Undo と同様に丸ごと置換する。
+
+#### 不変データ前提
+
+- `Partial` は不変（immutable）として扱い、Undo/Redoで同一インスタンスを安全に再利用できる前提を置く。
+- 科学計算系（NumPy等）の内部処理は可変でも良いが、Storeへ格納する成果物は不変（または書き換え不能）に寄せる。
+
+---
+
 ## 5. UI/UX 設計
 
 ### 5.1 画面レイアウト
@@ -255,10 +359,20 @@ class Partial:
 - **Canvas座標系:**
     - Backend (Hz/Sec) と Frontend (Pixel) の変換は Frontend 側で責務を持つ。
     - Backend は常に物理量 (Hz/Sec) のみを扱う。
-- **レイヤー構成 (Konva.js):**
-    - Layer 0 (Background): スペクトログラム画像。
-    - Layer 1 (Static): 確定済みパーシャル（負荷軽減のためキャッシュ化）。
-    - Layer 2 (Dynamic): 描画中の軌跡、選択中のハイライト。
+- **レイヤー構成 (Konva.js)**
+    - Layer 0 (Background): スペクトログラム画像（Konva.Image）
+    - Layer 1 (Overview Partials / Raster Cache):
+        - 確定済みパーシャル全体の表示。
+        - **描画戦略:**
+            - Frontend (Konva) 側で Canvas に描画し、それを画像としてキャッシュする (`Konva.Layer.toImage` 等の活用)。
+            - **遅延更新 (Debounce):** ユーザーの描画操作中は更新せず、操作完了から一定時間（例: 1秒）経過後に、変更があった区間のみを部分的にラスタライズし直す（Dirty Rect）。
+            - これにより、大量のベクタオブジェクトによる描画負荷を回避する。
+    - Layer 2 (Interaction / Input):
+        - 透明の受け皿（Konva.Rect等）としてポインタイベントを集約し、クリック・ドラッグ・ズームの入力を管理する。
+        - OverviewのKonva.Image自体にはパーシャル単位のヒットテストを持たせない。
+    - Layer 3 (Edit Partials / Vector):
+        - **選択された少数のパーシャルのみ**を Konva.Line 等のベクタとして表示し、ハンドル編集や強調表示を行う。
+    - Layer 4 (Playhead / HUD): 再生ヘッド、選択ハイライト、HUD等
 
 詳細は [docs/ui.md](ui.md) を参照。
 
@@ -288,12 +402,15 @@ stateDiagram-v2
     IDLE --> DRAW : Mouse Down
     IDLE --> MOD : Drag Handle
     IDLE --> MRG : Select Pair
-    
+    IDLE --> CALC : Click (HitTest)
+
     DRAW --> CALC : Mouse Up
     MOD --> CALC : Mouse Up
     MRG --> CALC : Confirm
     
     CALC --> BUF : Snap Result
+    CALC --> IDLE : HitTest Result (Select) 
+
     BUF --> IDLE : Complete
     
     IDLE --> PLAY : Play Click
@@ -331,4 +448,4 @@ stateDiagram-v2
 | **メモリ消費** | 破壊的加算方式により、1万パーシャルでもバッファは1本分(20MB強)に抑制。描画パスデータは軽量なため問題なし。 |
 | **計算誤差** | `float32` での多数回の加減算によるノイズ蓄積を防ぐため、Master Buffer は `float64` で保持する。 |
 | **配布後の起動エラー** | `uv` による厳密なロックと、CI上でのクリーンビルド生成物のみを配布することで、DLL欠損等の環境依存エラーを防ぐ。 |
-| **GUI描画負荷** | `Konva.js` を使用し、大量のオブジェクトを描画する際は Canvas のキャッシュ機能を活用する。 |
+| **GUI描画負荷** | 確定済みパーシャル全体はベクタノードとして保持せず、まとめ描きして **Konva.Image（ラスタ）** として表示する。編集対象は選択された少数パーシャルのみを **Konva.Line等のベクタ**で表示する。Overview表示では編集操作を限定し、ズーム後に編集可能とする。 |

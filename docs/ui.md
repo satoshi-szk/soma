@@ -15,8 +15,9 @@
     - `[App Title]`: "SOMA" ロゴ。
 - **Center Group (Transport)**
     - `[Stop (◼)]`: 停止＆先頭へ戻る。
-    - `[Play/Pause (▶/II)]`: 再生トグル。
+    - `[Play/Pause (▶/II)]`: 再生トグル（再合成中は無効）。
     - `[Loop (↻)]`: ループ再生 ON/OFF。
+    - `[原音/再合成]`: 入力音（原音）と再合成音のミックス比。
     - `[Time Display]`: `00:00:00.000` 形式の再生位置カウンター。
 - **Right Group (Tools & Actions)**
     - **Tool Switcher:** (ラジオボタン形式 / ショートカット対応)
@@ -30,9 +31,14 @@
 ### 1-B. Workspace (最大化)
 
 - **Main Canvas:**
-    - `Layer 0`: スペクトログラム画像 (Wavelet Heatmap)。
-    - `Layer 1`: パーシャル描画 (Vector Paths)。
-    - `Layer 2`: 再生ヘッド、選択ハイライト。
+    - `Layer 0`: スペクトログラム画像 (Wavelet Heatmap / Konva.Image)
+    - `Layer 1`: パーシャル表示（Overview / Raster Image）
+        - 確定済みパーシャル全体はラスタ化して表示（性能優先）
+    - `Layer 2`: 入力受付（透明レイヤ。クリック/ドラッグ/ズーム）
+    - `Layer 3`: 編集対象パーシャル（Edit / Vector）
+        - 選択中の少数パーシャルのみベクタ＋ハンドル表示
+        - 端点ハンドルのドラッグで延長/トリム（クロップ）を行う
+    - `Layer 4`: 再生ヘッド、選択ハイライト、HUD
 - **Rulers:**
     - `Top`: 時間軸 (Time/Bars)。
     - `Right`: 周波数軸 (Log Hz / Note Name)。
@@ -42,7 +48,7 @@
 
 ### 1-C. Status Bar
 
-- **Left:** システム状態 (`Ready`, `Analyzing...`, `Playing`).
+- **Left:** システム状態 (`Ready`, `Analyzing...`, `Resynthesizing...`, `Playing`).
 - **Center:** カーソル情報 (`T: 12.3s | F: 440Hz (A4) | A: -6dB`).
 - **Right:** デバッグ/リソース情報 (`Mem: 42MB`).
 
@@ -106,6 +112,7 @@
 - **Tab: MPE (MIDI)**
     - Pitch Bend Range
     - Amplitude Mapping (Velocity / Pressure / CC74)
+    - 同時発音が 16本以上の場合は自動的に複数のSMFを出力（連番付与）
 - **Tab: Audio / CV**
     - Output Type (Sine Synthesis / CV Control)
     - Sample Rate / Bit Depth
