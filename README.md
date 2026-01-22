@@ -51,6 +51,20 @@ npm run build
 uv run soma
 ```
 
+## テスト / 品質チェック
+
+```sh
+uv run pytest
+```
+
+```sh
+uv run mypy src
+```
+
+```sh
+uv run ruff check .
+```
+
 ## PyInstaller
 
 フロントをビルドしてから、単体バンドルを作成します。

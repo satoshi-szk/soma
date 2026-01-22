@@ -5,6 +5,66 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SOMA</title>
+    <script>
+      (function () {
+        const isWeb = window.location.protocol === 'http:' || window.location.protocol === 'https:'
+        const useBridge = !isWeb
+        const queue = []
+        const original = {}
+        const safeString = (value) => {
+          try {
+            if (typeof value === 'string') return value
+            return JSON.stringify(value)
+          } catch (error) {
+            try {
+              return String(value)
+            } catch (fallbackError) {
+              return '[unstringifiable]'
+            }
+          }
+        }
+
+        const send = (level, args) => {
+          const message = args.map(safeString).join(' ')
+          if (window.pywebview?.api?.frontend_log) {
+            window.pywebview.api.frontend_log(level, message)
+          } else if (useBridge) {
+            queue.push({ level, message })
+          }
+        }
+
+        const flush = () => {
+          if (!window.pywebview?.api?.frontend_log) return
+          queue.splice(0).forEach((entry) => {
+            window.pywebview.api.frontend_log(entry.level, entry.message)
+          })
+        }
+
+        ;['log', 'info', 'warn', 'error', 'debug'].forEach((level) => {
+          original[level] = console[level].bind(console)
+          console[level] = (...args) => {
+            send(level, args)
+            original[level](...args)
+          }
+        })
+
+        window.addEventListener('error', (event) => {
+          const msg = event?.message ? event.message : 'Unknown error'
+          const location = event?.filename ? ` @ ${event.filename}:${event.lineno}:${event.colno}` : ''
+          const stack = event?.error?.stack ? `\n${event.error.stack}` : ''
+          send('error', [`${msg}${location}${stack}`])
+        })
+
+        window.addEventListener('unhandledrejection', (event) => {
+          const reason = event?.reason
+          const msg = reason?.stack ? reason.stack : safeString(reason)
+          send('error', [`UnhandledRejection: ${msg}`])
+        })
+
+        window.addEventListener('pywebviewready', flush)
+        window.addEventListener('DOMContentLoaded', flush)
+      })()
+    </script>
   </head>
   <body>
     <div id="root"></div>
