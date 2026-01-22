@@ -15,7 +15,7 @@ import webview
 from soma.analysis import resample_audio
 from soma.document import SomaDocument
 from soma.exporter import AudioExportSettings, MpeExportSettings, export_audio, export_mpe
-from soma.logging_utils import configure_logging, get_log_dir
+from soma.logging_utils import configure_logging, get_session_log_dir
 from soma.models import AnalysisSettings, PartialPoint
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ class SomaApi:
     def __init__(self) -> None:
         self._doc = SomaDocument()
         self._last_audio_path: str | None = None
-        self._frontend_log_path = get_log_dir("soma") / "frontend.log"
+        self._frontend_log_path = get_session_log_dir("soma") / "frontend.log"
 
     def health(self) -> dict[str, str]:
         return {"status": "ok"}
@@ -547,6 +547,8 @@ def main() -> None:
         min_size=(960, 600),
         background_color="#f4f1ed",
     )
+    if window is None:
+        raise RuntimeError("Failed to create app window")
 
     def inject_console_hook() -> None:
         window.evaluate_js(CONSOLE_HOOK_JS)
