@@ -192,6 +192,8 @@ class SomaApi:
             freq_max=float(payload.get("freq_max", 20000.0)),
             bins_per_octave=int(payload.get("bins_per_octave", 48)),
             time_resolution_ms=float(payload.get("time_resolution_ms", 10.0)),
+            preview_freq_max=float(payload.get("preview_freq_max", 12000.0)),
+            preview_bins_per_octave=int(payload.get("preview_bins_per_octave", 12)),
             color_map=str(payload.get("color_map", "magma")),
             brightness=float(payload.get("brightness", 0.0)),
             contrast=float(payload.get("contrast", 1.0)),

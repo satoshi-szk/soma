@@ -42,6 +42,7 @@ def test_make_spectrogram_preview() -> None:
     assert preview.height == 320
     assert len(preview.data) == preview.width * preview.height
     assert preview.duration_sec > 0.0
+    assert preview.freq_max >= 10000.0
 
 
 def test_snap_trace_returns_points() -> None:
@@ -71,4 +72,3 @@ def test_snap_trace_decimates_points() -> None:
     points = snap_trace(audio, sample_rate, settings, trace, max_points=20)
 
     assert 1 <= len(points) <= 20
-

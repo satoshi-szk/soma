@@ -19,6 +19,8 @@ export const DEFAULT_SETTINGS: AnalysisSettings = {
   freq_max: 20000,
   bins_per_octave: 48,
   time_resolution_ms: 10,
+  preview_freq_max: 12000,
+  preview_bins_per_octave: 12,
   color_map: 'magma',
   brightness: 0,
   contrast: 1,

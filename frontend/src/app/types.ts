@@ -5,6 +5,8 @@ export type AnalysisSettings = {
   freq_max: number
   bins_per_octave: number
   time_resolution_ms: number
+  preview_freq_max: number
+  preview_bins_per_octave: number
   color_map: string
   brightness: number
   contrast: number

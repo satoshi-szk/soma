@@ -59,6 +59,8 @@ function App() {
     console.error(detail, error)
   }, [])
 
+  const flushUi = useCallback(() => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())), [])
+
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setReady(true))
     return () => window.cancelAnimationFrame(frame)
@@ -156,6 +158,9 @@ function App() {
     }
     if (label === 'Open Project...') {
       try {
+        setAnalysisState('analyzing')
+        setAnalysisError(null)
+        await flushUi()
         const result = await api.open_project()
         if (result?.status === 'ok' || result?.status === 'processing') {
           setAudioInfo(result.audio)
@@ -166,10 +171,17 @@ function App() {
             setAnalysisState('analyzing')
           }
           setStatusNote('Project opened')
+        } else if (result?.status === 'cancelled') {
+          setAnalysisState('idle')
         } else if (result?.status === 'error') {
+          setAnalysisState('error')
+          setAnalysisError(result.message ?? 'Failed to open project.')
           reportError('Open Project', result.message ?? 'Failed to open project.')
         }
       } catch (error) {
+        setAnalysisState('error')
+        const message = error instanceof Error ? error.message : 'Failed to open project.'
+        setAnalysisError(message)
         reportException('Open Project', error)
       }
       return
@@ -244,6 +256,7 @@ function App() {
     }
     setAnalysisState('analyzing')
     setAnalysisError(null)
+    await flushUi()
     try {
       const result = await api.open_audio()
       if (result.status === 'ok' || result.status === 'processing') {

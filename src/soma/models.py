@@ -38,6 +38,8 @@ class AnalysisSettings:
     freq_max: float = 20000.0
     bins_per_octave: int = 48
     time_resolution_ms: float = 10.0
+    preview_freq_max: float = 12000.0
+    preview_bins_per_octave: int = 12
     color_map: str = "magma"
     brightness: float = 0.0
     contrast: float = 1.0

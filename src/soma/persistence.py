@@ -50,6 +50,8 @@ def parse_settings(data: dict[str, Any]) -> AnalysisSettings:
         freq_max=float(settings.get("freq_max", 20000.0)),
         bins_per_octave=int(settings.get("bins_per_octave", 48)),
         time_resolution_ms=float(settings.get("time_resolution_ms", 10.0)),
+        preview_freq_max=float(settings.get("preview_freq_max", 12000.0)),
+        preview_bins_per_octave=int(settings.get("preview_bins_per_octave", 12)),
         color_map=str(settings.get("color_map", "magma")),
         brightness=float(settings.get("brightness", 0.0)),
         contrast=float(settings.get("contrast", 1.0)),
