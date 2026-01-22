@@ -5,14 +5,17 @@ import os
 import sys
 import threading
 import warnings
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import BinaryIO
 
+_session_log_dir: Path | None = None
+
 
 def configure_logging(app_name: str = "soma") -> None:
     force_dev = os.environ.get("SOMA_DEV", "").lower() in {"1", "true", "yes"}
-    log_dir = get_log_dir(app_name, force_dev)
+    log_dir = get_session_log_dir(app_name, force_dev)
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{app_name}.log"
 
@@ -92,3 +95,12 @@ def get_log_dir(app_name: str, force_dev: bool | None = None) -> Path:
     if force_dev is None:
         force_dev = os.environ.get("SOMA_DEV", "").lower() in {"1", "true", "yes"}
     return Path.cwd() / "logs" if force_dev else (Path.home() / f".{app_name}" / "logs")
+
+
+def get_session_log_dir(app_name: str, force_dev: bool | None = None) -> Path:
+    global _session_log_dir
+    if _session_log_dir is None:
+        base_dir = get_log_dir(app_name, force_dev)
+        session_stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+        _session_log_dir = base_dir / session_stamp
+    return _session_log_dir

@@ -15,7 +15,7 @@ import webview
 from soma.analysis import resample_audio
 from soma.document import SomaDocument
 from soma.exporter import AudioExportSettings, MpeExportSettings, export_audio, export_mpe
-from soma.logging_utils import configure_logging, get_log_dir
+from soma.logging_utils import configure_logging, get_session_log_dir
 from soma.models import AnalysisSettings, PartialPoint
 
 logger = logging.getLogger(__name__)
@@ -63,7 +63,7 @@ class SomaApi:
     def __init__(self) -> None:
         self._doc = SomaDocument()
         self._last_audio_path: str | None = None
-        self._frontend_log_path = get_log_dir("soma") / "frontend.log"
+        self._frontend_log_path = get_session_log_dir("soma") / "frontend.log"
 
     def health(self) -> dict[str, str]:
         return {"status": "ok"}
@@ -192,6 +192,8 @@ class SomaApi:
             freq_max=float(payload.get("freq_max", 20000.0)),
             bins_per_octave=int(payload.get("bins_per_octave", 48)),
             time_resolution_ms=float(payload.get("time_resolution_ms", 10.0)),
+            preview_freq_max=float(payload.get("preview_freq_max", 12000.0)),
+            preview_bins_per_octave=int(payload.get("preview_bins_per_octave", 12)),
             color_map=str(payload.get("color_map", "magma")),
             brightness=float(payload.get("brightness", 0.0)),
             contrast=float(payload.get("contrast", 1.0)),
@@ -485,12 +487,60 @@ def resolve_frontend_url() -> str:
     return "http://localhost:5173"
 
 
+CONSOLE_HOOK_JS = r"""
+(function () {
+  function safeToString(v) {
+    try {
+      if (typeof v === 'string') return v;
+      return JSON.stringify(v);
+    } catch (e) {
+      try { return String(v); } catch (_) { return '[unstringifiable]'; }
+    }
+  }
+
+  function send(level, args) {
+    try {
+      if (window.pywebview && window.pywebview.api && window.pywebview.api.frontend_log) {
+        const msg = args.map(safeToString).join(' ');
+        window.pywebview.api.frontend_log(level, msg);
+      }
+    } catch (e) {
+      // 送信失敗しても落とさない
+    }
+  }
+
+  ['log', 'info', 'warn', 'error', 'debug'].forEach(function (level) {
+    const orig = console[level];
+    console[level] = function (...args) {
+      send(level, args);
+      return orig.apply(console, args);
+    };
+  });
+
+  window.addEventListener('error', function (e) {
+    const msg = (e && e.message ? e.message : 'Unknown error')
+      + (e && e.filename ? ` @ ${e.filename}:${e.lineno}:${e.colno}` : '');
+    const stack = (e && e.error && e.error.stack) ? ("\n" + e.error.stack) : "";
+    send('error', [msg + stack]);
+  });
+
+  window.addEventListener('unhandledrejection', function (e) {
+    const r = e && e.reason;
+    const msg = r && r.stack ? r.stack : safeToString(r);
+    send('error', ['UnhandledRejection: ' + msg]);
+  });
+
+  console.log('[ConsoleHook] Initialized');
+})();
+"""
+
+
 def main() -> None:
     configure_logging()
     force_dev = os.environ.get("SOMA_DEV", "").lower() in {"1", "true", "yes"}
     url = resolve_frontend_url()
     api = SomaApi()
-    webview.create_window(
+    window = webview.create_window(
         "SOMA",
         url=url,
         js_api=api,
@@ -499,6 +549,13 @@ def main() -> None:
         min_size=(960, 600),
         background_color="#f4f1ed",
     )
+    if window is None:
+        raise RuntimeError("Failed to create app window")
+
+    def inject_console_hook() -> None:
+        window.evaluate_js(CONSOLE_HOOK_JS)
+
+    window.events.loaded += inject_console_hook
     webview.start(debug=force_dev)
 
 

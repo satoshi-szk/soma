@@ -9,6 +9,7 @@ export type HeaderToolbarProps = {
   isLooping: boolean
   mixValue: number
   playbackTimeLabel: string
+  playDisabled: boolean
   onMenuToggle: () => void
   onMenuAction: (label: string) => void
   onToolChange: (tool: ToolId) => void
@@ -28,6 +29,7 @@ export function HeaderToolbar({
   isLooping,
   mixValue,
   playbackTimeLabel,
+  playDisabled,
   onMenuToggle,
   onMenuAction,
   onToolChange,
@@ -91,7 +93,12 @@ export function HeaderToolbar({
           </button>
           <button
             onClick={onPlayToggle}
-            className="rounded-none bg-[var(--accent)] px-4 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-white"
+            className={`rounded-none px-4 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
+              playDisabled
+                ? 'bg-[var(--panel-strong)] text-[var(--muted)]'
+                : 'bg-[var(--accent)] text-white'
+            }`}
+            disabled={playDisabled}
           >
             {isPlaying ? 'Pause' : 'Play'}
           </button>

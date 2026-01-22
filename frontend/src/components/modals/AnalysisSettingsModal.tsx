@@ -38,6 +38,22 @@ export function AnalysisSettingsModal({ settings, onChange, onCancel, onApply }:
             />
           </label>
           <label>
+            Preview Max Frequency (Hz)
+            <input
+              type="number"
+              value={settings.preview_freq_max}
+              onChange={(event) => onChange({ ...settings, preview_freq_max: Number(event.target.value) })}
+            />
+          </label>
+          <label>
+            Preview Bins per Octave
+            <input
+              type="number"
+              value={settings.preview_bins_per_octave}
+              onChange={(event) => onChange({ ...settings, preview_bins_per_octave: Number(event.target.value) })}
+            />
+          </label>
+          <label>
             Time Resolution (ms)
             <input
               type="number"

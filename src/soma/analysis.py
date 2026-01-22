@@ -16,12 +16,10 @@ def load_audio(path: Path, max_duration_sec: float | None = 30.0) -> tuple[Audio
     sample_rate, raw = wavfile.read(path)
     if raw.ndim == 1:
         channels = 1
-        audio = raw
+        audio = _to_float32(raw)
     else:
         channels = raw.shape[1]
-        audio = raw.mean(axis=1)
-
-    audio = _to_float32(audio)
+        audio = _to_float32(raw).mean(axis=1).astype(np.float32)
     total_samples = audio.shape[0]
     truncated = False
     if max_duration_sec is not None:
@@ -60,22 +58,21 @@ def make_spectrogram_preview(
         )
 
     original_duration = audio.shape[0] / float(sample_rate)
-    time_resolution = max(1.0, settings.time_resolution_ms) / 1000.0
-    target_bins = max(width, int(np.ceil(original_duration / time_resolution)))
-    max_bins = width * 4
-    target_bins = min(target_bins, max_bins)
-
-    if audio.shape[0] != target_bins:
-        audio = resample(audio, target_bins)
-        sample_rate = int(np.ceil(target_bins / original_duration))
-
-    target_rate = _preview_sample_rate(sample_rate, settings.freq_max)
+    preview_freq_max = min(settings.preview_freq_max, settings.freq_max)
+    preview_freq_max = max(preview_freq_max, settings.freq_min)
+    preview_bins_per_octave = max(4, int(settings.preview_bins_per_octave))
+    target_rate = _preview_sample_rate(sample_rate, preview_freq_max)
     if target_rate != sample_rate:
         audio = resample_audio(audio, sample_rate, target_rate)[0]
         sample_rate = target_rate
 
-    preview_freq_max = min(settings.freq_max, sample_rate * 0.5)
-    frequencies = _build_frequencies(settings, max_freq=preview_freq_max)
+    preview_freq_max = min(preview_freq_max, sample_rate * 0.5)
+    preview_settings = AnalysisSettings(
+        freq_min=settings.freq_min,
+        freq_max=preview_freq_max,
+        bins_per_octave=preview_bins_per_octave,
+    )
+    frequencies = _build_frequencies(preview_settings, max_freq=preview_freq_max)
     cwt_matrix = _cwt_magnitude(audio, sample_rate, frequencies)
 
     magnitude = _normalize_cwt(cwt_matrix)
@@ -83,6 +80,7 @@ def make_spectrogram_preview(
     resized = resample(time_resampled, height, axis=0)
     resized = resample(resized, width, axis=1)
     normalized = np.clip(resized, 0.0, 1.0)
+    normalized = np.flipud(normalized)
 
     data = (normalized * 255).astype(np.uint8).flatten().tolist()
     duration_sec = original_duration

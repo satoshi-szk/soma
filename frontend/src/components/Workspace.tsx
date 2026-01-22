@@ -1,17 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Circle, Group, Layer, Line, Rect, Shape, Stage, Image as KonvaImage } from 'react-konva'
+import { Circle, Group, Layer, Line, Rect, Shape, Stage, Image as KonvaImage, Text } from 'react-konva'
 import type { AnalysisSettings, Partial, PartialPoint, SpectrogramPreview, ToolId } from '../app/types'
 import { mapColor } from '../app/utils'
+import { SelectionHud } from './SelectionHud'
+import type { KonvaEventObject } from 'konva/lib/Node'
+import type { Context } from 'konva/lib/Context'
 
 export type WorkspaceProps = {
   preview: SpectrogramPreview | null
   settings: AnalysisSettings
   partials: Partial[]
   selectedIds: string[]
+  selectedInfo: Partial | null
   activeTool: ToolId
   analysisState: 'idle' | 'analyzing' | 'error'
   zoom: number
   pan: { x: number; y: number }
+  playbackPosition: number
   onZoomChange: (zoom: number) => void
   onPanChange: (pan: { x: number; y: number }) => void
   onTraceCommit: (trace: Array<[number, number]>) => Promise<boolean>
@@ -21,6 +26,9 @@ export type WorkspaceProps = {
   onUpdatePartial: (id: string, points: PartialPoint[]) => void
   onConnectPick: (point: { time: number; freq: number }) => void
   onOpenAudio: () => void
+  onCursorMove: (cursor: { time: number; freq: number; amp: number | null }) => void
+  onPartialMute: () => void
+  onPartialDelete: () => void
 }
 
 export function Workspace({
@@ -28,10 +36,12 @@ export function Workspace({
   settings,
   partials,
   selectedIds,
+  selectedInfo,
   activeTool,
   analysisState,
   zoom,
   pan,
+  playbackPosition,
   onZoomChange,
   onPanChange,
   onTraceCommit,
@@ -41,6 +51,9 @@ export function Workspace({
   onUpdatePartial,
   onConnectPick,
   onOpenAudio,
+  onCursorMove,
+  onPartialMute,
+  onPartialDelete,
 }: WorkspaceProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [stageSize, setStageSize] = useState({ width: 900, height: 420 })
@@ -49,10 +62,7 @@ export function Workspace({
   const [committedTrace, setCommittedTrace] = useState<PartialPoint[]>([])
   const [selectionBox, setSelectionBox] = useState<null | { x: number; y: number; w: number; h: number }>(null)
   const [draggedPartial, setDraggedPartial] = useState<Partial | null>(null)
-
-  useEffect(() => {
-    setDraggedPartial(null)
-  }, [selectedIds])
+  const [hudPosition, setHudPosition] = useState({ x: 16, y: 16 })
 
   useEffect(() => {
     const observer = new ResizeObserver((entries) => {
@@ -123,11 +133,26 @@ export function Workspace({
     [preview, freqMin, freqMax],
   )
 
+  const freqRulerMarks = useMemo(() => {
+    if (!preview) return []
+    const marks: { freq: number; label: string }[] = []
+    const frequencies = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]
+    for (const freq of frequencies) {
+      if (freq >= freqMin && freq <= freqMax) {
+        const label = freq >= 1000 ? `${freq / 1000}k` : `${freq}`
+        marks.push({ freq, label })
+      }
+    }
+    return marks
+  }, [preview, freqMin, freqMax])
+
+  const contentOffset = useMemo(() => ({ x: 0, y: 28 }), [])
+
   const positionToTimeFreq = useCallback(
     (x: number, y: number) => {
       if (!preview) return { time: 0, freq: freqMin }
-      const contentX = (x - pan.x) / scale.x
-      const contentY = (y - pan.y) / scale.y
+      const contentX = (x - pan.x - contentOffset.x) / scale.x
+      const contentY = (y - pan.y - contentOffset.y) / scale.y
       const time = (contentX / preview.width) * duration
       const logMin = Math.log(freqMin)
       const logMax = Math.log(freqMax)
@@ -135,12 +160,13 @@ export function Workspace({
       const freq = Math.exp(logMax - ratio * (logMax - logMin))
       return { time, freq }
     },
-    [preview, duration, pan, scale, freqMin, freqMax],
+    [preview, duration, pan, scale, freqMin, freqMax, contentOffset],
   )
 
-  const onStageWheel = (event: any) => {
+  const onStageWheel = (event: KonvaEventObject<WheelEvent>) => {
     event.evt.preventDefault()
     const stage = event.target.getStage()
+    if (!stage) return
     const pointer = stage.getPointerPosition()
     if (!pointer) return
     const isZoomGesture = event.evt.ctrlKey || event.evt.metaKey
@@ -172,11 +198,13 @@ export function Workspace({
     onPanChange(newPan)
   }
 
-  const handleStageMouseDown = (event: any) => {
+  const handleStageMouseDown = (event: KonvaEventObject<MouseEvent>) => {
     if (!preview) return
     const stage = event.target.getStage()
+    if (!stage) return
     const pointer = stage.getPointerPosition()
     if (!pointer) return
+    if (pointer.y < rulerHeight) return
     if (activeTool === 'trace' || activeTool === 'erase') {
       const { time, freq } = positionToTimeFreq(pointer.x, pointer.y)
       setTracePath([{ time, freq, amp: 0.5 }])
@@ -188,14 +216,26 @@ export function Workspace({
     }
   }
 
-  const handleStageMouseMove = (event: any) => {
+  const handleStageMouseMove = (event: KonvaEventObject<MouseEvent>) => {
     if (!preview) return
     const stage = event.target.getStage()
+    if (!stage) return
     const pointer = stage.getPointerPosition()
     if (!pointer) return
+    if (pointer.y < rulerHeight) return
+    const cursor = positionToTimeFreq(pointer.x, pointer.y)
+    onCursorMove({ time: cursor.time, freq: cursor.freq, amp: null })
+    setHudPosition((prev) => {
+      const margin = 12
+      const width = 260
+      const height = 120
+      const nextX = Math.min(Math.max(margin, pointer.x + 16), stageSize.width - width - margin)
+      const nextY = Math.min(Math.max(margin, pointer.y + 16), stageSize.height - height - margin)
+      if (prev.x === nextX && prev.y === nextY) return prev
+      return { x: nextX, y: nextY }
+    })
     if (isTracing) {
-      const { time, freq } = positionToTimeFreq(pointer.x, pointer.y)
-      setTracePath((prev) => [...prev, { time, freq, amp: 0.5 }])
+      setTracePath((prev) => [...prev, { ...cursor, amp: 0.5 }])
     }
     if (selectionBox) {
       setSelectionBox((prev) =>
@@ -243,11 +283,13 @@ export function Workspace({
     }
   }
 
-  const handleStageClick = (event: any) => {
+  const handleStageClick = (event: KonvaEventObject<MouseEvent>) => {
     if (!preview) return
     const stage = event.target.getStage()
+    if (!stage) return
     const pointer = stage.getPointerPosition()
     if (!pointer) return
+    if (pointer.y < rulerHeight) return
     const { time, freq } = positionToTimeFreq(pointer.x, pointer.y)
     if (activeTool === 'connect') {
       onConnectPick({ time, freq })
@@ -263,13 +305,13 @@ export function Workspace({
   }, [partials, selectedIds])
 
   const renderPartials = useMemo(() => {
-    if (!draggedPartial) return selectedPartials
+    if (!draggedPartial || !selectedIds.includes(draggedPartial.id)) return selectedPartials
     return selectedPartials.map((partial) => (partial.id === draggedPartial.id ? draggedPartial : partial))
-  }, [selectedPartials, draggedPartial])
+  }, [selectedPartials, draggedPartial, selectedIds])
 
   const drawPartials = useCallback(
-    (context: any) => {
-      const ctx = context as CanvasRenderingContext2D
+    (context: Context) => {
+      const ctx = context
       ctx.save()
       ctx.lineWidth = 1
       for (const partial of partials) {
@@ -297,8 +339,46 @@ export function Workspace({
     setDraggedPartial({ ...partial, points: updated })
   }
 
+  const rulerWidth = 72
+  const rulerHeight = contentOffset.y
+
+  const visibleRange = useMemo(() => {
+    if (!preview) return { start: 0, end: 0 }
+    const start = Math.max(0, ((-pan.x - contentOffset.x) / scale.x / preview.width) * duration)
+    const end = Math.min(
+      duration,
+      ((stageSize.width - pan.x - contentOffset.x) / scale.x / preview.width) * duration,
+    )
+    return { start, end }
+  }, [preview, pan, scale, stageSize, duration, contentOffset])
+
+  const timeMarks = useMemo(() => {
+    if (!preview) return []
+    const range = Math.max(0.001, visibleRange.end - visibleRange.start)
+    const step =
+      range > 120
+        ? 10
+        : range > 60
+          ? 5
+          : range > 30
+            ? 2
+            : range > 10
+              ? 1
+              : range > 5
+                ? 0.5
+                : range > 1
+                  ? 0.25
+                  : 0.1
+    const first = Math.ceil(visibleRange.start / step) * step
+    const marks = []
+    for (let t = first; t <= visibleRange.end; t += step) {
+      marks.push(t)
+    }
+    return marks
+  }, [preview, visibleRange])
+
   return (
-    <div ref={containerRef} className="canvas-surface relative rounded-none p-4 min-h-[520px]">
+    <div ref={containerRef} className="canvas-surface relative h-full min-h-[520px] rounded-none p-4">
       <Stage
         width={stageSize.width}
         height={stageSize.height}
@@ -309,14 +389,35 @@ export function Workspace({
         onClick={handleStageClick}
       >
         <Layer>
-          <Group x={pan.x} y={pan.y} scaleX={scale.x} scaleY={scale.y}>
+          <Rect x={0} y={0} width={stageSize.width} height={rulerHeight} fill="rgba(12, 18, 30, 0.7)" />
+          <Line points={[0, rulerHeight, stageSize.width, rulerHeight]} stroke="rgba(248, 209, 154, 0.35)" />
+          {timeMarks.map((time) => {
+            const x = pan.x + contentOffset.x + timeToX(time) * scale.x
+            if (x < 0 || x > stageSize.width) return null
+            return (
+              <Group key={time}>
+                <Line points={[x, rulerHeight - 6, x, rulerHeight]} stroke="rgba(248, 209, 154, 0.6)" />
+                <Text
+                  x={x + 4}
+                  y={2}
+                  text={`${time.toFixed(time < 1 ? 2 : 1)}s`}
+                  fontSize={9}
+                  fill="rgba(248, 209, 154, 0.75)"
+                  fontFamily="monospace"
+                />
+              </Group>
+            )
+          })}
+        </Layer>
+        <Layer>
+          <Group x={pan.x + contentOffset.x} y={pan.y + contentOffset.y} scaleX={scale.x} scaleY={scale.y}>
             {previewImage ? (
               <KonvaImage image={previewImage} width={preview?.width} height={preview?.height} opacity={0.85} />
             ) : null}
           </Group>
         </Layer>
         <Layer>
-          <Group x={pan.x} y={pan.y} scaleX={scale.x} scaleY={scale.y}>
+          <Group x={pan.x + contentOffset.x} y={pan.y + contentOffset.y} scaleX={scale.x} scaleY={scale.y}>
             <Shape sceneFunc={(ctx, shape) => { drawPartials(ctx); ctx.fillStrokeShape(shape) }} />
             {tracePath.length > 1 ? (
               <Line
@@ -381,6 +482,47 @@ export function Workspace({
             />
           ) : null}
         </Layer>
+        <Layer>
+          <Group x={stageSize.width - rulerWidth} y={pan.y + contentOffset.y} scaleY={scale.y}>
+            {freqRulerMarks.map((mark) => {
+              const y = freqToY(mark.freq)
+              return (
+                <Group key={mark.freq}>
+                  <Line
+                    points={[0, y, 8, y]}
+                    stroke="rgba(248, 209, 154, 0.5)"
+                    strokeWidth={1}
+                  />
+                  <Text
+                    x={12}
+                    y={y}
+                    text={mark.label}
+                    fontSize={10}
+                    fill="rgba(248, 209, 154, 0.8)"
+                    fontFamily="monospace"
+                    scaleY={1 / scale.y}
+                    offsetY={5}
+                  />
+                </Group>
+              )
+            })}
+          </Group>
+        </Layer>
+        <Layer>
+          {preview ? (
+            <Line
+              points={[
+                pan.x + contentOffset.x + timeToX(playbackPosition) * scale.x,
+                rulerHeight,
+                pan.x + contentOffset.x + timeToX(playbackPosition) * scale.x,
+                stageSize.height,
+              ]}
+              stroke="rgba(247, 245, 242, 0.8)"
+              strokeWidth={1}
+              dash={[6, 4]}
+            />
+          ) : null}
+        </Layer>
       </Stage>
       {!preview ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center text-white/70">
@@ -397,6 +539,16 @@ export function Workspace({
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-xs uppercase tracking-[0.24em] text-white">
           Analyzing...
         </div>
+      ) : null}
+      {selectedInfo ? (
+        <SelectionHud
+          selected={selectedInfo}
+          canMute={selectedIds.length === 1}
+          canDelete={selectedIds.length > 0}
+          onMute={onPartialMute}
+          onDelete={onPartialDelete}
+          position={hudPosition}
+        />
       ) : null}
     </div>
   )

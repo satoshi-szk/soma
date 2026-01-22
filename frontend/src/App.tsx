@@ -3,12 +3,11 @@ import { AnalysisSettingsModal } from './components/modals/AnalysisSettingsModal
 import { ExportModal } from './components/modals/ExportModal'
 import { HeaderToolbar } from './components/HeaderToolbar'
 import { Workspace } from './components/Workspace'
-import { SelectionHud } from './components/SelectionHud'
 import { AudioInfoPanel } from './components/AudioInfoPanel'
 import { StatusBar } from './components/StatusBar'
 import { DEFAULT_SETTINGS } from './app/constants'
 import type { AnalysisSettings, AudioInfo, Partial, PartialPoint, SpectrogramPreview, ToolId } from './app/types'
-import { formatDuration, toPartial } from './app/utils'
+import { formatDuration, formatNote, toPartial } from './app/utils'
 import { useApiStatus } from './hooks/useApiStatus'
 
 function App() {
@@ -27,6 +26,11 @@ function App() {
   const [mixValue, setMixValue] = useState(55)
   const [statusNote, setStatusNote] = useState<string | null>(null)
   const [playbackPosition, setPlaybackPosition] = useState(0)
+  const [cursorInfo, setCursorInfo] = useState<{ time: number; freq: number; amp: number | null }>({
+    time: 0,
+    freq: 440,
+    amp: null,
+  })
   const [selection, setSelection] = useState<string[]>([])
   const [showAnalysisModal, setShowAnalysisModal] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
@@ -54,6 +58,8 @@ function App() {
     setStatusNote(detail)
     console.error(detail, error)
   }, [])
+
+  const flushUi = useCallback(() => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())), [])
 
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setReady(true))
@@ -152,6 +158,9 @@ function App() {
     }
     if (label === 'Open Project...') {
       try {
+        setAnalysisState('analyzing')
+        setAnalysisError(null)
+        await flushUi()
         const result = await api.open_project()
         if (result?.status === 'ok' || result?.status === 'processing') {
           setAudioInfo(result.audio)
@@ -162,10 +171,17 @@ function App() {
             setAnalysisState('analyzing')
           }
           setStatusNote('Project opened')
+        } else if (result?.status === 'cancelled') {
+          setAnalysisState('idle')
         } else if (result?.status === 'error') {
+          setAnalysisState('error')
+          setAnalysisError(result.message ?? 'Failed to open project.')
           reportError('Open Project', result.message ?? 'Failed to open project.')
         }
       } catch (error) {
+        setAnalysisState('error')
+        const message = error instanceof Error ? error.message : 'Failed to open project.'
+        setAnalysisError(message)
         reportException('Open Project', error)
       }
       return
@@ -240,6 +256,7 @@ function App() {
     }
     setAnalysisState('analyzing')
     setAnalysisError(null)
+    await flushUi()
     try {
       const result = await api.open_audio()
       if (result.status === 'ok' || result.status === 'processing') {
@@ -523,6 +540,7 @@ function App() {
   }, [handleKeyDown])
 
   const handlePlayToggle = async () => {
+    if (analysisState === 'analyzing') return
     const api = window.pywebview?.api
     if (!api?.play || !api?.pause) {
       reportError('Playback', 'API not available')
@@ -617,9 +635,16 @@ function App() {
     return partials.find((partial) => partial.id === selection[0]) ?? null
   }, [selection, partials])
 
+  const cursorLabel = useMemo(() => {
+    if (!preview) return 'T: -- | F: -- | A: --dB'
+    const note = formatNote(cursorInfo.freq)
+    const ampLabel = cursorInfo.amp === null ? '--dB' : `${cursorInfo.amp.toFixed(1)}dB`
+    return `T: ${cursorInfo.time.toFixed(2)}s | F: ${cursorInfo.freq.toFixed(1)}Hz (${note}) | A: ${ampLabel}`
+  }, [cursorInfo, preview])
+
   return (
-    <div className={`page ${ready ? 'is-ready' : ''}`}>
-      <div className="mx-auto flex min-h-screen w-full max-w-[1600px] flex-col gap-4 px-4 pb-6 pt-6 sm:px-6">
+    <div className={`page ${ready ? 'is-ready' : ''} h-screen`}>
+      <div className="mx-auto flex h-full w-full max-w-none flex-col gap-4 px-4 pb-6 pt-6 sm:px-6">
         <HeaderToolbar
           apiBadge={apiBadge}
           menuOpen={menuOpen}
@@ -637,24 +662,27 @@ function App() {
           onMixChange={setMixValue}
           onExport={() => setShowExportModal(true)}
           menuRef={menuRef}
+          playDisabled={analysisState === 'analyzing'}
         />
 
-        <main className="flex flex-1 flex-col gap-4">
-          <section className="panel rounded-none px-4 py-4">
+        <main className="flex h-full flex-1 min-h-0 flex-col gap-4">
+          <section className="panel flex flex-1 min-h-0 flex-col rounded-none px-4 py-4">
             <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.22em] text-[var(--muted)]">
               <span>Workspace</span>
               <span className="font-mono text-[10px]">Zoom {Math.round(zoom * 100)}%</span>
             </div>
-            <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_72px]">
+            <div className="mt-3 flex-1 min-h-0 h-full">
               <Workspace
                 preview={preview}
                 settings={settings}
                 partials={partials}
                 selectedIds={selection}
+                selectedInfo={selectedInfo}
                 activeTool={activeTool}
                 analysisState={analysisState}
                 zoom={zoom}
                 pan={pan}
+                playbackPosition={playbackPosition}
                 onZoomChange={setZoom}
                 onPanChange={setPan}
                 onTraceCommit={handleTraceCommit}
@@ -664,34 +692,19 @@ function App() {
                 onUpdatePartial={handleUpdatePartial}
                 onConnectPick={handleConnectPick}
                 onOpenAudio={openAudio}
+                onCursorMove={setCursorInfo}
+                onPartialMute={handlePartialMute}
+                onPartialDelete={handlePartialDelete}
               />
-              <div className="panel flex flex-col items-center justify-between rounded-none px-3 py-4 text-[10px] uppercase tracking-[0.24em] text-[var(--muted)]">
-                <span>Freq</span>
-                <div className="flex flex-col items-center gap-3 font-mono text-[10px] text-[var(--accent-strong)]">
-                  <span>{Math.round((preview?.freq_max ?? settings.freq_max) / 1000)}k</span>
-                  <span>{Math.round((preview?.freq_max ?? settings.freq_max) / 5000)}k</span>
-                  <span>1k</span>
-                  <span>200</span>
-                  <span>50</span>
-                </div>
-                <span>Hz</span>
-              </div>
             </div>
           </section>
 
-          <section className="grid gap-3 lg:grid-cols-[1.2fr_1fr]">
-            <SelectionHud
-              selected={selectedInfo}
-              canMute={selection.length === 1}
-              canDelete={selection.length > 0}
-              onMute={handlePartialMute}
-              onDelete={handlePartialDelete}
-            />
+          <section>
             <AudioInfoPanel audioInfo={audioInfo} analysisError={analysisError} statusNote={statusNote} />
           </section>
         </main>
 
-        <StatusBar statusLabel={statusLabel} statusNote={statusNote} />
+        <StatusBar statusLabel={statusLabel} cursorLabel={cursorLabel} statusNote={statusNote} />
       </div>
 
       {showAnalysisModal ? (
