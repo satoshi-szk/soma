@@ -532,11 +532,11 @@ function App() {
     if (key === 'p') setActiveTool('trace')
     if (key === 'e') setActiveTool('erase')
     if (key === 'c') setActiveTool('connect')
-    if (key === 'z' && (event.metaKey || event.ctrlKey)) {
+    if (key === 'z' && (event.metaKey || event.ctrlKey) && !event.shiftKey) {
       event.preventDefault()
       void undo()
     }
-    if (key === 'y' && (event.metaKey || event.ctrlKey)) {
+    if (key === 'z' && event.shiftKey && (event.metaKey || event.ctrlKey)) {
       event.preventDefault()
       void redo()
     }
