@@ -16,12 +16,10 @@ def load_audio(path: Path, max_duration_sec: float | None = 30.0) -> tuple[Audio
     sample_rate, raw = wavfile.read(path)
     if raw.ndim == 1:
         channels = 1
-        audio = raw
+        audio = _to_float32(raw)
     else:
         channels = raw.shape[1]
-        audio = raw.mean(axis=1)
-
-    audio = _to_float32(audio)
+        audio = _to_float32(raw).mean(axis=1).astype(np.float32)
     total_samples = audio.shape[0]
     truncated = False
     if max_duration_sec is not None:

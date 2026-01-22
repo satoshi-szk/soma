@@ -30,6 +30,20 @@ def test_load_audio_truncates(tmp_path: Path) -> None:
     assert audio.shape[0] <= int(sample_rate * 0.5)
 
 
+def test_load_audio_normalizes_stereo_int32(tmp_path: Path) -> None:
+    path = tmp_path / "stereo.wav"
+    sample_rate = 44100
+    peak = np.iinfo(np.int32).max
+    data = np.full((10, 2), peak, dtype=np.int32)
+    _write_wav(path, sample_rate, data)
+
+    _info, audio = load_audio(path, max_duration_sec=None)
+
+    assert audio.ndim == 1
+    assert audio.max() <= 1.0
+    assert audio.min() >= -1.0
+
+
 def test_make_spectrogram_preview() -> None:
     sample_rate = 44100
     t = np.linspace(0, 1.0, sample_rate, endpoint=False)
