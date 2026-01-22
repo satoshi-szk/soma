@@ -45,6 +45,36 @@ def test_make_spectrogram_preview() -> None:
     assert preview.freq_max >= 10000.0
 
 
+def test_make_spectrogram_preview_flips_vertical(monkeypatch: pytest.MonkeyPatch) -> None:
+    from soma import analysis
+
+    def fake_build_frequencies(_: AnalysisSettings, max_freq: float | None = None) -> np.ndarray:
+        return np.array([100.0, 200.0], dtype=np.float32)
+
+    def fake_cwt_magnitude(
+        _audio: np.ndarray, _sample_rate: float, _frequencies: np.ndarray
+    ) -> np.ndarray:
+        return np.array([[0.0, 0.25], [0.5, 1.0]], dtype=np.float32)
+
+    def fake_normalize(magnitude: np.ndarray) -> np.ndarray:
+        return magnitude
+
+    def fake_resample(data: np.ndarray, _num: int, axis: int = 0) -> np.ndarray:
+        return data
+
+    monkeypatch.setattr(analysis, "_build_frequencies", fake_build_frequencies)
+    monkeypatch.setattr(analysis, "_cwt_magnitude", fake_cwt_magnitude)
+    monkeypatch.setattr(analysis, "_normalize_cwt", fake_normalize)
+    monkeypatch.setattr(analysis, "resample", fake_resample)
+
+    audio = np.array([0.1], dtype=np.float32)
+    settings = AnalysisSettings()
+
+    preview = analysis.make_spectrogram_preview(audio, 1000, settings, width=2, height=2)
+
+    assert preview.data == [127, 255, 0, 63]
+
+
 def test_snap_trace_returns_points() -> None:
     sample_rate = 44100
     duration = 0.5

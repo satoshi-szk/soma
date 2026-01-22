@@ -82,6 +82,7 @@ def make_spectrogram_preview(
     resized = resample(time_resampled, height, axis=0)
     resized = resample(resized, width, axis=1)
     normalized = np.clip(resized, 0.0, 1.0)
+    normalized = np.flipud(normalized)
 
     data = (normalized * 255).astype(np.uint8).flatten().tolist()
     duration_sec = original_duration
