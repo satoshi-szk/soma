@@ -1,0 +1,34 @@
+import { useEffect, useCallback } from 'react'
+import type { ToolId } from '../app/types'
+
+type Options = {
+  onToolChange: (tool: ToolId) => void
+  onUndo: () => void
+  onRedo: () => void
+}
+
+export function useKeyboardShortcuts({ onToolChange, onUndo, onRedo }: Options) {
+  const handleKeyDown = useCallback(
+    (event: KeyboardEvent) => {
+      const key = event.key.toLowerCase()
+      if (key === 'v') onToolChange('select')
+      if (key === 'p') onToolChange('trace')
+      if (key === 'e') onToolChange('erase')
+      if (key === 'c') onToolChange('connect')
+      if (key === 'z' && (event.metaKey || event.ctrlKey) && !event.shiftKey) {
+        event.preventDefault()
+        onUndo()
+      }
+      if (key === 'z' && event.shiftKey && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault()
+        onRedo()
+      }
+    },
+    [onToolChange, onUndo, onRedo]
+  )
+
+  useEffect(() => {
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [handleKeyDown])
+}
