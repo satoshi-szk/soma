@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from soma.models import AnalysisSettings, Partial, PartialPoint, ProjectMeta, SourceInfo
+from soma.models import AnalysisSettings, Partial, PartialPoint, ProjectMeta, SourceInfo, generate_bright_color
 
 
 def compute_md5(path: Path) -> str:
@@ -83,11 +84,22 @@ def parse_partials(data: dict[str, Any]) -> list[Partial]:
             if not isinstance(raw, (list, tuple)) or len(raw) < 3:
                 continue
             points.append(PartialPoint(time=float(raw[0]), freq=float(raw[1]), amp=float(raw[2])))
+        color_raw = entry.get("color")
+        color = _parse_color(color_raw)
         partials.append(
             Partial(
                 id=str(entry.get("id", "")),
                 points=points,
                 is_muted=bool(entry.get("is_muted", False)),
+                color=color,
             )
         )
     return partials
+
+
+def _parse_color(value: Any) -> str:
+    if isinstance(value, str):
+        cleaned = value.strip()
+        if re.fullmatch(r"#?[0-9a-fA-F]{6}", cleaned):
+            return cleaned if cleaned.startswith("#") else f"#{cleaned}"
+    return generate_bright_color()

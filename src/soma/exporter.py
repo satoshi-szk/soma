@@ -82,16 +82,10 @@ def _build_mpe_file(partials: list[Partial], settings: MpeExportSettings) -> Mid
     midi.tracks.append(master)
 
     events: list[tuple[float, Message]] = []
+    amp_reference = _max_amp(partials)
     for idx, partial in enumerate(partials):
         channel = (idx % 15) + 1
-        points = sorted(partial.points, key=lambda p: p.time)
-        start_time = points[0].time
-        end_time = points[-1].time
-        midi_note = _freq_to_midi(points[0].freq)
-        velocity = _amp_to_velocity(points[0].amp)
-        events.append((start_time, Message("note_on", note=midi_note, velocity=velocity, channel=channel)))
-        events.append((end_time, Message("note_off", note=midi_note, velocity=0, channel=channel)))
-        events.extend(_automation_events(points, channel, midi_note, settings))
+        events.extend(_partial_events(partial, channel, settings, amp_reference))
 
     track = MidiTrack()
     track.extend(_pitch_bend_rpn_messages(0, settings.pitch_bend_range))
@@ -110,22 +104,36 @@ def _build_mpe_file(partials: list[Partial], settings: MpeExportSettings) -> Mid
     return midi
 
 
-def _automation_events(
-    points: list,
+def _partial_events(
+    partial: Partial,
     channel: int,
-    midi_note: int,
     settings: MpeExportSettings,
+    amp_reference: float,
 ) -> list[tuple[float, Message]]:
+    points = sorted(partial.points, key=lambda p: p.time)
+    if not points:
+        return []
     events: list[tuple[float, Message]] = []
+    current_note = _freq_to_midi(points[0].freq)
+    velocity = _amp_to_velocity(_normalize_amp(points[0].amp, amp_reference))
+    events.append((points[0].time, Message("note_on", note=current_note, velocity=velocity, channel=channel)))
+
     for point in points:
-        pitch_bend = _freq_to_pitch_bend(point.freq, midi_note, settings.pitch_bend_range)
+        if _needs_retrigger(point.freq, current_note, settings.pitch_bend_range):
+            events.append((point.time, Message("note_off", note=current_note, velocity=0, channel=channel)))
+            current_note = _freq_to_midi(point.freq)
+            velocity = _amp_to_velocity(_normalize_amp(point.amp, amp_reference))
+            events.append((point.time, Message("note_on", note=current_note, velocity=velocity, channel=channel)))
+        pitch_bend = _freq_to_pitch_bend(point.freq, current_note, settings.pitch_bend_range)
+        normalized_amp = _normalize_amp(point.amp, amp_reference)
         events.append((point.time, Message("pitchwheel", pitch=pitch_bend, channel=channel)))
         if settings.amplitude_mapping == "pressure":
-            events.append((point.time, Message("aftertouch", value=_amp_to_cc(point.amp), channel=channel)))
+            events.append((point.time, Message("aftertouch", value=_amp_to_cc(normalized_amp), channel=channel)))
         elif settings.amplitude_mapping == "cc74":
             events.append(
-                (point.time, Message("control_change", control=74, value=_amp_to_cc(point.amp), channel=channel))
+                (point.time, Message("control_change", control=74, value=_amp_to_cc(normalized_amp), channel=channel))
             )
+    events.append((points[-1].time, Message("note_off", note=current_note, velocity=0, channel=channel)))
     return events
 
 
@@ -170,19 +178,47 @@ def _freq_to_midi(freq: float) -> int:
     return int(np.clip(np.round(69 + 12 * np.log2(freq / 440.0)), 0, 127))
 
 
-def _freq_to_pitch_bend(freq: float, midi_note: int, pitch_bend_range: int) -> int:
+def _max_amp(partials: list[Partial]) -> float:
+    max_amp = 0.0
+    for partial in partials:
+        for point in partial.points:
+            if point.amp > max_amp:
+                max_amp = point.amp
+    return max_amp if max_amp > 0 else 1.0
+
+
+def _normalize_amp(amp: float, amp_reference: float) -> float:
+    return float(np.clip(amp / amp_reference, 0.0, 1.0)) if amp_reference > 0 else 0.0
+
+
+def _needs_retrigger(freq: float, midi_note: int, pitch_bend_range: int) -> bool:
+    offset = _freq_to_semitone_offset(freq, midi_note)
+    return abs(offset) > pitch_bend_range
+
+
+def _freq_to_semitone_offset(freq: float, midi_note: int) -> float:
     target = 69 + 12 * np.log2(freq / 440.0)
-    offset = target - midi_note
+    return float(target - midi_note)
+
+
+def _freq_to_pitch_bend(freq: float, midi_note: int, pitch_bend_range: int) -> int:
+    offset = _freq_to_semitone_offset(freq, midi_note)
     normalized = np.clip(offset / pitch_bend_range, -1.0, 1.0)
     return int(normalized * 8191)
 
 
 def _amp_to_velocity(amp: float) -> int:
-    return int(np.clip(round(amp * 127), 1, 127))
+    return int(np.clip(_amp_to_midi_db(amp), 1, 127))
 
 
 def _amp_to_cc(amp: float) -> int:
-    return int(np.clip(round(amp * 127), 0, 127))
+    return int(np.clip(_amp_to_midi_db(amp), 0, 127))
+
+
+def _amp_to_midi_db(amp: float, min_db: float = -60.0) -> int:
+    db = min_db if amp <= 0 else max(min_db, 20.0 * np.log10(amp))
+    normalized = (db - min_db) / max(1e-6, -min_db)
+    return int(round(np.clip(normalized, 0.0, 1.0) * 127))
 
 
 def _convert_bit_depth(data: np.ndarray, bit_depth: int) -> np.ndarray:

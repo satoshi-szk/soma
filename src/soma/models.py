@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import colorsys
+import random
 from collections.abc import Iterable
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
@@ -63,6 +65,7 @@ class Partial:
     id: str
     points: list[PartialPoint]
     is_muted: bool = False
+    color: str = field(default_factory=lambda: generate_bright_color())
 
     def sorted_points(self) -> list[PartialPoint]:
         return sorted(self.points, key=lambda p: p.time)
@@ -71,12 +74,21 @@ class Partial:
         return {
             "id": self.id,
             "is_muted": self.is_muted,
+            "color": self.color,
             "points": [point.to_list() for point in self.sorted_points()],
         }
 
     @classmethod
-    def from_points(cls, partial_id: str, points: Iterable[PartialPoint]) -> Partial:
-        return cls(id=partial_id, points=list(points))
+    def from_points(cls, partial_id: str, points: Iterable[PartialPoint], color: str | None = None) -> Partial:
+        return cls(id=partial_id, points=list(points), color=color or generate_bright_color())
+
+
+def generate_bright_color() -> str:
+    hue = random.random()
+    saturation = random.uniform(0.6, 0.95)
+    value = random.uniform(0.85, 1.0)
+    r, g, b = colorsys.hsv_to_rgb(hue, saturation, value)
+    return f"#{int(r * 255):02x}{int(g * 255):02x}{int(b * 255):02x}"
 
 
 @dataclass(frozen=True)

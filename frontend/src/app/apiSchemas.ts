@@ -35,6 +35,7 @@ const partialPointTupleSchema = z.tuple([z.number(), z.number(), z.number()])
 const partialSchema = z.object({
   id: z.string(),
   is_muted: z.boolean(),
+  color: z.string(),
   points: z.array(partialPointTupleSchema),
 })
 

@@ -6,6 +6,17 @@ import { SelectionHud } from './SelectionHud'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import type { Context } from 'konva/lib/Context'
 
+const hexToRgba = (hex: string, alpha: number) => {
+  const cleaned = hex.trim().replace('#', '')
+  if (!/^[0-9a-fA-F]{6}$/.test(cleaned)) {
+    return `rgba(248, 209, 154, ${alpha})`
+  }
+  const r = parseInt(cleaned.slice(0, 2), 16)
+  const g = parseInt(cleaned.slice(2, 4), 16)
+  const b = parseInt(cleaned.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
 export type WorkspaceProps = {
   preview: SpectrogramPreview | null
   settings: AnalysisSettings
@@ -14,6 +25,7 @@ export type WorkspaceProps = {
   selectedInfo: Partial | null
   activeTool: ToolId
   analysisState: 'idle' | 'analyzing' | 'error'
+  isSnapping: boolean
   zoom: number
   pan: { x: number; y: number }
   playbackPosition: number
@@ -39,6 +51,7 @@ export function Workspace({
   selectedInfo,
   activeTool,
   analysisState,
+  isSnapping,
   zoom,
   pan,
   playbackPosition,
@@ -63,6 +76,8 @@ export function Workspace({
   const [selectionBox, setSelectionBox] = useState<null | { x: number; y: number; w: number; h: number }>(null)
   const [draggedPartial, setDraggedPartial] = useState<Partial | null>(null)
   const [hudPosition, setHudPosition] = useState({ x: 16, y: 16 })
+  const automationLaneHeight = 120
+  const automationPadding = { top: 18, bottom: 16 }
 
   useEffect(() => {
     const observer = new ResizeObserver((entries) => {
@@ -76,6 +91,7 @@ export function Workspace({
     }
     return () => observer.disconnect()
   }, [])
+
 
   const previewImage = useMemo(() => {
     if (!preview) return null
@@ -100,13 +116,19 @@ export function Workspace({
     return canvas
   }, [preview, settings])
 
+  const contentOffset = useMemo(() => ({ x: 0, y: 28 }), [])
+  const spectrogramAreaHeight = Math.max(1, stageSize.height - automationLaneHeight)
+  const automationContentHeight = Math.max(1, automationLaneHeight - automationPadding.top - automationPadding.bottom)
+  const automationTop = spectrogramAreaHeight
+  const automationContentTop = automationTop + automationPadding.top
+
   const baseScale = useMemo(() => {
     if (!preview) return { x: 1, y: 1 }
     return {
       x: stageSize.width / preview.width,
-      y: stageSize.height / preview.height,
+      y: Math.max(1, spectrogramAreaHeight - contentOffset.y) / preview.height,
     }
-  }, [preview, stageSize])
+  }, [preview, stageSize, spectrogramAreaHeight, contentOffset])
 
   const scale = useMemo(() => ({ x: baseScale.x * zoom, y: baseScale.y * zoom }), [baseScale, zoom])
 
@@ -145,8 +167,6 @@ export function Workspace({
     }
     return marks
   }, [preview, freqMin, freqMax])
-
-  const contentOffset = useMemo(() => ({ x: 0, y: 28 }), [])
 
   const positionToTimeFreq = useCallback(
     (x: number, y: number) => {
@@ -204,7 +224,7 @@ export function Workspace({
     if (!stage) return
     const pointer = stage.getPointerPosition()
     if (!pointer) return
-    if (pointer.y < rulerHeight) return
+    if (pointer.y < rulerHeight || pointer.y > spectrogramAreaHeight) return
     if (activeTool === 'trace' || activeTool === 'erase') {
       const { time, freq } = positionToTimeFreq(pointer.x, pointer.y)
       setTracePath([{ time, freq, amp: 0.5 }])
@@ -222,7 +242,7 @@ export function Workspace({
     if (!stage) return
     const pointer = stage.getPointerPosition()
     if (!pointer) return
-    if (pointer.y < rulerHeight) return
+    if (pointer.y < rulerHeight || pointer.y > spectrogramAreaHeight) return
     const cursor = positionToTimeFreq(pointer.x, pointer.y)
     onCursorMove({ time: cursor.time, freq: cursor.freq, amp: null })
     setHudPosition((prev) => {
@@ -289,7 +309,7 @@ export function Workspace({
     if (!stage) return
     const pointer = stage.getPointerPosition()
     if (!pointer) return
-    if (pointer.y < rulerHeight) return
+    if (pointer.y < rulerHeight || pointer.y > spectrogramAreaHeight) return
     const { time, freq } = positionToTimeFreq(pointer.x, pointer.y)
     if (activeTool === 'connect') {
       onConnectPick({ time, freq })
@@ -316,7 +336,7 @@ export function Workspace({
       ctx.lineWidth = 1
       for (const partial of partials) {
         if (partial.points.length < 2) continue
-        ctx.strokeStyle = partial.is_muted ? 'rgba(248, 209, 154, 0.3)' : '#f8d19a'
+        ctx.strokeStyle = hexToRgba(partial.color, partial.is_muted ? 0.25 : 0.6)
         ctx.beginPath()
         partial.points.forEach((point, index) => {
           const x = timeToX(point.time)
@@ -341,6 +361,48 @@ export function Workspace({
 
   const rulerWidth = 72
   const rulerHeight = contentOffset.y
+
+  const maxAmp = useMemo(() => {
+    let max = 0
+    for (const partial of partials) {
+      for (const point of partial.points) {
+        if (point.amp > max) {
+          max = point.amp
+        }
+      }
+    }
+    return max > 0 ? max : 1
+  }, [partials])
+
+  const committedTracePath = useMemo(() => {
+    if (committedTrace.length < 2 || !preview) return ''
+    return committedTrace
+      .map((point, index) => {
+        const x = pan.x + contentOffset.x + timeToX(point.time) * scale.x
+        const y = pan.y + contentOffset.y + freqToY(point.freq) * scale.y
+        return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`
+      })
+      .join(' ')
+  }, [committedTrace, preview, pan, contentOffset, timeToX, freqToY, scale])
+
+  const tracePathD = useMemo(() => {
+    if (tracePath.length < 2 || !preview) return ''
+    return tracePath
+      .map((point, index) => {
+        const x = pan.x + contentOffset.x + timeToX(point.time) * scale.x
+        const y = pan.y + contentOffset.y + freqToY(point.freq) * scale.y
+        return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`
+      })
+      .join(' ')
+  }, [tracePath, preview, pan, contentOffset, timeToX, freqToY, scale])
+
+  const ampToLaneY = useCallback(
+    (amp: number) => {
+      const normalized = Math.min(1, Math.max(0, amp / maxAmp))
+      return automationContentHeight - normalized * automationContentHeight
+    },
+    [automationContentHeight, maxAmp],
+  )
 
   const visibleRange = useMemo(() => {
     if (!preview) return { start: 0, end: 0 }
@@ -417,27 +479,45 @@ export function Workspace({
           </Group>
         </Layer>
         <Layer>
-          <Group x={pan.x + contentOffset.x} y={pan.y + contentOffset.y} scaleX={scale.x} scaleY={scale.y}>
-            <Shape sceneFunc={(ctx, shape) => { drawPartials(ctx); ctx.fillStrokeShape(shape) }} />
-            {tracePath.length > 1 ? (
+          <Rect
+            x={0}
+            y={automationTop}
+            width={stageSize.width}
+            height={automationLaneHeight}
+            fill="rgba(10, 14, 20, 0.82)"
+          />
+          <Line
+            points={[0, automationTop, stageSize.width, automationTop]}
+            stroke="rgba(248, 209, 154, 0.25)"
+            strokeWidth={1}
+          />
+          <Text
+            x={12}
+            y={automationTop + 6}
+            text="Partial Amplitude"
+            fontSize={9}
+            fill="rgba(248, 209, 154, 0.7)"
+            fontFamily="monospace"
+          />
+          <Group x={pan.x + contentOffset.x} y={automationContentTop} scaleX={scale.x}>
+            {partials.map((partial) => (
               <Line
-                points={tracePath.flatMap((point) => [timeToX(point.time), freqToY(point.freq)])}
-                stroke="#f59f8b"
-                strokeWidth={1.5}
-              />
-            ) : null}
-            {committedTrace.length > 1 ? (
-              <Line
-                points={committedTrace.flatMap((point) => [timeToX(point.time), freqToY(point.freq)])}
-                stroke="rgba(245, 159, 139, 0.5)"
+                key={`amp-${partial.id}`}
+                points={partial.points.flatMap((point) => [timeToX(point.time), ampToLaneY(point.amp)])}
+                stroke={hexToRgba(partial.color, partial.is_muted ? 0.25 : 0.85)}
                 strokeWidth={1.25}
               />
-            ) : null}
+            ))}
+          </Group>
+        </Layer>
+        <Layer>
+          <Group x={pan.x + contentOffset.x} y={pan.y + contentOffset.y} scaleX={scale.x} scaleY={scale.y}>
+            <Shape sceneFunc={(ctx, shape) => { drawPartials(ctx); ctx.fillStrokeShape(shape) }} />
             {renderPartials.map((partial) => (
               <Line
                 key={partial.id}
                 points={partial.points.flatMap((point) => [timeToX(point.time), freqToY(point.freq)])}
-                stroke="#fdf5d3"
+                stroke={hexToRgba(partial.color, partial.is_muted ? 0.35 : 0.95)}
                 strokeWidth={2}
               />
             ))}
@@ -449,7 +529,7 @@ export function Workspace({
                     x={timeToX(renderPartials[0].points[index].time)}
                     y={freqToY(renderPartials[0].points[index].freq)}
                     radius={4}
-                    fill="#f59f8b"
+                    fill={hexToRgba(renderPartials[0].color, 0.95)}
                     draggable
                     onDragMove={(event) => {
                       const { x, y } = event.target.position()
@@ -524,6 +604,25 @@ export function Workspace({
           ) : null}
         </Layer>
       </Stage>
+      {tracePathD || committedTracePath ? (
+        <svg
+          className="pointer-events-none absolute inset-4"
+          width={stageSize.width}
+          height={stageSize.height}
+          viewBox={`0 0 ${stageSize.width} ${stageSize.height}`}
+        >
+          {tracePathD ? (
+            <path d={tracePathD} fill="none" stroke="#7feeff" strokeWidth={3.75} />
+          ) : null}
+          <path
+            d={committedTracePath}
+            fill="none"
+            stroke={isSnapping ? '#7feeff' : 'rgba(245, 159, 139, 0.5)'}
+            strokeWidth={isSnapping ? 3.75 : 1.25}
+            className={isSnapping ? 'animate-pulse' : ''}
+          />
+        </svg>
+      ) : null}
       {!preview ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center text-white/70">
           <div className="text-xs uppercase tracking-[0.3em]">No Audio Loaded</div>
