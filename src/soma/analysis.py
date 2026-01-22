@@ -73,13 +73,18 @@ def make_spectrogram_preview(
         bins_per_octave=preview_bins_per_octave,
     )
     frequencies = _build_frequencies(preview_settings, max_freq=preview_freq_max)
-    cwt_matrix = _cwt_magnitude(audio, sample_rate, frequencies)
+    cwt_matrix = _cwt_magnitude(
+        audio,
+        sample_rate,
+        frequencies,
+        wavelet_bandwidth=settings.wavelet_bandwidth,
+        wavelet_center_freq=settings.wavelet_center_freq,
+    )
     amp_reference = float(np.max(cwt_matrix)) if cwt_matrix.size else 1.0
 
     magnitude = _normalize_cwt(cwt_matrix)
     time_resampled = resample(magnitude, width, axis=1)
     resized = resample(time_resampled, height, axis=0)
-    resized = resample(resized, width, axis=1)
     normalized = np.clip(resized, 0.0, 1.0)
     normalized = np.flipud(normalized)
 
@@ -154,12 +159,17 @@ def make_viewport_spectrogram(
         bins_per_octave=settings.bins_per_octave,
     )
     frequencies = _build_frequencies(viewport_settings, max_freq=effective_freq_max)
-    cwt_matrix = _cwt_magnitude(audio_segment, sample_rate, frequencies)
+    cwt_matrix = _cwt_magnitude(
+        audio_segment,
+        sample_rate,
+        frequencies,
+        wavelet_bandwidth=settings.wavelet_bandwidth,
+        wavelet_center_freq=settings.wavelet_center_freq,
+    )
     magnitude = _normalize_cwt(cwt_matrix)
 
     time_resampled = resample(magnitude, width, axis=1)
     resized = resample(time_resampled, height, axis=0)
-    resized = resample(resized, width, axis=1)
     normalized = np.clip(resized, 0.0, 1.0)
     normalized = np.flipud(normalized)
 
@@ -229,7 +239,13 @@ def snap_trace(
             )
         )
 
-        magnitude = _cwt_magnitude(window, window_sample_rate, frequencies)
+        magnitude = _cwt_magnitude(
+            window,
+            window_sample_rate,
+            frequencies,
+            wavelet_bandwidth=settings.wavelet_bandwidth,
+            wavelet_center_freq=settings.wavelet_center_freq,
+        )
         center_idx = min(magnitude.shape[1] - 1, window.shape[0] // 2)
         spectrum = magnitude[:, center_idx]
         if spectrum.size == 0:
@@ -289,8 +305,22 @@ def _build_frequencies(settings: AnalysisSettings, max_freq: float | None = None
     return min_freq * (2.0 ** (indices / settings.bins_per_octave))
 
 
-def _cwt_magnitude(audio: np.ndarray, sample_rate: float, frequencies: np.ndarray) -> np.ndarray:
-    wavelet = pywt.ContinuousWavelet("cmor1.5-1.0")
+def _cwt_magnitude(
+    audio: np.ndarray,
+    sample_rate: float,
+    frequencies: np.ndarray,
+    wavelet_bandwidth: float = 8.0,
+    wavelet_center_freq: float = 1.0,
+) -> np.ndarray:
+    # Bandwidth parameter controls time/frequency trade-off.
+    # A larger value yields sharper frequency ridges (at the cost of time smearing),
+    # which better matches typical "thin ridge" spectrogram expectations.
+    bw = float(wavelet_bandwidth)
+    # Keep it in a sensible range; this is a UI-controlled parameter and should never explode.
+    bw = 0.1 if not np.isfinite(bw) or bw <= 0 else min(bw, 64.0)
+    cf = float(wavelet_center_freq)
+    cf = 0.1 if not np.isfinite(cf) or cf <= 0 else min(cf, 16.0)
+    wavelet = pywt.ContinuousWavelet(f"cmor{bw:.1f}-{cf:.1f}")
     center_freq = pywt.central_frequency(wavelet)
     scales = center_freq * sample_rate / frequencies
     coefficients, _ = pywt.cwt(audio, scales, wavelet, sampling_period=1.0 / sample_rate)
@@ -299,10 +329,25 @@ def _cwt_magnitude(audio: np.ndarray, sample_rate: float, frequencies: np.ndarra
 
 
 def _normalize_cwt(magnitude: np.ndarray) -> np.ndarray:
-    log_mag = np.log10(magnitude + 1e-6)
-    log_mag -= float(log_mag.min())
-    log_mag /= float(log_mag.max() + 1e-8)
-    return log_mag
+    """Normalize CWT magnitude for visualization.
+
+    We use a fixed dB range relative to the peak instead of min/max normalization.
+    Min/max tends to lift the noise floor (especially for narrowband signals like a sine),
+    making ridges look unrealistically thick.
+    """
+    if magnitude.size == 0:
+        return np.zeros_like(magnitude, dtype=np.float32)
+
+    # Visual dynamic range in dB (0dB = peak, <= min_db -> black).
+    min_db = -60.0
+    eps = 1e-12
+    max_mag = float(np.max(magnitude))
+    if max_mag <= 0:
+        return np.zeros_like(magnitude, dtype=np.float32)
+
+    db = 20.0 * (np.log10(magnitude.astype(np.float64) + eps) - np.log10(max_mag + eps))
+    normalized = (db - min_db) / (-min_db)
+    return np.asarray(np.clip(normalized, 0.0, 1.0), dtype=np.float32)
 
 
 def _preview_sample_rate(sample_rate: int, freq_max: float) -> int:

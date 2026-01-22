@@ -56,6 +56,8 @@ class AnalysisSettings:
     time_resolution_ms: float = 10.0
     preview_freq_max: float = 12000.0
     preview_bins_per_octave: int = 12
+    wavelet_bandwidth: float = 8.0
+    wavelet_center_freq: float = 2.0
     color_map: str = "magma"
     brightness: float = 0.0
     contrast: float = 1.0

@@ -21,6 +21,8 @@ export const DEFAULT_SETTINGS: AnalysisSettings = {
   time_resolution_ms: 10,
   preview_freq_max: 12000,
   preview_bins_per_octave: 12,
+  wavelet_bandwidth: 8.0,
+  wavelet_center_freq: 2.0,
   color_map: 'magma',
   brightness: 0,
   contrast: 1,

@@ -7,6 +7,8 @@ const analysisSettingsSchema = z.object({
   time_resolution_ms: z.number(),
   preview_freq_max: z.number(),
   preview_bins_per_octave: z.number(),
+  wavelet_bandwidth: z.number(),
+  wavelet_center_freq: z.number(),
   color_map: z.string(),
   brightness: z.number(),
   contrast: z.number(),

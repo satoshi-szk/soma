@@ -7,6 +7,8 @@ export type AnalysisSettings = {
   time_resolution_ms: number
   preview_freq_max: number
   preview_bins_per_octave: number
+  wavelet_bandwidth: number
+  wavelet_center_freq: number
   color_map: string
   brightness: number
   contrast: number

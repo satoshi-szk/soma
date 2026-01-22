@@ -54,6 +54,42 @@ export function AnalysisSettingsModal({ settings, onChange, onCancel, onApply }:
             />
           </label>
           <label>
+            <span className="modal-label-row">
+              Wavelet Bandwidth (cmor)
+              <button
+                type="button"
+                className="modal-help"
+                title="cmorB-C bandwidth (B) = TIME vs FREQUENCY resolution knob. Higher B => thinner frequency ridges but more time smearing. Tune based on what you want to emphasize (transients vs stable tones). Typical range: 2-12."
+              >
+                ?
+              </button>
+            </span>
+            <input
+              type="number"
+              step={0.1}
+              value={settings.wavelet_bandwidth}
+              onChange={(event) => onChange({ ...settings, wavelet_bandwidth: Number(event.target.value) })}
+            />
+          </label>
+          <label>
+            <span className="modal-label-row">
+              Wavelet Center Freq (cmor)
+              <button
+                type="button"
+                className="modal-help"
+                title="cmorB-C center frequency (C). Larger C = faster oscillation and more high-frequency focus. Lower C for low-frequency focus, higher C for high-frequency focus. Typical range: 0.5-3.0."
+              >
+                ?
+              </button>
+            </span>
+            <input
+              type="number"
+              step={0.1}
+              value={settings.wavelet_center_freq}
+              onChange={(event) => onChange({ ...settings, wavelet_center_freq: Number(event.target.value) })}
+            />
+          </label>
+          <label>
             Time Resolution (ms)
             <input
               type="number"

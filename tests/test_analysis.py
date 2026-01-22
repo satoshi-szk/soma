@@ -67,7 +67,11 @@ def test_make_spectrogram_preview_flips_vertical(monkeypatch: pytest.MonkeyPatch
         return np.array([100.0, 200.0], dtype=np.float32)
 
     def fake_cwt_magnitude(
-        _audio: np.ndarray, _sample_rate: float, _frequencies: np.ndarray
+        _audio: np.ndarray,
+        _sample_rate: float,
+        _frequencies: np.ndarray,
+        wavelet_bandwidth: float = 8.0,
+        wavelet_center_freq: float = 1.0,
     ) -> np.ndarray:
         return np.array([[0.0, 0.25], [0.5, 1.0]], dtype=np.float32)
 
@@ -113,7 +117,11 @@ def test_snap_trace_uses_amp_reference(monkeypatch: pytest.MonkeyPatch) -> None:
         return np.array([100.0, 200.0], dtype=np.float32)
 
     def fake_cwt_magnitude(
-        _audio: np.ndarray, _sample_rate: float, _frequencies: np.ndarray
+        _audio: np.ndarray,
+        _sample_rate: float,
+        _frequencies: np.ndarray,
+        wavelet_bandwidth: float = 8.0,
+        wavelet_center_freq: float = 1.0,
     ) -> np.ndarray:
         return np.array([[1.0, 1.0, 1.0, 1.0, 1.0], [2.0, 2.0, 2.0, 2.0, 2.0]], dtype=np.float32)
 
@@ -153,7 +161,13 @@ def test_snap_trace_resamples_to_time_resolution(monkeypatch: pytest.MonkeyPatch
     def fake_build_frequencies(_: AnalysisSettings, max_freq: float | None = None) -> np.ndarray:
         return np.array([100.0, 200.0], dtype=np.float32)
 
-    def fake_cwt_magnitude(audio: np.ndarray, _sample_rate: float, _frequencies: np.ndarray) -> np.ndarray:
+    def fake_cwt_magnitude(
+        audio: np.ndarray,
+        _sample_rate: float,
+        _frequencies: np.ndarray,
+        wavelet_bandwidth: float = 8.0,
+        wavelet_center_freq: float = 1.0,
+    ) -> np.ndarray:
         return np.vstack([np.ones(audio.size, dtype=np.float32), np.ones(audio.size, dtype=np.float32) * 2.0])
 
     def fake_preview_sample_rate(sample_rate: int, _freq_max: float) -> int:
@@ -170,3 +184,34 @@ def test_snap_trace_resamples_to_time_resolution(monkeypatch: pytest.MonkeyPatch
     points = analysis.snap_trace(audio, 1000, settings, trace, max_points=10)
 
     assert len(points) == 5
+
+
+def test_cwt_ridge_is_not_too_broad_for_sine() -> None:
+    """Guardrail for visualization/peak-finding defaults.
+
+    A pure sine should not show a strong ridge an octave above the fundamental.
+    """
+    from soma import analysis
+
+    sample_rate = 44100
+    duration = 1.0
+    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+    audio = (0.8 * np.sin(2 * math.pi * 1000.0 * t)).astype(np.float32)
+    settings = AnalysisSettings(freq_min=200.0, freq_max=8000.0, bins_per_octave=48)
+
+    frequencies = analysis._build_frequencies(settings, max_freq=settings.freq_max)
+    magnitude = analysis._cwt_magnitude(
+        audio,
+        sample_rate,
+        frequencies,
+        wavelet_bandwidth=settings.wavelet_bandwidth,
+        wavelet_center_freq=settings.wavelet_center_freq,
+    )
+    spectrum = magnitude[:, magnitude.shape[1] // 2]
+    peak = float(np.max(spectrum))
+    assert peak > 0
+
+    # Compare level at ~2kHz vs peak.
+    idx_2k = int(np.argmin(np.abs(frequencies - 2000.0)))
+    rel_db = 20.0 * math.log10(float(spectrum[idx_2k]) / peak + 1e-12)
+    assert rel_db < -45.0
