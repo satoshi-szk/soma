@@ -34,32 +34,36 @@ class ProjectState:
     source_info: SourceInfo | None = None
 
 
+@dataclass
+class HistoryEntry:
+    before: ProjectState
+    after: ProjectState
+
+
 class UndoRedoManager:
     def __init__(self) -> None:
-        self._undo: list[ProjectState] = []
-        self._redo: list[ProjectState] = []
+        self._undo: list[HistoryEntry] = []
+        self._redo: list[HistoryEntry] = []
 
-    def push(self, state: ProjectState) -> None:
-        self._undo.append(state)
+    def push(self, entry: HistoryEntry) -> None:
+        self._undo.append(entry)
         self._redo.clear()
 
-    def undo(self) -> ProjectState | None:
+    def undo(self) -> HistoryEntry | None:
         if not self._undo:
             return None
-        state = self._undo.pop()
-        return state
+        return self._undo.pop()
 
-    def redo(self) -> ProjectState | None:
+    def redo(self) -> HistoryEntry | None:
         if not self._redo:
             return None
-        state = self._redo.pop()
-        return state
+        return self._redo.pop()
 
-    def push_redo(self, state: ProjectState) -> None:
-        self._redo.append(state)
+    def push_redo(self, entry: HistoryEntry) -> None:
+        self._redo.append(entry)
 
-    def push_undo(self, state: ProjectState) -> None:
-        self._undo.append(state)
+    def push_undo(self, entry: HistoryEntry) -> None:
+        self._undo.append(entry)
 
     def clear(self) -> None:
         self._undo.clear()
@@ -116,11 +120,15 @@ class SomaDocument:
         return info
 
     def set_settings(self, settings: AnalysisSettings) -> SpectrogramPreview | None:
-        self._push_settings()
+        before = self._snapshot_state(include_settings=True)
         self.settings = settings
         if self.audio_data is None or self.audio_info is None:
+            after = self._snapshot_state(include_settings=True)
+            self.undo_manager.push(HistoryEntry(before=before, after=after))
             return None
         self.start_preview_async()
+        after = self._snapshot_state(include_settings=True)
+        self.undo_manager.push(HistoryEntry(before=before, after=after))
         return None
 
     def snap_partial(self, trace: list[tuple[float, float]]) -> Partial | None:
@@ -131,9 +139,11 @@ class SomaDocument:
             return None
         partial_id = str(uuid.uuid4())
         partial = Partial(id=partial_id, points=snapped)
-        self._push_state([partial_id])
+        before = self._snapshot_state(partial_ids=[partial_id])
         self.store.add(partial)
         self.synth.apply_partial(partial)
+        after = self._snapshot_state(partial_ids=[partial_id])
+        self.undo_manager.push(HistoryEntry(before=before, after=after))
         return partial
 
     def erase_path(self, trace: list[tuple[float, float]], radius_hz: float = 40.0) -> list[Partial]:
@@ -147,43 +157,56 @@ class SomaDocument:
                 affected.append(partial)
         if not affected:
             return []
+        segments: list[Partial] = []
+        for partial in affected:
+            segments.extend(_split_partial(partial, trace, radius_hz))
         removed_ids = [p.id for p in affected]
-        self._push_state(removed_ids)
+        added_ids = [segment.id for segment in segments]
+        tracked_ids = removed_ids + added_ids
+        before = self._snapshot_state(partial_ids=tracked_ids)
         for partial in affected:
             self.store.remove(partial.id)
             self.synth.remove_partial(partial.id)
-            for segment in _split_partial(partial, trace, radius_hz):
-                self.store.add(segment)
-                self.synth.apply_partial(segment)
+        for segment in segments:
+            self.store.add(segment)
+            self.synth.apply_partial(segment)
+        after = self._snapshot_state(partial_ids=tracked_ids)
+        self.undo_manager.push(HistoryEntry(before=before, after=after))
         return self.store.all()
 
     def toggle_mute(self, partial_id: str) -> Partial | None:
         partial = self.store.get(partial_id)
         if partial is None:
             return None
-        self._push_state([partial_id])
+        before = self._snapshot_state(partial_ids=[partial_id])
         partial.is_muted = not partial.is_muted
         self.store.update(partial)
         self.synth.apply_partial(partial)
+        after = self._snapshot_state(partial_ids=[partial_id])
+        self.undo_manager.push(HistoryEntry(before=before, after=after))
         return partial
 
     def delete_partials(self, partial_ids: Iterable[str]) -> None:
         ids = list(partial_ids)
         if not ids:
             return
-        self._push_state(ids)
+        before = self._snapshot_state(partial_ids=ids)
         for partial_id in ids:
             self.store.remove(partial_id)
             self.synth.remove_partial(partial_id)
+        after = self._snapshot_state(partial_ids=ids)
+        self.undo_manager.push(HistoryEntry(before=before, after=after))
 
     def update_partial_points(self, partial_id: str, points: list[PartialPoint]) -> Partial | None:
         partial = self.store.get(partial_id)
         if partial is None:
             return None
-        self._push_state([partial_id])
+        before = self._snapshot_state(partial_ids=[partial_id])
         updated = Partial(id=partial_id, points=points, is_muted=partial.is_muted)
         self.store.update(updated)
         self.synth.apply_partial(updated)
+        after = self._snapshot_state(partial_ids=[partial_id])
+        self.undo_manager.push(HistoryEntry(before=before, after=after))
         return updated
 
     def merge_partials(self, first_id: str, second_id: str) -> Partial | None:
@@ -191,15 +214,19 @@ class SomaDocument:
         second = self.store.get(second_id)
         if first is None or second is None:
             return None
-        self._push_state([first_id, second_id])
+        merged_id = str(uuid.uuid4())
+        tracked_ids = [first_id, second_id, merged_id]
+        before = self._snapshot_state(partial_ids=tracked_ids)
         merged_points = sorted(first.points + second.points, key=lambda p: p.time)
-        merged = Partial(id=str(uuid.uuid4()), points=merged_points)
+        merged = Partial(id=merged_id, points=merged_points)
         self.store.remove(first_id)
         self.store.remove(second_id)
         self.synth.remove_partial(first_id)
         self.synth.remove_partial(second_id)
         self.store.add(merged)
         self.synth.apply_partial(merged)
+        after = self._snapshot_state(partial_ids=tracked_ids)
+        self.undo_manager.push(HistoryEntry(before=before, after=after))
         return merged
 
     def hit_test(self, time_sec: float, freq_hz: float, tolerance: float = 0.05) -> str | None:
@@ -215,20 +242,18 @@ class SomaDocument:
         return self.store.select_in_box(time_start, time_end, freq_start, freq_end)
 
     def undo(self) -> None:
-        state = self.undo_manager.undo()
-        if state is None:
+        entry = self.undo_manager.undo()
+        if entry is None:
             return
-        redo_state = self._snapshot_state(state)
-        self._apply_state(state)
-        self.undo_manager.push_redo(redo_state)
+        self._apply_state(entry.before)
+        self.undo_manager.push_redo(entry)
 
     def redo(self) -> None:
-        state = self.undo_manager.redo()
-        if state is None:
+        entry = self.undo_manager.redo()
+        if entry is None:
             return
-        undo_state = self._snapshot_state(state)
-        self._apply_state(state)
-        self.undo_manager.push_undo(undo_state)
+        self._apply_state(entry.after)
+        self.undo_manager.push_undo(entry)
 
     def is_resynthesizing(self) -> bool:
         with self._lock:
@@ -369,10 +394,6 @@ class SomaDocument:
             return np.concatenate([audio.astype(np.float32), pad])
         return audio[:length].astype(np.float32)
 
-    def _push_state(self, partial_ids: Iterable[str]) -> None:
-        state = self._snapshot_state(ProjectState(partials={pid: None for pid in partial_ids}))
-        self.undo_manager.push(state)
-
     def _apply_state(self, state: ProjectState) -> None:
         if state.settings is not None:
             self.settings = state.settings
@@ -390,32 +411,33 @@ class SomaDocument:
             self.store.update(snapshot)
             self.synth.apply_partial(snapshot)
 
-    def _snapshot_state(self, reference: ProjectState) -> ProjectState:
-        snapshot: dict[str, Partial | None] = {}
-        if reference.partials is None:
-            return reference
-        for partial_id in reference.partials:
-            partial = self.store.get(partial_id)
-            if partial is None:
-                snapshot[partial_id] = None
-            else:
-                snapshot[partial_id] = Partial(
-                    id=partial.id,
-                    points=list(partial.points),
-                    is_muted=partial.is_muted,
-                )
+    def _snapshot_state(
+        self,
+        *,
+        partial_ids: Iterable[str] | None = None,
+        include_settings: bool = False,
+    ) -> ProjectState:
+        snapshot: dict[str, Partial | None] | None = None
+        if partial_ids is not None:
+            snapshot = {}
+            for partial_id in partial_ids:
+                partial = self.store.get(partial_id)
+                if partial is None:
+                    snapshot[partial_id] = None
+                else:
+                    snapshot[partial_id] = Partial(
+                        id=partial.id,
+                        points=list(partial.points),
+                        is_muted=partial.is_muted,
+                    )
         return ProjectState(
             audio_info=self.audio_info,
             audio_data=self.audio_data,
-            settings=self.settings,
+            settings=self.settings if include_settings else None,
             partials=snapshot,
             project_path=self.project_path,
             source_info=self.source_info,
         )
-
-    def _push_settings(self) -> None:
-        state = ProjectState(settings=self.settings, partials={})
-        self.undo_manager.push(state)
 
 
 def _intersects_trace(partial: Partial, trace: list[tuple[float, float]], radius_hz: float) -> bool:
