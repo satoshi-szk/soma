@@ -154,6 +154,26 @@ function App() {
     }
   }
 
+  const handleOpenAudioPath = async (path: string) => {
+    setMenuOpen(false)
+    setStatusNote(null)
+    const result = await analysis.openAudioPath(path)
+    if (result) {
+      partialsHook.setPartials(result.partials)
+      setStatusNote('Audio loaded')
+    }
+  }
+
+  const handleOpenAudioFile = async (file: File) => {
+    setMenuOpen(false)
+    setStatusNote(null)
+    const result = await analysis.openAudioFile(file)
+    if (result) {
+      partialsHook.setPartials(result.partials)
+      setStatusNote('Audio loaded')
+    }
+  }
+
   const handleApplySettings = async () => {
     const success = await analysis.applySettings(analysis.settings)
     if (success) setStatusNote('Settings applied')
@@ -322,6 +342,9 @@ function App() {
                 onUpdatePartial={partialsHook.updatePartial}
                 onConnectPick={partialsHook.connectPick}
                 onOpenAudio={handleOpenAudio}
+                onOpenAudioPath={handleOpenAudioPath}
+                onOpenAudioFile={handleOpenAudioFile}
+                allowDrop={!analysis.audioInfo}
                 onCursorMove={setCursorInfo}
                 onPartialMute={handlePartialMute}
                 onPartialDelete={handlePartialDelete}

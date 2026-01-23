@@ -92,6 +92,11 @@ export const apiSchemas = {
     response: okStatusSchema,
   },
   open_audio: { response: loadResponseSchema },
+  open_audio_path: { payload: z.object({ path: z.string() }), response: loadResponseSchema },
+  open_audio_data: {
+    payload: z.object({ name: z.string(), data_base64: z.string() }),
+    response: loadResponseSchema,
+  },
   new_project: { response: z.union([okStatusSchema, errorStatusSchema]) },
   open_project: { response: loadResponseSchema },
   save_project: { response: z.union([okStatusSchema.extend({ path: z.string().optional() }), errorStatusSchema]) },

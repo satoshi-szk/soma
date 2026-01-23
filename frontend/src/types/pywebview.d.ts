@@ -8,6 +8,8 @@ declare global {
         status: () => Promise<unknown>
         frontend_log: (level: string, message: string) => Promise<unknown>
         open_audio: () => Promise<unknown>
+        open_audio_path: (payload: unknown) => Promise<unknown>
+        open_audio_data: (payload: unknown) => Promise<unknown>
         new_project: () => Promise<unknown>
         open_project: () => Promise<unknown>
         save_project: () => Promise<unknown>
