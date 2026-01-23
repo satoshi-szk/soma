@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pywt
 from scipy.io import wavfile
-from scipy.signal import resample, resample_poly
+from scipy.signal import find_peaks, resample, resample_poly
 
 from soma.models import AnalysisSettings, AudioInfo, PartialPoint, SpectrogramPreview, ViewportPreview
 
@@ -251,9 +251,18 @@ def snap_trace(
         if spectrum.size == 0:
             continue
 
-        peak_index = int(np.argmax(spectrum))
-        peak_freq = float(frequencies[peak_index])
-        peak_amp = float(spectrum[peak_index])
+        # Find local maxima (peaks where both neighbors are smaller)
+        peak_indices, _ = find_peaks(spectrum)
+        if len(peak_indices) > 0:
+            # Select the peak closest to freq_in (in log-frequency space)
+            peak_freqs = frequencies[peak_indices]
+            log_distances = np.abs(np.log2(peak_freqs / freq_in))
+            closest_idx = peak_indices[int(np.argmin(log_distances))]
+        else:
+            # Fallback: no local maxima found, use global max
+            closest_idx = int(np.argmax(spectrum))
+        peak_freq = float(frequencies[closest_idx])
+        peak_amp = float(spectrum[closest_idx])
         window_max = float(np.max(magnitude))
         normalizer = amp_reference if amp_reference and amp_reference > 0 else window_max
         normalized_amp = float(np.clip(peak_amp / (normalizer + 1e-8), 0.0, 1.0))
