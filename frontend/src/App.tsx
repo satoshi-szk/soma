@@ -28,7 +28,7 @@ function App() {
   const [showExportModal, setShowExportModal] = useState(false)
   const [exportTab, setExportTab] = useState<'mpe' | 'audio'>('mpe')
   const [pitchBendRange, setPitchBendRange] = useState(48)
-  const [ampMapping, setAmpMapping] = useState('velocity')
+  const [ampMapping, setAmpMapping] = useState('cc74')
   const [exportSampleRate, setExportSampleRate] = useState(44100)
   const [exportBitDepth, setExportBitDepth] = useState(16)
   const [exportType, setExportType] = useState<'sine' | 'cv'>('sine')
