@@ -2,6 +2,21 @@ import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { isPywebviewApiAvailable, pywebviewApi } from '../app/pywebviewApi'
 import type { SpectrogramPreview, ViewportPreview } from '../app/types'
 
+type ViewportParams = {
+  timeStart: number
+  timeEnd: number
+  freqMin: number
+  freqMax: number
+}
+
+function areParamsSimilar(a: ViewportParams | null, b: ViewportParams): boolean {
+  if (!a) return false
+  const threshold = 0.02
+  const timeDiff = Math.abs(a.timeStart - b.timeStart) + Math.abs(a.timeEnd - b.timeEnd)
+  const freqDiff = Math.abs(a.freqMin - b.freqMin) / b.freqMin + Math.abs(a.freqMax - b.freqMax) / b.freqMax
+  return timeDiff < threshold && freqDiff < threshold
+}
+
 export function useViewport(preview: SpectrogramPreview | null) {
   const [zoomX, setZoomX] = useState(1)
   const [zoomY, setZoomY] = useState(1)
@@ -10,6 +25,7 @@ export function useViewport(preview: SpectrogramPreview | null) {
   const [viewportPreviewData, setViewportPreviewData] = useState<ViewportPreview | null>(null)
   const [viewportRequestId, setViewportRequestId] = useState<string | null>(null)
   const viewportDebounceRef = useRef<number | null>(null)
+  const lastRequestedParams = useRef<ViewportParams | null>(null)
 
   // Derive viewportPreview: null when not zoomed
   const viewportPreview = useMemo(() => {
@@ -45,13 +61,27 @@ export function useViewport(preview: SpectrogramPreview | null) {
         logMax - Math.min(1, (stageSize.height - pan.y) / (stageSize.height * zoomY)) * (logMax - logMin)
       )
 
+      const params: ViewportParams = {
+        timeStart: visibleTimeStart,
+        timeEnd: visibleTimeEnd,
+        freqMin: Math.max(freqMin, visibleFreqMin),
+        freqMax: Math.min(freqMax, visibleFreqMax),
+      }
+
+      // Skip if params are similar to last request
+      if (areParamsSimilar(lastRequestedParams.current, params)) {
+        return
+      }
+
+      lastRequestedParams.current = params
+
       const result = await api.request_viewport_preview({
-        time_start: visibleTimeStart,
-        time_end: visibleTimeEnd,
-        freq_min: Math.max(freqMin, visibleFreqMin),
-        freq_max: Math.min(freqMax, visibleFreqMax),
-        width: Math.round(stageSize.width),
-        height: Math.round(stageSize.height),
+        time_start: params.timeStart,
+        time_end: params.timeEnd,
+        freq_min: params.freqMin,
+        freq_max: params.freqMax,
+        width: Math.round(stageSize.width * 0.5),
+        height: Math.round(stageSize.height * 0.5),
       })
 
       if (result.status === 'processing') {
@@ -87,7 +117,7 @@ export function useViewport(preview: SpectrogramPreview | null) {
     }
 
     void poll()
-    const interval = window.setInterval(poll, 200)
+    const interval = window.setInterval(poll, 400)
     return () => {
       alive = false
       window.clearInterval(interval)
