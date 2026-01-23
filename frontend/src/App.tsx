@@ -116,11 +116,11 @@ function App() {
       return
     }
     if (label === 'Zoom In') {
-      viewport.zoomIn()
+      viewport.zoomInX()
       return
     }
     if (label === 'Zoom Out') {
-      viewport.zoomOut()
+      viewport.zoomOutX()
       return
     }
     if (label === 'Reset View') {
@@ -262,7 +262,7 @@ function App() {
           <section className="panel flex flex-1 min-h-0 flex-col rounded-none px-4 py-4">
             <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.22em] text-[var(--muted)]">
               <span>Workspace</span>
-              <span className="font-mono text-[10px]">Zoom {Math.round(viewport.zoom * 100)}%</span>
+              <span className="font-mono text-[10px]">Time {Math.round(viewport.zoomX * 100)}%</span>
             </div>
             <div className="mt-3 flex-1 min-h-0 h-full">
               <Workspace
@@ -275,10 +275,11 @@ function App() {
                 activeTool={activeTool}
                 analysisState={analysis.analysisState}
                 isSnapping={partialsHook.isSnapping}
-                zoom={viewport.zoom}
+                zoomX={viewport.zoomX}
+                zoomY={viewport.zoomY}
                 pan={viewport.pan}
                 playbackPosition={playback.playbackPosition}
-                onZoomChange={viewport.setZoom}
+                onZoomXChange={viewport.setZoomX}
                 onPanChange={viewport.setPan}
                 onStageSizeChange={viewport.setStageSize}
                 onTraceCommit={handleTraceCommit}
@@ -291,6 +292,8 @@ function App() {
                 onCursorMove={setCursorInfo}
                 onPartialMute={handlePartialMute}
                 onPartialDelete={handlePartialDelete}
+                onZoomInY={viewport.zoomInY}
+                onZoomOutY={viewport.zoomOutY}
               />
             </div>
           </section>

@@ -27,10 +27,11 @@ export type WorkspaceProps = {
   activeTool: ToolId
   analysisState: 'idle' | 'analyzing' | 'error'
   isSnapping: boolean
-  zoom: number
+  zoomX: number
+  zoomY: number
   pan: { x: number; y: number }
   playbackPosition: number
-  onZoomChange: (zoom: number) => void
+  onZoomXChange: (zoom: number) => void
   onPanChange: (pan: { x: number; y: number }) => void
   onStageSizeChange: (size: { width: number; height: number }) => void
   onTraceCommit: (trace: Array<[number, number]>) => Promise<boolean>
@@ -43,6 +44,8 @@ export type WorkspaceProps = {
   onCursorMove: (cursor: { time: number; freq: number; amp: number | null }) => void
   onPartialMute: () => void
   onPartialDelete: () => void
+  onZoomInY: () => void
+  onZoomOutY: () => void
 }
 
 export function Workspace({
@@ -55,10 +58,11 @@ export function Workspace({
   activeTool,
   analysisState,
   isSnapping,
-  zoom,
+  zoomX,
+  zoomY,
   pan,
   playbackPosition,
-  onZoomChange,
+  onZoomXChange,
   onPanChange,
   onStageSizeChange,
   onTraceCommit,
@@ -71,6 +75,8 @@ export function Workspace({
   onCursorMove,
   onPartialMute,
   onPartialDelete,
+  onZoomInY,
+  onZoomOutY,
 }: WorkspaceProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [stageSize, setStageSize] = useState({ width: 900, height: 420 })
@@ -158,7 +164,7 @@ export function Workspace({
     }
   }, [preview, stageSize, spectrogramAreaHeight, contentOffset])
 
-  const scale = useMemo(() => ({ x: baseScale.x * zoom, y: baseScale.y * zoom }), [baseScale, zoom])
+  const scale = useMemo(() => ({ x: baseScale.x * zoomX, y: baseScale.y * zoomY }), [baseScale, zoomX, zoomY])
 
   const duration = preview?.duration_sec ?? 1
   const freqMin = preview?.freq_min ?? settings.freq_min
@@ -242,23 +248,21 @@ export function Workspace({
       onPanChange(nextPan)
       return
     }
+    // Horizontal zoom only (time axis)
     const scaleBy = 1.05
-    const oldScale = zoom
+    const oldScaleX = zoomX
     const direction = event.evt.deltaY > 0 ? -1 : 1
-    const newScale = direction > 0 ? oldScale * scaleBy : oldScale / scaleBy
-    const clamped = Math.min(4, Math.max(0.5, newScale))
+    const newScaleX = direction > 0 ? oldScaleX * scaleBy : oldScaleX / scaleBy
+    const clampedX = Math.min(4, Math.max(0.5, newScaleX))
 
-    const mousePointTo = {
-      x: (pointer.x - pan.x) / (baseScale.x * oldScale),
-      y: (pointer.y - pan.y) / (baseScale.y * oldScale),
-    }
+    const mousePointToX = (pointer.x - pan.x) / (baseScale.x * oldScaleX)
 
     const newPan = {
-      x: pointer.x - mousePointTo.x * baseScale.x * clamped,
-      y: pointer.y - mousePointTo.y * baseScale.y * clamped,
+      x: pointer.x - mousePointToX * baseScale.x * clampedX,
+      y: pan.y,
     }
 
-    onZoomChange(clamped)
+    onZoomXChange(clampedX)
     onPanChange(newPan)
   }
 
@@ -702,6 +706,27 @@ export function Workspace({
           onDelete={onPartialDelete}
           position={hudPosition}
         />
+      ) : null}
+      {preview ? (
+        <div className="absolute right-6 top-1/2 -translate-y-1/2 flex flex-col gap-1">
+          <button
+            className="flex h-7 w-7 items-center justify-center rounded-sm bg-[rgba(12,18,30,0.85)] text-[var(--muted)] hover:bg-[rgba(20,28,45,0.95)] hover:text-white transition-colors"
+            onClick={onZoomInY}
+            title="Zoom in frequency"
+          >
+            <span className="text-sm font-bold">+</span>
+          </button>
+          <div className="flex h-5 items-center justify-center text-[9px] text-[var(--muted)] font-mono">
+            {Math.round(zoomY * 100)}%
+          </div>
+          <button
+            className="flex h-7 w-7 items-center justify-center rounded-sm bg-[rgba(12,18,30,0.85)] text-[var(--muted)] hover:bg-[rgba(20,28,45,0.95)] hover:text-white transition-colors"
+            onClick={onZoomOutY}
+            title="Zoom out frequency"
+          >
+            <span className="text-sm font-bold">−</span>
+          </button>
+        </div>
       ) : null}
     </div>
   )

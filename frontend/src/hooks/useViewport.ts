@@ -3,7 +3,8 @@ import { isPywebviewApiAvailable, pywebviewApi } from '../app/pywebviewApi'
 import type { SpectrogramPreview, ViewportPreview } from '../app/types'
 
 export function useViewport(preview: SpectrogramPreview | null) {
-  const [zoom, setZoom] = useState(1)
+  const [zoomX, setZoomX] = useState(1)
+  const [zoomY, setZoomY] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [stageSize, setStageSize] = useState({ width: 900, height: 420 })
   const [viewportPreviewData, setViewportPreviewData] = useState<ViewportPreview | null>(null)
@@ -12,13 +13,13 @@ export function useViewport(preview: SpectrogramPreview | null) {
 
   // Derive viewportPreview: null when not zoomed
   const viewportPreview = useMemo(() => {
-    if (!preview || zoom <= 1) return null
+    if (!preview || (zoomX <= 1 && zoomY <= 1)) return null
     return viewportPreviewData
-  }, [preview, zoom, viewportPreviewData])
+  }, [preview, zoomX, zoomY, viewportPreviewData])
 
   // Request viewport preview on zoom/pan change
   useEffect(() => {
-    if (!preview || zoom <= 1) {
+    if (!preview || (zoomX <= 1 && zoomY <= 1)) {
       return
     }
 
@@ -35,13 +36,13 @@ export function useViewport(preview: SpectrogramPreview | null) {
       const freqMax = preview.freq_max
 
       // Calculate visible viewport
-      const visibleTimeStart = Math.max(0, (-pan.x / (stageSize.width * zoom)) * duration)
-      const visibleTimeEnd = Math.min(duration, visibleTimeStart + duration / zoom)
+      const visibleTimeStart = Math.max(0, (-pan.x / (stageSize.width * zoomX)) * duration)
+      const visibleTimeEnd = Math.min(duration, visibleTimeStart + duration / zoomX)
       const logMin = Math.log(freqMin)
       const logMax = Math.log(freqMax)
-      const visibleFreqMax = Math.exp(logMax - Math.max(0, -pan.y / (stageSize.height * zoom)) * (logMax - logMin))
+      const visibleFreqMax = Math.exp(logMax - Math.max(0, -pan.y / (stageSize.height * zoomY)) * (logMax - logMin))
       const visibleFreqMin = Math.exp(
-        logMax - Math.min(1, (stageSize.height - pan.y) / (stageSize.height * zoom)) * (logMax - logMin)
+        logMax - Math.min(1, (stageSize.height - pan.y) / (stageSize.height * zoomY)) * (logMax - logMin)
       )
 
       const result = await api.request_viewport_preview({
@@ -63,7 +64,7 @@ export function useViewport(preview: SpectrogramPreview | null) {
         window.clearTimeout(viewportDebounceRef.current)
       }
     }
-  }, [zoom, pan, stageSize, preview])
+  }, [zoomX, zoomY, pan, stageSize, preview])
 
   // Poll viewport preview status
   useEffect(() => {
@@ -93,29 +94,41 @@ export function useViewport(preview: SpectrogramPreview | null) {
     }
   }, [viewportRequestId])
 
-  const zoomIn = useCallback(() => {
-    setZoom((value) => Math.min(4, value + 0.2))
+  const zoomInX = useCallback(() => {
+    setZoomX((value) => Math.min(4, value + 0.2))
   }, [])
 
-  const zoomOut = useCallback(() => {
-    setZoom((value) => Math.max(0.5, value - 0.2))
+  const zoomOutX = useCallback(() => {
+    setZoomX((value) => Math.max(0.5, value - 0.2))
+  }, [])
+
+  const zoomInY = useCallback(() => {
+    setZoomY((value) => Math.min(4, value + 0.2))
+  }, [])
+
+  const zoomOutY = useCallback(() => {
+    setZoomY((value) => Math.max(0.5, value - 0.2))
   }, [])
 
   const resetView = useCallback(() => {
-    setZoom(1)
+    setZoomX(1)
+    setZoomY(1)
     setPan({ x: 0, y: 0 })
   }, [])
 
   return {
-    zoom,
+    zoomX,
+    zoomY,
     pan,
     stageSize,
     viewportPreview,
-    setZoom,
+    setZoomX,
     setPan,
     setStageSize,
-    zoomIn,
-    zoomOut,
+    zoomInX,
+    zoomOutX,
+    zoomInY,
+    zoomOutY,
     resetView,
   }
 }
