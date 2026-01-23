@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
 import sys
+import tempfile
 import threading
 import wave
 from datetime import UTC, datetime
@@ -22,6 +24,8 @@ from soma.api_schema import (
     ExportMpePayload,
     HitTestPayload,
     MergePartialsPayload,
+    OpenAudioDataPayload,
+    OpenAudioPathPayload,
     PayloadBase,
     PlayPayload,
     RequestViewportPreviewPayload,
@@ -159,6 +163,82 @@ class SomaApi:
             self._doc.start_preview_async()
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("open_audio failed")
+            return {"status": "error", "message": str(exc)}
+
+        self._last_audio_path = info.path
+        return {
+            "status": "processing",
+            "audio": info.to_dict(),
+            "preview": None,
+            "settings": self._doc.settings.to_dict(),
+            "partials": [partial.to_dict() for partial in self._doc.store.all()],
+        }
+
+    def open_audio_path(self, payload: dict[str, Any]) -> dict[str, Any]:
+        window = webview.windows[0] if webview.windows else None
+        if window is None:
+            return {"status": "error", "message": "Window not ready"}
+
+        parsed = _validated_payload(OpenAudioPathPayload, payload, "open_audio_path")
+        if isinstance(parsed, dict):
+            return parsed
+
+        path = Path(parsed.path).expanduser()
+        if not path.is_absolute():
+            path = path.resolve()
+        if not path.exists() or not path.is_file():
+            return {"status": "error", "message": "Audio file not found."}
+
+        duration_check = _check_audio_duration(window, path)
+        if duration_check is not None:
+            return duration_check
+        try:
+            info = self._doc.load_audio(path)
+            self._doc.start_preview_async()
+        except Exception as exc:  # pragma: no cover - surface errors to UI
+            logger.exception("open_audio_path failed")
+            return {"status": "error", "message": str(exc)}
+
+        self._last_audio_path = info.path
+        return {
+            "status": "processing",
+            "audio": info.to_dict(),
+            "preview": None,
+            "settings": self._doc.settings.to_dict(),
+            "partials": [partial.to_dict() for partial in self._doc.store.all()],
+        }
+
+    def open_audio_data(self, payload: dict[str, Any]) -> dict[str, Any]:
+        window = webview.windows[0] if webview.windows else None
+        if window is None:
+            return {"status": "error", "message": "Window not ready"}
+
+        parsed = _validated_payload(OpenAudioDataPayload, payload, "open_audio_data")
+        if isinstance(parsed, dict):
+            return parsed
+
+        suffix = Path(parsed.name).suffix or ".wav"
+        temp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(delete=False, suffix=suffix, prefix="soma-drop-") as handle:
+                temp_path = Path(handle.name)
+                handle.write(base64.b64decode(parsed.data_base64))
+        except Exception as exc:  # pragma: no cover - unexpected decode errors
+            logger.exception("open_audio_data failed to write temp file")
+            return {"status": "error", "message": str(exc)}
+
+        duration_check = _check_audio_duration(window, temp_path)
+        if duration_check is not None:
+            try:
+                temp_path.unlink()
+            except OSError:
+                logger.warning("Failed to remove temp audio file: %s", temp_path)
+            return duration_check
+        try:
+            info = self._doc.load_audio(temp_path)
+            self._doc.start_preview_async()
+        except Exception as exc:  # pragma: no cover - surface errors to UI
+            logger.exception("open_audio_data failed")
             return {"status": "error", "message": str(exc)}
 
         self._last_audio_path = info.path

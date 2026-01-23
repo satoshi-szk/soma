@@ -95,14 +95,6 @@ function App() {
       }
       return
     }
-    if (label === 'Open Audio...') {
-      const result = await analysis.openAudio()
-      if (result) {
-        partialsHook.setPartials(result.partials)
-        setStatusNote('Audio loaded')
-      }
-      return
-    }
     if (label === 'Save Project') {
       const success = await analysis.saveProject()
       if (success) setStatusNote('Project saved')
@@ -148,6 +140,26 @@ function App() {
     setMenuOpen(false)
     setStatusNote(null)
     const result = await analysis.openAudio()
+    if (result) {
+      partialsHook.setPartials(result.partials)
+      setStatusNote('Audio loaded')
+    }
+  }
+
+  const handleOpenAudioPath = async (path: string) => {
+    setMenuOpen(false)
+    setStatusNote(null)
+    const result = await analysis.openAudioPath(path)
+    if (result) {
+      partialsHook.setPartials(result.partials)
+      setStatusNote('Audio loaded')
+    }
+  }
+
+  const handleOpenAudioFile = async (file: File) => {
+    setMenuOpen(false)
+    setStatusNote(null)
+    const result = await analysis.openAudioFile(file)
     if (result) {
       partialsHook.setPartials(result.partials)
       setStatusNote('Audio loaded')
@@ -322,6 +334,9 @@ function App() {
                 onUpdatePartial={partialsHook.updatePartial}
                 onConnectPick={partialsHook.connectPick}
                 onOpenAudio={handleOpenAudio}
+                onOpenAudioPath={handleOpenAudioPath}
+                onOpenAudioFile={handleOpenAudioFile}
+                allowDrop={!analysis.audioInfo}
                 onCursorMove={setCursorInfo}
                 onPartialMute={handlePartialMute}
                 onPartialDelete={handlePartialDelete}

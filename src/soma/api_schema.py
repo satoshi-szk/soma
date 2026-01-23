@@ -80,6 +80,15 @@ class ExportAudioPayload(PayloadBase):
     output_type: str = "sine"
 
 
+class OpenAudioPathPayload(PayloadBase):
+    path: str
+
+
+class OpenAudioDataPayload(PayloadBase):
+    name: str
+    data_base64: str
+
+
 class RequestViewportPreviewPayload(PayloadBase):
     time_start: float
     time_end: float

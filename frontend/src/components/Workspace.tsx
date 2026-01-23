@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { DragEvent } from 'react'
 import { Circle, Group, Layer, Line, Rect, Shape, Stage, Image as KonvaImage, Text } from 'react-konva'
 import { ZOOM_X_MAX_PX_PER_SEC, ZOOM_X_MIN_PX_PER_SEC } from '../app/constants'
 import type { AnalysisSettings, Partial, PartialPoint, SpectrogramPreview, ToolId } from '../app/types'
@@ -42,6 +43,9 @@ export type WorkspaceProps = {
   onUpdatePartial: (id: string, points: PartialPoint[]) => void
   onConnectPick: (point: { time: number; freq: number }) => void
   onOpenAudio: () => void
+  onOpenAudioPath: (path: string) => void
+  onOpenAudioFile: (file: File) => void
+  allowDrop: boolean
   onCursorMove: (cursor: { time: number; freq: number; amp: number | null }) => void
   onPartialMute: () => void
   onPartialDelete: () => void
@@ -73,6 +77,9 @@ export function Workspace({
   onUpdatePartial,
   onConnectPick,
   onOpenAudio,
+  onOpenAudioPath,
+  onOpenAudioFile,
+  allowDrop,
   onCursorMove,
   onPartialMute,
   onPartialDelete,
@@ -87,6 +94,7 @@ export function Workspace({
   const [selectionBox, setSelectionBox] = useState<null | { x: number; y: number; w: number; h: number }>(null)
   const [draggedPartial, setDraggedPartial] = useState<Partial | null>(null)
   const [hudPosition, setHudPosition] = useState({ x: 16, y: 16 })
+  const [isDragActive, setIsDragActive] = useState(false)
   const automationLaneHeight = 120
   const automationPadding = { top: 18, bottom: 16 }
 
@@ -103,6 +111,148 @@ export function Workspace({
     }
     return () => observer.disconnect()
   }, [onStageSizeChange])
+
+  const resolveDroppedPath = useCallback((dataTransfer: DataTransfer | null) => {
+    const directFile = dataTransfer?.files?.[0]
+    if (directFile) {
+      const candidate = (directFile as File & { path?: string }).path
+      if (candidate) return candidate
+    }
+
+    const items = dataTransfer?.items
+    if (items) {
+      for (const item of Array.from(items)) {
+        if (item.kind !== 'file') continue
+        const file = item.getAsFile()
+        const candidate = (file as File & { path?: string } | null)?.path
+        if (candidate) return candidate
+      }
+    }
+
+    const uriList = dataTransfer?.getData('text/uri-list')
+    if (uriList) {
+      const entry = uriList
+        .split('\n')
+        .map((line) => line.trim())
+        .find((line) => line && !line.startsWith('#'))
+      if (entry) {
+        try {
+          const url = new URL(entry)
+          if (url.protocol === 'file:') {
+            return decodeURIComponent(url.pathname)
+          }
+        } catch {
+          // Ignore invalid URI data.
+        }
+      }
+    }
+
+    return null
+  }, [])
+
+  const isEventInsideContainer = useCallback((event: Event) => {
+    const container = containerRef.current
+    if (!container) return false
+    const withPath = event as Event & { composedPath?: () => EventTarget[] }
+    if (typeof withPath.composedPath === 'function') {
+      return withPath.composedPath().includes(container)
+    }
+    return container.contains(event.target as Node)
+  }, [])
+
+  const handleDragOver = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      if (!allowDrop) return
+      event.preventDefault()
+      event.dataTransfer.dropEffect = 'copy'
+    },
+    [allowDrop]
+  )
+
+  const handleDragEnter = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      if (!allowDrop) return
+      event.preventDefault()
+      setIsDragActive(true)
+    },
+    [allowDrop]
+  )
+
+  const handleDragLeave = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      if (!allowDrop) return
+      event.preventDefault()
+      setIsDragActive(false)
+    },
+    [allowDrop]
+  )
+
+  const handleDrop = useCallback(
+    (event: DragEvent<HTMLDivElement>) => {
+      if (!allowDrop) return
+      event.preventDefault()
+      setIsDragActive(false)
+      const filePath = resolveDroppedPath(event.dataTransfer)
+      if (filePath) {
+        onOpenAudioPath(filePath)
+        return
+      }
+      const fallbackFile = event.dataTransfer?.files?.[0] ?? null
+      if (!fallbackFile) return
+      onOpenAudioFile(fallbackFile)
+    },
+    [allowDrop, onOpenAudioPath, onOpenAudioFile, resolveDroppedPath]
+  )
+
+  useEffect(() => {
+    if (!allowDrop) return
+
+    const handleWindowDragOver = (event: globalThis.DragEvent) => {
+      if (!isEventInsideContainer(event)) return
+      event.preventDefault()
+      if (event.dataTransfer) {
+        event.dataTransfer.dropEffect = 'copy'
+      }
+    }
+
+    const handleWindowDragEnter = (event: globalThis.DragEvent) => {
+      if (!isEventInsideContainer(event)) return
+      event.preventDefault()
+      setIsDragActive(true)
+    }
+
+    const handleWindowDragLeave = (event: globalThis.DragEvent) => {
+      if (!isEventInsideContainer(event)) return
+      event.preventDefault()
+      setIsDragActive(false)
+    }
+
+    const handleWindowDrop = (event: globalThis.DragEvent) => {
+      if (!isEventInsideContainer(event)) return
+      event.preventDefault()
+      setIsDragActive(false)
+      const filePath = resolveDroppedPath(event.dataTransfer)
+      if (filePath) {
+        onOpenAudioPath(filePath)
+        return
+      }
+      const fallbackFile = event.dataTransfer?.files?.[0] ?? null
+      if (!fallbackFile) return
+      onOpenAudioFile(fallbackFile)
+    }
+
+    window.addEventListener('dragover', handleWindowDragOver, true)
+    window.addEventListener('dragenter', handleWindowDragEnter, true)
+    window.addEventListener('dragleave', handleWindowDragLeave, true)
+    window.addEventListener('drop', handleWindowDrop, true)
+
+    return () => {
+      window.removeEventListener('dragover', handleWindowDragOver, true)
+      window.removeEventListener('dragenter', handleWindowDragEnter, true)
+      window.removeEventListener('dragleave', handleWindowDragLeave, true)
+      window.removeEventListener('drop', handleWindowDrop, true)
+    }
+  }, [allowDrop, isEventInsideContainer, resolveDroppedPath, onOpenAudioPath, onOpenAudioFile])
 
 
   const previewImage = useMemo(() => {
@@ -504,7 +654,16 @@ export function Workspace({
   }, [preview, visibleRange])
 
   return (
-    <div ref={containerRef} className="canvas-surface relative h-full min-h-[520px] rounded-none p-4">
+    <div
+      ref={containerRef}
+      className={`canvas-surface relative h-full min-h-[520px] rounded-none p-4 ${
+        allowDrop && isDragActive ? 'ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--canvas)]' : ''
+      }`}
+      onDragOver={handleDragOver}
+      onDragEnter={handleDragEnter}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+    >
       <Stage
         width={stageSize.width}
         height={stageSize.height}
@@ -707,6 +866,9 @@ export function Workspace({
       {!preview ? (
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center text-white/70">
           <div className="text-xs uppercase tracking-[0.3em]">No Audio Loaded</div>
+          {allowDrop ? (
+            <div className="text-[10px] uppercase tracking-[0.24em] text-white/60">Drop a WAV file here</div>
+          ) : null}
           <button
             className="rounded-md bg-white/90 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-strong)]"
             onClick={onOpenAudio}
@@ -714,6 +876,9 @@ export function Workspace({
             Open Audio
           </button>
         </div>
+      ) : null}
+      {allowDrop && isDragActive ? (
+        <div className="pointer-events-none absolute inset-3 rounded-md border border-dashed border-white/60" />
       ) : null}
       {analysisState === 'analyzing' ? (
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-xs uppercase tracking-[0.24em] text-white">

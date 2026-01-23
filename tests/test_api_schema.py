@@ -1,4 +1,10 @@
-from soma.api_schema import TracePartialPayload, UpdateSettingsPayload, parse_payload
+from soma.api_schema import (
+    OpenAudioDataPayload,
+    OpenAudioPathPayload,
+    TracePartialPayload,
+    UpdateSettingsPayload,
+    parse_payload,
+)
 
 
 def test_parse_payload_rejects_non_dict() -> None:
@@ -19,3 +25,17 @@ def test_parse_payload_rejects_bad_trace() -> None:
     parsed, error = parse_payload(TracePartialPayload, {"trace": [[1.0]]})
     assert parsed is None
     assert error is not None
+
+
+def test_parse_payload_accepts_audio_path() -> None:
+    parsed, error = parse_payload(OpenAudioPathPayload, {"path": "/tmp/example.wav"})
+    assert error is None
+    assert parsed is not None
+    assert parsed.path == "/tmp/example.wav"
+
+
+def test_parse_payload_accepts_audio_data() -> None:
+    parsed, error = parse_payload(OpenAudioDataPayload, {"name": "example.wav", "data_base64": "AAAA"})
+    assert error is None
+    assert parsed is not None
+    assert parsed.name == "example.wav"

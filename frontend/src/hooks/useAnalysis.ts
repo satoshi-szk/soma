@@ -140,6 +140,119 @@ export function useAnalysis(reportError: ReportError) {
     }
   }, [reportError, flushUi])
 
+  const openAudioPath = useCallback(
+    async (path: string): Promise<AnalysisResult | null> => {
+      const api = isPywebviewApiAvailable() ? pywebviewApi : null
+      if (!api?.open_audio_path) {
+        setAnalysisState('error')
+        setAnalysisError('Pywebview API is not available.')
+        reportError('Open Audio', 'API not available')
+        return null
+      }
+      setAnalysisState('analyzing')
+      setAnalysisError(null)
+      await flushUi()
+      try {
+        const result = await api.open_audio_path({ path })
+        if (result.status === 'ok' || result.status === 'processing') {
+          setAudioInfo(result.audio)
+          setPreview(result.preview ?? null)
+          setSettings(result.settings)
+          setAnalysisState(result.status === 'processing' ? 'analyzing' : 'idle')
+          return {
+            audio: result.audio,
+            preview: result.preview ?? null,
+            settings: result.settings,
+            partials: result.partials.map(toPartial),
+          }
+        } else if (result.status === 'cancelled') {
+          setAnalysisState('idle')
+          return null
+        } else if (result.status === 'error') {
+          setAnalysisState('error')
+          setAnalysisError(result.message ?? 'Failed to load audio.')
+          reportError('Open Audio', result.message ?? 'Failed to load audio.')
+          return null
+        } else {
+          setAnalysisState('error')
+          setAnalysisError('Unexpected response from API.')
+          reportError('Open Audio', 'Unexpected response from API.')
+          return null
+        }
+      } catch (error) {
+        setAnalysisState('error')
+        const message = error instanceof Error ? error.message : 'Failed to load audio.'
+        setAnalysisError(message)
+        reportError('Open Audio', message)
+        return null
+      }
+    },
+    [reportError, flushUi]
+  )
+
+  const openAudioFile = useCallback(
+    async (file: File): Promise<AnalysisResult | null> => {
+      const api = isPywebviewApiAvailable() ? pywebviewApi : null
+      if (!api?.open_audio_data) {
+        setAnalysisState('error')
+        setAnalysisError('Pywebview API is not available.')
+        reportError('Open Audio', 'API not available')
+        return null
+      }
+      setAnalysisState('analyzing')
+      setAnalysisError(null)
+      await flushUi()
+      try {
+        const dataUrl = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader()
+          reader.onload = () => resolve(String(reader.result))
+          reader.onerror = () => reject(reader.error ?? new Error('Failed to read file'))
+          reader.readAsDataURL(file)
+        })
+        const base64 = dataUrl.split(',')[1]
+        if (!base64) {
+          setAnalysisState('error')
+          setAnalysisError('Failed to read audio data.')
+          reportError('Open Audio', 'Failed to read audio data.')
+          return null
+        }
+        const result = await api.open_audio_data({ name: file.name, data_base64: base64 })
+        if (result.status === 'ok' || result.status === 'processing') {
+          setAudioInfo(result.audio)
+          setPreview(result.preview ?? null)
+          setSettings(result.settings)
+          setAnalysisState(result.status === 'processing' ? 'analyzing' : 'idle')
+          return {
+            audio: result.audio,
+            preview: result.preview ?? null,
+            settings: result.settings,
+            partials: result.partials.map(toPartial),
+          }
+        } else if (result.status === 'cancelled') {
+          setAnalysisState('idle')
+          return null
+        } else if (result.status === 'error') {
+          setAnalysisState('error')
+          setAnalysisError(result.message ?? 'Failed to load audio.')
+          reportError('Open Audio', result.message ?? 'Failed to load audio.')
+          return null
+        } else {
+          setAnalysisState('error')
+          setAnalysisError('Unexpected response from API.')
+          reportError('Open Audio', 'Unexpected response from API.')
+          return null
+        }
+      } catch (error) {
+        setAnalysisState('error')
+        const message = error instanceof Error ? error.message : 'Failed to load audio.'
+        setAnalysisError(message)
+        reportError('Open Audio', message)
+        return null
+      }
+    },
+    [reportError, flushUi]
+  )
+
   const openProject = useCallback(async (): Promise<AnalysisResult | null> => {
     const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.open_project) {
@@ -290,6 +403,8 @@ export function useAnalysis(reportError: ReportError) {
     settings,
     setSettings,
     openAudio,
+    openAudioPath,
+    openAudioFile,
     openProject,
     newProject,
     saveProject,
