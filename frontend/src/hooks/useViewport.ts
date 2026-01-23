@@ -137,8 +137,8 @@ export function useViewport(preview: SpectrogramPreview | null) {
         time_end: params.timeEnd,
         freq_min: params.freqMin,
         freq_max: params.freqMax,
-        width: Math.round(stageSize.width * 0.5),
-        height: Math.round(stageSize.height * 0.5),
+        width: Math.round(stageSize.width),
+        height: Math.round(stageSize.height),
       })
 
       // fire & forget: result status only indicates request acceptance
