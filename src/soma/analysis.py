@@ -9,10 +9,10 @@ import pywt
 from scipy.io import wavfile
 from scipy.signal import find_peaks, resample, resample_poly
 
-from soma.models import AnalysisSettings, AudioInfo, PartialPoint, SpectrogramPreview, ViewportPreview
+from soma.models import AnalysisSettings, AudioInfo, PartialPoint, SpectrogramPreview
 
 
-def load_audio(path: Path, max_duration_sec: float | None = 30.0) -> tuple[AudioInfo, np.ndarray]:
+def load_audio(path: Path, max_duration_sec: float | None = None) -> tuple[AudioInfo, np.ndarray]:
     sample_rate, raw = wavfile.read(path)
     if raw.ndim == 1:
         channels = 1
@@ -40,67 +40,7 @@ def load_audio(path: Path, max_duration_sec: float | None = 30.0) -> tuple[Audio
     return info, audio
 
 
-def make_spectrogram_preview(
-    audio: np.ndarray,
-    sample_rate: int,
-    settings: AnalysisSettings,
-    width: int = 768,
-    height: int = 320,
-) -> tuple[SpectrogramPreview, float]:
-    if audio.size == 0:
-        return SpectrogramPreview(
-            width=width,
-            height=height,
-            data=[0] * (width * height),
-            freq_min=settings.freq_min,
-            freq_max=settings.freq_max,
-            duration_sec=0.0,
-        ), 1.0
-
-    original_duration = audio.shape[0] / float(sample_rate)
-    preview_freq_max = min(settings.preview_freq_max, settings.freq_max)
-    preview_freq_max = max(preview_freq_max, settings.freq_min)
-    preview_bins_per_octave = max(4, int(settings.preview_bins_per_octave))
-    target_rate = _preview_sample_rate(sample_rate, preview_freq_max)
-    if target_rate != sample_rate:
-        audio = resample_audio(audio, sample_rate, target_rate)[0]
-        sample_rate = target_rate
-
-    preview_freq_max = min(preview_freq_max, sample_rate * 0.5)
-    preview_settings = AnalysisSettings(
-        freq_min=settings.freq_min,
-        freq_max=preview_freq_max,
-        bins_per_octave=preview_bins_per_octave,
-    )
-    frequencies = _build_frequencies(preview_settings, max_freq=preview_freq_max)
-    cwt_matrix = _cwt_magnitude(
-        audio,
-        sample_rate,
-        frequencies,
-        wavelet_bandwidth=settings.wavelet_bandwidth,
-        wavelet_center_freq=settings.wavelet_center_freq,
-    )
-    amp_reference = float(np.max(cwt_matrix)) if cwt_matrix.size else 1.0
-
-    magnitude = _normalize_cwt(cwt_matrix)
-    time_resampled = resample(magnitude, width, axis=1)
-    resized = resample(time_resampled, height, axis=0)
-    normalized = np.clip(resized, 0.0, 1.0)
-    normalized = np.flipud(normalized)
-
-    data = (normalized * 255).astype(np.uint8).flatten().tolist()
-    duration_sec = original_duration
-    return SpectrogramPreview(
-        width=width,
-        height=height,
-        data=data,
-        freq_min=settings.freq_min,
-        freq_max=preview_freq_max,
-        duration_sec=duration_sec,
-    ), amp_reference
-
-
-def make_viewport_spectrogram(
+def make_spectrogram(
     audio: np.ndarray,
     sample_rate: int,
     settings: AnalysisSettings,
@@ -111,79 +51,239 @@ def make_viewport_spectrogram(
     width: int,
     height: int,
     amp_reference: float | None = None,
-) -> ViewportPreview:
-    """Generate a high-resolution spectrogram for the specified viewport region."""
+) -> tuple[SpectrogramPreview, float]:
+    """Generate a CWT spectrogram for the specified time/frequency region.
+
+    The computation cost is proportional to the output size (width x height),
+    not the audio duration. This allows efficient rendering of both overview
+    and zoomed-in views.
+    """
+    total_duration = audio.shape[0] / float(sample_rate) if audio.size > 0 else 0.0
+
     if audio.size == 0 or time_end <= time_start:
-        return ViewportPreview(
+        return SpectrogramPreview(
             width=width,
             height=height,
             data=[0] * (width * height),
-            time_start=time_start,
-            time_end=time_end,
             freq_min=freq_min,
             freq_max=freq_max,
-        )
+            duration_sec=total_duration,
+            time_start=time_start,
+            time_end=time_end,
+        ), 1.0
 
-    duration = audio.shape[0] / float(sample_rate)
-    time_start = max(0.0, min(time_start, duration))
-    time_end = max(time_start, min(time_end, duration))
+    # Clamp time range to valid bounds
+    time_start = max(0.0, min(time_start, total_duration))
+    time_end = max(time_start + 1e-6, min(time_end, total_duration))
 
+    # Extract audio segment for the requested time range
     start_sample = int(time_start * sample_rate)
     end_sample = int(time_end * sample_rate)
     audio_segment = audio[start_sample:end_sample]
 
     if audio_segment.size < 32:
-        return ViewportPreview(
+        return SpectrogramPreview(
             width=width,
             height=height,
             data=[0] * (width * height),
-            time_start=time_start,
-            time_end=time_end,
             freq_min=freq_min,
             freq_max=freq_max,
-        )
+            duration_sec=total_duration,
+            time_start=time_start,
+            time_end=time_end,
+        ), 1.0
 
+    # Clamp frequency range
     effective_freq_min = max(freq_min, settings.freq_min, 1.0)
-    effective_freq_max = min(freq_max, settings.freq_max)
+    effective_freq_max = min(freq_max, settings.freq_max, sample_rate * 0.5)
     effective_freq_max = max(effective_freq_max, effective_freq_min * 1.001)
 
-    target_rate = _preview_sample_rate(sample_rate, effective_freq_max)
-    if target_rate < sample_rate:
-        audio_segment, _ = resample_audio(audio_segment, sample_rate, target_rate)
-        sample_rate = target_rate
+    # Downsample audio so we keep enough temporal samples per output pixel, while
+    # preserving a minimum sample rate for the requested freq_max (Nyquist).
+    samples_per_pixel = 32
+    segment_duration = time_end - time_start
+    min_sample_rate = min(sample_rate, max(2000.0, effective_freq_max * 2.2))
+    min_samples = int(np.ceil(min_sample_rate * segment_duration))
+    target_samples = max(width * samples_per_pixel, min_samples)
 
-    effective_freq_max = min(effective_freq_max, sample_rate * 0.5)
+    if audio_segment.size > target_samples:
+        # Downsample in time domain to reduce CWT computation
+        audio_segment = resample(audio_segment, target_samples).astype(np.float32)
+        working_sample_rate = int(target_samples / segment_duration)
+    else:
+        working_sample_rate = sample_rate
 
-    viewport_settings = AnalysisSettings(
+    # Further downsample based on frequency range (Nyquist)
+    target_rate = _preview_sample_rate(working_sample_rate, effective_freq_max)
+    if target_rate < working_sample_rate:
+        audio_segment, _ = resample_audio(audio_segment, working_sample_rate, target_rate)
+        working_sample_rate = target_rate
+
+    effective_freq_max = min(effective_freq_max, working_sample_rate * 0.5)
+
+    # Determine bins_per_octave based on output height
+    # More pixels = more frequency resolution needed
+    octaves = np.log2(effective_freq_max / effective_freq_min)
+    bins_per_octave = max(4, min(settings.preview_bins_per_octave, int(height / max(1, octaves))))
+
+    cwt_settings = AnalysisSettings(
         freq_min=effective_freq_min,
         freq_max=effective_freq_max,
-        bins_per_octave=settings.bins_per_octave,
+        bins_per_octave=bins_per_octave,
     )
-    frequencies = _build_frequencies(viewport_settings, max_freq=effective_freq_max)
+    frequencies = _build_frequencies(cwt_settings, max_freq=effective_freq_max)
     cwt_matrix = _cwt_magnitude(
         audio_segment,
-        sample_rate,
+        working_sample_rate,
         frequencies,
         wavelet_bandwidth=settings.wavelet_bandwidth,
         wavelet_center_freq=settings.wavelet_center_freq,
     )
-    magnitude = _normalize_cwt(cwt_matrix, reference_max=amp_reference)
 
+    computed_amp_reference = float(np.max(cwt_matrix)) if cwt_matrix.size else 1.0
+    if amp_reference is None:
+        amp_reference = computed_amp_reference
+
+    magnitude = _normalize_cwt(cwt_matrix, reference_max=amp_reference)
     time_resampled = resample(magnitude, width, axis=1)
     resized = resample(time_resampled, height, axis=0)
     normalized = np.clip(resized, 0.0, 1.0)
     normalized = np.flipud(normalized)
 
     data = (normalized * 255).astype(np.uint8).flatten().tolist()
-    return ViewportPreview(
+    return SpectrogramPreview(
         width=width,
         height=height,
         data=data,
-        time_start=time_start,
-        time_end=time_end,
         freq_min=effective_freq_min,
         freq_max=effective_freq_max,
-    )
+        duration_sec=total_duration,
+        time_start=time_start,
+        time_end=time_end,
+    ), computed_amp_reference
+
+
+def make_spectrogram_stft(
+    audio: np.ndarray,
+    sample_rate: int,
+    settings: AnalysisSettings,
+    time_start: float,
+    time_end: float,
+    freq_min: float,
+    freq_max: float,
+    width: int,
+    height: int,
+    amp_reference: float | None = None,
+) -> tuple[SpectrogramPreview, float]:
+    """Generate a fast STFT-based preview spectrogram for GUI display only.
+
+    This must never be used for snap/ridge detection.
+    """
+    total_duration = audio.shape[0] / float(sample_rate) if audio.size > 0 else 0.0
+
+    if audio.size == 0 or time_end <= time_start:
+        return SpectrogramPreview(
+            width=width,
+            height=height,
+            data=[0] * (width * height),
+            freq_min=freq_min,
+            freq_max=freq_max,
+            duration_sec=total_duration,
+            time_start=time_start,
+            time_end=time_end,
+        ), 1.0
+
+    # Clamp time range to valid bounds
+    time_start = max(0.0, min(time_start, total_duration))
+    time_end = max(time_start + 1e-6, min(time_end, total_duration))
+
+    start_sample = int(time_start * sample_rate)
+    end_sample = int(time_end * sample_rate)
+    audio_segment = _to_float32(audio[start_sample:end_sample])
+
+    if audio_segment.size < 32:
+        return SpectrogramPreview(
+            width=width,
+            height=height,
+            data=[0] * (width * height),
+            freq_min=freq_min,
+            freq_max=freq_max,
+            duration_sec=total_duration,
+            time_start=time_start,
+            time_end=time_end,
+        ), 1.0
+
+    # Clamp frequency range
+    effective_freq_min = max(freq_min, settings.freq_min, 1.0)
+    effective_freq_max = min(freq_max, settings.preview_freq_max, settings.freq_max, sample_rate * 0.5)
+    effective_freq_max = max(effective_freq_max, effective_freq_min * 1.001)
+
+    # Sparse STFT: sample `width` windows across the segment (no sliding),
+    # to avoid O(N) work for long audio.
+    nperseg = 4096 if sample_rate >= 48000 else 2048
+    nperseg = int(min(nperseg, max(256, audio_segment.size)))
+    if nperseg & (nperseg - 1) != 0:
+        nperseg = 1 << int(np.floor(np.log2(nperseg)))
+        nperseg = max(256, nperseg)
+
+    window = np.hanning(nperseg).astype(np.float32)
+    fft_freqs = np.fft.rfftfreq(nperseg, d=1.0 / float(sample_rate)).astype(np.float64)
+    if fft_freqs.size < 2:
+        return SpectrogramPreview(
+            width=width,
+            height=height,
+            data=[0] * (width * height),
+            freq_min=effective_freq_min,
+            freq_max=effective_freq_max,
+            duration_sec=total_duration,
+            time_start=time_start,
+            time_end=time_end,
+        ), 1.0
+
+    frame_centers = np.linspace(0, audio_segment.size - 1, width, dtype=np.int64)
+    half = nperseg // 2
+    mags = np.zeros((fft_freqs.size, width), dtype=np.float32)
+
+    audio_f64 = audio_segment.astype(np.float64, copy=False)
+    for col, center in enumerate(frame_centers.tolist()):
+        start = int(center) - half
+        end = start + nperseg
+        if start < 0 or end > audio_segment.size:
+            padded = np.zeros(nperseg, dtype=np.float64)
+            src_start = max(0, start)
+            src_end = min(audio_segment.size, end)
+            dst_start = src_start - start
+            dst_end = dst_start + (src_end - src_start)
+            padded[dst_start:dst_end] = audio_f64[src_start:src_end]
+            segment = padded
+        else:
+            segment = audio_f64[start:end]
+        spectrum = np.fft.rfft(segment * window, n=nperseg)
+        mags[:, col] = np.abs(spectrum).astype(np.float32)
+
+    # Interpolate linear-frequency magnitudes to log-frequency axis.
+    log_freqs = np.geomspace(effective_freq_min, effective_freq_max, height).astype(np.float64)
+    resized = np.empty((height, width), dtype=np.float32)
+    for col in range(width):
+        resized[:, col] = np.interp(log_freqs, fft_freqs, mags[:, col], left=0.0, right=0.0).astype(np.float32)
+
+    computed_amp_reference = float(np.max(resized)) if resized.size else 1.0
+    if amp_reference is None:
+        amp_reference = computed_amp_reference
+
+    normalized = _normalize_magnitude_db(resized, reference_max=amp_reference)
+    normalized = np.flipud(normalized)
+    data = (normalized * 255).astype(np.uint8).flatten().tolist()
+    return SpectrogramPreview(
+        width=width,
+        height=height,
+        data=data,
+        freq_min=effective_freq_min,
+        freq_max=effective_freq_max,
+        duration_sec=total_duration,
+        time_start=time_start,
+        time_end=time_end,
+    ), computed_amp_reference
 
 
 def snap_trace(
@@ -193,7 +293,6 @@ def snap_trace(
     trace: Sequence[tuple[float, float]],
     window_ms: float = 200.0,
     freq_window_octaves: float = 0.5,
-    max_points: int | None = None,
     amp_reference: float | None = None,
 ) -> list[PartialPoint]:
     if not trace or audio.size == 0:
@@ -201,17 +300,8 @@ def snap_trace(
 
     resampled = _resample_trace(trace, settings.time_resolution_ms)
     trace_points = list(resampled)
-    use_fast_mode = len(trace_points) > 256
-    if max_points is not None and len(trace_points) > max_points:
-        trace_points = _decimate_trace(trace_points, max_points=max_points)
-        use_fast_mode = True
-    effective_bins = settings.bins_per_octave
-    effective_window_ms = window_ms
-    if use_fast_mode:
-        effective_bins = max(8, settings.bins_per_octave // 3)
-        effective_window_ms = min(window_ms, 80.0)
 
-    window_samples = int(sample_rate * effective_window_ms / 1000.0)
+    window_samples = int(sample_rate * window_ms / 1000.0)
     window_samples = max(32, window_samples)
     half_window = window_samples // 2
 
@@ -227,22 +317,17 @@ def snap_trace(
         window = _to_float32(window)
         local_freq_min = max(1.0, freq_in / (2.0**freq_window_octaves))
         local_freq_max = min(settings.freq_max, freq_in * (2.0**freq_window_octaves))
-        window_sample_rate = sample_rate
-        target_rate = _preview_sample_rate(window_sample_rate, local_freq_max)
-        if target_rate < window_sample_rate:
-            window, _ = resample_audio(window, window_sample_rate, target_rate)
-            window_sample_rate = target_rate
         frequencies = _build_frequencies(
             AnalysisSettings(
                 freq_min=local_freq_min,
                 freq_max=local_freq_max,
-                bins_per_octave=effective_bins,
+                bins_per_octave=settings.bins_per_octave,
             )
         )
 
         magnitude = _cwt_magnitude(
             window,
-            window_sample_rate,
+            sample_rate,
             frequencies,
             wavelet_bandwidth=settings.wavelet_bandwidth,
             wavelet_center_freq=settings.wavelet_center_freq,
@@ -270,15 +355,6 @@ def snap_trace(
         points.append(PartialPoint(time=time_sec, freq=peak_freq, amp=normalized_amp))
 
     return points
-
-
-def _decimate_trace(trace: Sequence[tuple[float, float]], max_points: int) -> list[tuple[float, float]]:
-    if max_points <= 0:
-        return []
-    if len(trace) <= max_points:
-        return list(trace)
-    indices = np.linspace(0, len(trace) - 1, max_points, dtype=int)
-    return [trace[idx] for idx in indices]
 
 
 def _resample_trace(trace: Sequence[tuple[float, float]], time_resolution_ms: float) -> list[tuple[float, float]]:
@@ -355,6 +431,21 @@ def _normalize_cwt(magnitude: np.ndarray, reference_max: float | None = None) ->
         return np.zeros_like(magnitude, dtype=np.float32)
 
     # Visual dynamic range in dB (0dB = peak, <= min_db -> black).
+    min_db = -60.0
+    eps = 1e-12
+    max_mag = reference_max if reference_max is not None and reference_max > 0 else float(np.max(magnitude))
+    if max_mag <= 0:
+        return np.zeros_like(magnitude, dtype=np.float32)
+
+    db = 20.0 * (np.log10(magnitude.astype(np.float64) + eps) - np.log10(max_mag + eps))
+    normalized = (db - min_db) / (-min_db)
+    return np.asarray(np.clip(normalized, 0.0, 1.0), dtype=np.float32)
+
+
+def _normalize_magnitude_db(magnitude: np.ndarray, reference_max: float | None = None) -> np.ndarray:
+    if magnitude.size == 0:
+        return np.zeros_like(magnitude, dtype=np.float32)
+
     min_db = -60.0
     eps = 1e-12
     max_mag = reference_max if reference_max is not None and reference_max > 0 else float(np.max(magnitude))

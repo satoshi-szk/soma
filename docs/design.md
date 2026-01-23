@@ -21,7 +21,7 @@
     - `Tailwind CSS`
 - **Backend (Model):**
     - `NumPy`: 行列演算、バッファ管理。
-    - `SciPy` / `PyWavelets`: 信号処理、CWT、補間。
+    - `SciPy` / `PyWavelets`: 信号処理（STFT/CWT）、補間。
     - `SoundDevice`: オーディオ再生。
 - **Build / CI:**
     - `uv`: パッケージ・依存関係管理。
@@ -31,6 +31,10 @@
 ### 2.2 アーキテクチャ図 (Conceptual)
 
 Frontend (JS) と Backend (Python) は `window.pywebview.api` を介して通信する。
+
+補足:
+- パーシャル抽出（スナップ）などの操作系コマンドは通常のリクエスト/レスポンス。
+- スペクトログラムプレビューは計算が重く非同期になりやすいため、**フロントは fire & forget でリクエストし、結果は Backend から push 通知**する方式を採用する。
 
 コード スニペット
 
@@ -50,6 +54,7 @@ graph TD
     end
     
     API -->|JSON Response| JS
+    API -.->|Preview Events (Push)| JS
 ```
 
 ---
@@ -58,7 +63,7 @@ graph TD
 
 ### 3.1 Backend: 解析エンジン (`Analyzer`)
 
-FFTではなく **Continuous Wavelet Transform (CWT)** を採用する。
+パーシャル抽出（スナップ処理）では、FFT/STFTではなく **Continuous Wavelet Transform (CWT)** を採用する。
 
 - **アルゴリズム:** Complex Morlet Wavelet を使用。
 - **理由:** 低域の周波数解像度と高域の時間解像度（過渡特性の捕捉）を両立させるため。また、対数周波数軸との親和性が高い。
@@ -69,6 +74,7 @@ FFTではなく **Continuous Wavelet Transform (CWT)** を採用する。
         2. **JIT解析:** 軌跡の周辺時間（$\pm$ 数100ms）のみ、高解像度 Wavelet 変換を行う。
         3. **Ridge Detection:** 各時刻において、$f_{in}$ 近傍の局所最大ピーク（Ridge）を探索し、最も確かな成分をつなぎ合わせて Partial を生成する。
     - **備考:** 描画中のリアルタイムスナップは行わないため、事前計算キャッシュは不要。常に最新・高精度のJIT解析結果を用いる。
+- **重要:** STFT は GUI のスペクトログラムプレビュー専用であり、スナップ処理には **絶対に使用しない**。
 
 ### 3.2 Backend: 合成・再生エンジン (`Synthesizer`)
 
@@ -112,9 +118,9 @@ class Partial:
 
 1. **Visualization Layer (表示用・低解像度)**
     - **目的:** スペクトログラムの全体描画。
-    - **手法:** `hop_length` を大きく設定（例: 512 samples ≈ 11ms）して間引き計算を行う。
-    - **データサイズ:** 1分のオーディオで約 20MB 程度。
-    - **タイミング:** プロジェクトロード時に一括計算し、RAMに保持する。ディスクキャッシュは不要。
+    - **手法:** **STFT** を用いた高速プレビューをベースラインとして生成する（時間解像度は出力 `width` に合わせて調整）。
+    - **プログレッシブ更新:** 表示窓長 `time_end - time_start` が閾値以下の場合、バックグラウンドで **CWT** による高品質版を生成し差し替える。
+    - **タイミング:** 初期化時（overview）およびズーム/パン完了時（viewport）に fire & forget で生成を要求し、結果は Backend から push 通知する。
     - **Peak List Cache (局所最大リストのキャッシュ)**
         - **廃止:** スナップ処理は `MouseUp` 時に JIT 計算を行う方針に変更されたため、広域の Peak List 事前計算・キャッシュは行わない。
         - Visualization Layer は純粋に「背景のスペクトログラム画像」の描画のみを担当する。
@@ -123,6 +129,7 @@ class Partial:
     - **手法:** **On-the-fly (JIT) Computation**。全データをメモリに持たず、カーソル周辺の微小時間（例: $\pm 100\text{ms}$）のみを、ユーザー操作が発生した瞬間に局所的に計算する。
     - **データサイズ:** 数 KB 程度（一瞬で破棄）。
     - **タイミング:** マウスダウン / ドラッグ時のみ。
+    - **重要:** Interaction Layer の解析は CWT のみで行う（STFT は使わない）。
 3. **Persistence (永続化)**
     - 巨大なCWT行列データは `.soma` ファイルに保存しない。
     - 「ソース音声パス」と「解析パラメータ」のみを保存し、次回起動時に Visualization Layer を再計算する。

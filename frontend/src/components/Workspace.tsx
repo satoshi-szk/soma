@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Circle, Group, Layer, Line, Rect, Shape, Stage, Image as KonvaImage, Text } from 'react-konva'
-import type { AnalysisSettings, Partial, PartialPoint, SpectrogramPreview, ToolId, ViewportPreview } from '../app/types'
+import { ZOOM_X_MAX_PX_PER_SEC, ZOOM_X_MIN_PX_PER_SEC } from '../app/constants'
+import type { AnalysisSettings, Partial, PartialPoint, SpectrogramPreview, ToolId } from '../app/types'
 import { mapColor } from '../app/utils'
 import { SelectionHud } from './SelectionHud'
 import type { KonvaEventObject } from 'konva/lib/Node'
@@ -19,7 +20,7 @@ const hexToRgba = (hex: string, alpha: number) => {
 
 export type WorkspaceProps = {
   preview: SpectrogramPreview | null
-  viewportPreview: ViewportPreview | null
+  viewportPreviews: SpectrogramPreview[] | null
   settings: AnalysisSettings
   partials: Partial[]
   selectedIds: string[]
@@ -27,10 +28,11 @@ export type WorkspaceProps = {
   activeTool: ToolId
   analysisState: 'idle' | 'analyzing' | 'error'
   isSnapping: boolean
-  zoom: number
+  zoomX: number
+  zoomY: number
   pan: { x: number; y: number }
   playbackPosition: number
-  onZoomChange: (zoom: number) => void
+  onZoomXChange: (zoom: number) => void
   onPanChange: (pan: { x: number; y: number }) => void
   onStageSizeChange: (size: { width: number; height: number }) => void
   onTraceCommit: (trace: Array<[number, number]>) => Promise<boolean>
@@ -43,11 +45,13 @@ export type WorkspaceProps = {
   onCursorMove: (cursor: { time: number; freq: number; amp: number | null }) => void
   onPartialMute: () => void
   onPartialDelete: () => void
+  onZoomInY: () => void
+  onZoomOutY: () => void
 }
 
 export function Workspace({
   preview,
-  viewportPreview,
+  viewportPreviews,
   settings,
   partials,
   selectedIds,
@@ -55,10 +59,11 @@ export function Workspace({
   activeTool,
   analysisState,
   isSnapping,
-  zoom,
+  zoomX,
+  zoomY,
   pan,
   playbackPosition,
-  onZoomChange,
+  onZoomXChange,
   onPanChange,
   onStageSizeChange,
   onTraceCommit,
@@ -71,6 +76,8 @@ export function Workspace({
   onCursorMove,
   onPartialMute,
   onPartialDelete,
+  onZoomInY,
+  onZoomOutY,
 }: WorkspaceProps) {
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [stageSize, setStageSize] = useState({ width: 900, height: 420 })
@@ -121,28 +128,35 @@ export function Workspace({
     return canvas
   }, [preview, settings])
 
-  const viewportPreviewImage = useMemo(() => {
-    if (!viewportPreview) return null
-    const canvas = document.createElement('canvas')
-    canvas.width = viewportPreview.width
-    canvas.height = viewportPreview.height
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return null
-    const image = ctx.createImageData(viewportPreview.width, viewportPreview.height)
-    for (let i = 0; i < viewportPreview.data.length; i += 1) {
-      const normalized = viewportPreview.data[i] / 255
-      const adjusted = Math.min(1, Math.max(0, (normalized - 0.5) * settings.contrast + 0.5 + settings.brightness))
-      const value = Math.round(adjusted * 255)
-      const color = mapColor(settings.color_map, value)
-      const offset = i * 4
-      image.data[offset] = color[0]
-      image.data[offset + 1] = color[1]
-      image.data[offset + 2] = color[2]
-      image.data[offset + 3] = 255
-    }
-    ctx.putImageData(image, 0, 0)
-    return canvas
-  }, [viewportPreview, settings])
+  const viewportPreviewImages = useMemo(() => {
+    if (!viewportPreviews || viewportPreviews.length === 0) return []
+    return viewportPreviews
+      .map((current) => {
+        const canvas = document.createElement('canvas')
+        canvas.width = current.width
+        canvas.height = current.height
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return null
+        const image = ctx.createImageData(current.width, current.height)
+        for (let i = 0; i < current.data.length; i += 1) {
+          const normalized = current.data[i] / 255
+          const adjusted = Math.min(
+            1,
+            Math.max(0, (normalized - 0.5) * settings.contrast + 0.5 + settings.brightness)
+          )
+          const value = Math.round(adjusted * 255)
+          const color = mapColor(settings.color_map, value)
+          const offset = i * 4
+          image.data[offset] = color[0]
+          image.data[offset + 1] = color[1]
+          image.data[offset + 2] = color[2]
+          image.data[offset + 3] = 255
+        }
+        ctx.putImageData(image, 0, 0)
+        return { preview: current, image: canvas }
+      })
+      .filter((item): item is { preview: SpectrogramPreview; image: HTMLCanvasElement } => item !== null)
+  }, [viewportPreviews, settings])
 
   const contentOffset = useMemo(() => ({ x: 0, y: 28 }), [])
   const spectrogramAreaHeight = Math.max(1, stageSize.height - automationLaneHeight)
@@ -151,34 +165,39 @@ export function Workspace({
   const automationContentTop = automationTop + automationPadding.top
 
   const baseScale = useMemo(() => {
-    if (!preview) return { x: 1, y: 1 }
+    if (!preview) return { y: 1 }
     return {
-      x: stageSize.width / preview.width,
       y: Math.max(1, spectrogramAreaHeight - contentOffset.y) / preview.height,
     }
-  }, [preview, stageSize, spectrogramAreaHeight, contentOffset])
-
-  const scale = useMemo(() => ({ x: baseScale.x * zoom, y: baseScale.y * zoom }), [baseScale, zoom])
+  }, [preview, spectrogramAreaHeight, contentOffset])
 
   const duration = preview?.duration_sec ?? 1
+  const timeScale = useMemo(() => {
+    if (!preview) return 1
+    return (duration * zoomX) / preview.width
+  }, [preview, duration, zoomX])
+  const scale = useMemo(() => ({ x: timeScale, y: baseScale.y * zoomY }), [timeScale, baseScale, zoomY])
   const freqMin = preview?.freq_min ?? settings.freq_min
   const freqMax = preview?.freq_max ?? settings.freq_max
 
-  const viewportPosition = useMemo(() => {
-    if (!viewportPreview || !preview) return null
+  const viewportPositions = useMemo(() => {
+    if (!viewportPreviews || !preview) return []
     const logMin = Math.log(freqMin)
     const logMax = Math.log(freqMax)
-    const vpLogMin = Math.log(viewportPreview.freq_min)
-    const vpLogMax = Math.log(viewportPreview.freq_max)
-    const yTop = ((logMax - vpLogMax) / (logMax - logMin)) * preview.height
-    const yBottom = ((logMax - vpLogMin) / (logMax - logMin)) * preview.height
-    return {
-      x: (viewportPreview.time_start / duration) * preview.width,
-      y: yTop,
-      width: ((viewportPreview.time_end - viewportPreview.time_start) / duration) * preview.width,
-      height: yBottom - yTop,
-    }
-  }, [viewportPreview, preview, duration, freqMin, freqMax])
+    return viewportPreviews.map((current) => {
+      const vpLogMin = Math.log(current.freq_min)
+      const vpLogMax = Math.log(current.freq_max)
+      const yTop = ((logMax - vpLogMax) / (logMax - logMin)) * preview.height
+      const yBottom = ((logMax - vpLogMin) / (logMax - logMin)) * preview.height
+      return {
+        preview: current,
+        x: (current.time_start / duration) * preview.width,
+        y: yTop,
+        width: ((current.time_end - current.time_start) / duration) * preview.width,
+        height: yBottom - yTop,
+      }
+    })
+  }, [viewportPreviews, preview, duration, freqMin, freqMax])
 
   const timeToX = useCallback(
     (time: number) => {
@@ -233,6 +252,7 @@ export function Workspace({
     if (!stage) return
     const pointer = stage.getPointerPosition()
     if (!pointer) return
+    if (!preview) return
     const isZoomGesture = event.evt.ctrlKey || event.evt.metaKey
     if (!isZoomGesture) {
       const nextPan = {
@@ -242,23 +262,23 @@ export function Workspace({
       onPanChange(nextPan)
       return
     }
+    // Horizontal zoom only (time axis)
     const scaleBy = 1.05
-    const oldScale = zoom
+    const oldScaleX = zoomX
     const direction = event.evt.deltaY > 0 ? -1 : 1
-    const newScale = direction > 0 ? oldScale * scaleBy : oldScale / scaleBy
-    const clamped = Math.min(4, Math.max(0.5, newScale))
+    const newScaleX = direction > 0 ? oldScaleX * scaleBy : oldScaleX / scaleBy
+    const clampedX = Math.min(ZOOM_X_MAX_PX_PER_SEC, Math.max(ZOOM_X_MIN_PX_PER_SEC, newScaleX))
 
-    const mousePointTo = {
-      x: (pointer.x - pan.x) / (baseScale.x * oldScale),
-      y: (pointer.y - pan.y) / (baseScale.y * oldScale),
-    }
+    const oldTimeScale = (duration * oldScaleX) / preview.width
+    const newTimeScale = (duration * clampedX) / preview.width
+    const mousePointToX = (pointer.x - pan.x) / oldTimeScale
 
     const newPan = {
-      x: pointer.x - mousePointTo.x * baseScale.x * clamped,
-      y: pointer.y - mousePointTo.y * baseScale.y * clamped,
+      x: pointer.x - mousePointToX * newTimeScale,
+      y: pan.y,
     }
 
-    onZoomChange(clamped)
+    onZoomXChange(clampedX)
     onPanChange(newPan)
   }
 
@@ -520,16 +540,23 @@ export function Workspace({
             {previewImage ? (
               <KonvaImage image={previewImage} width={preview?.width} height={preview?.height} opacity={0.85} />
             ) : null}
-            {viewportPreviewImage && viewportPosition ? (
-              <KonvaImage
-                image={viewportPreviewImage}
-                x={viewportPosition.x}
-                y={viewportPosition.y}
-                width={viewportPosition.width}
-                height={viewportPosition.height}
-                opacity={0.95}
-              />
-            ) : null}
+            {viewportPreviewImages.length > 0 && viewportPositions.length > 0
+              ? viewportPreviewImages.map((item) => {
+                  const position = viewportPositions.find((entry) => entry.preview === item.preview)
+                  if (!position) return null
+                  return (
+                    <KonvaImage
+                      key={`${item.preview.time_start}-${item.preview.time_end}-${item.preview.freq_min}-${item.preview.freq_max}`}
+                      image={item.image}
+                      x={position.x}
+                      y={position.y}
+                      width={position.width}
+                      height={position.height}
+                      opacity={0.95}
+                    />
+                  )
+                })
+              : null}
           </Group>
         </Layer>
         <Layer>
@@ -702,6 +729,27 @@ export function Workspace({
           onDelete={onPartialDelete}
           position={hudPosition}
         />
+      ) : null}
+      {preview ? (
+        <div className="absolute right-6 top-1/2 -translate-y-1/2 flex flex-col gap-1">
+          <button
+            className="flex h-7 w-7 items-center justify-center rounded-sm bg-[rgba(12,18,30,0.85)] text-[var(--muted)] hover:bg-[rgba(20,28,45,0.95)] hover:text-white transition-colors"
+            onClick={onZoomInY}
+            title="Zoom in frequency"
+          >
+            <span className="text-sm font-bold">+</span>
+          </button>
+          <div className="flex h-5 items-center justify-center text-[9px] text-[var(--muted)] font-mono">
+            {Math.round(zoomY * 100)}%
+          </div>
+          <button
+            className="flex h-7 w-7 items-center justify-center rounded-sm bg-[rgba(12,18,30,0.85)] text-[var(--muted)] hover:bg-[rgba(20,28,45,0.95)] hover:text-white transition-colors"
+            onClick={onZoomOutY}
+            title="Zoom out frequency"
+          >
+            <span className="text-sm font-bold">−</span>
+          </button>
+        </div>
       ) : null}
     </div>
   )

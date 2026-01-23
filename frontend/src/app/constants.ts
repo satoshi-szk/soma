@@ -28,6 +28,10 @@ export const DEFAULT_SETTINGS: AnalysisSettings = {
   contrast: 1,
 }
 
+export const ZOOM_X_MIN_PX_PER_SEC = 0.05
+export const ZOOM_X_MAX_PX_PER_SEC = 10000
+export const ZOOM_X_STEP_RATIO = 2.0
+
 export const MENU_SECTIONS = [
   {
     label: 'Project',

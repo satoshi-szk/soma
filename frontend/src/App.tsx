@@ -116,11 +116,11 @@ function App() {
       return
     }
     if (label === 'Zoom In') {
-      viewport.zoomIn()
+      viewport.zoomInX()
       return
     }
     if (label === 'Zoom Out') {
-      viewport.zoomOut()
+      viewport.zoomOutX()
       return
     }
     if (label === 'Reset View') {
@@ -235,6 +235,14 @@ function App() {
     return `T: ${cursorInfo.time.toFixed(2)}s | F: ${cursorInfo.freq.toFixed(1)}Hz (${note}) | A: ${ampLabel}`
   }, [cursorInfo, analysis.preview])
 
+  const timeScaleLabel = useMemo(() => {
+    if (!analysis.preview) return 'Time -- px/ms'
+    const value = viewport.zoomX / 1000
+    if (value >= 1) return `Time ${value.toFixed(2)} px/ms`
+    if (value >= 0.1) return `Time ${value.toFixed(3)} px/ms`
+    return `Time ${value.toFixed(4)} px/ms`
+  }, [analysis.preview, viewport.zoomX])
+
   return (
     <div className={`page ${ready ? 'is-ready' : ''} h-screen`}>
       <div className="mx-auto flex h-full w-full max-w-none flex-col gap-4 px-4 pb-6 pt-6 sm:px-6">
@@ -262,12 +270,12 @@ function App() {
           <section className="panel flex flex-1 min-h-0 flex-col rounded-none px-4 py-4">
             <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.22em] text-[var(--muted)]">
               <span>Workspace</span>
-              <span className="font-mono text-[10px]">Zoom {Math.round(viewport.zoom * 100)}%</span>
+              <span className="font-mono text-[10px]">{timeScaleLabel}</span>
             </div>
             <div className="mt-3 flex-1 min-h-0 h-full">
               <Workspace
                 preview={analysis.preview}
-                viewportPreview={viewport.viewportPreview}
+                viewportPreviews={viewport.viewportPreviews}
                 settings={analysis.settings}
                 partials={partialsHook.partials}
                 selectedIds={partialsHook.selection}
@@ -275,10 +283,11 @@ function App() {
                 activeTool={activeTool}
                 analysisState={analysis.analysisState}
                 isSnapping={partialsHook.isSnapping}
-                zoom={viewport.zoom}
+                zoomX={viewport.zoomX}
+                zoomY={viewport.zoomY}
                 pan={viewport.pan}
                 playbackPosition={playback.playbackPosition}
-                onZoomChange={viewport.setZoom}
+                onZoomXChange={viewport.setZoomX}
                 onPanChange={viewport.setPan}
                 onStageSizeChange={viewport.setStageSize}
                 onTraceCommit={handleTraceCommit}
@@ -291,6 +300,8 @@ function App() {
                 onCursorMove={setCursorInfo}
                 onPartialMute={handlePartialMute}
                 onPartialDelete={handlePartialDelete}
+                onZoomInY={viewport.zoomInY}
+                onZoomOutY={viewport.zoomOutY}
               />
             </div>
           </section>

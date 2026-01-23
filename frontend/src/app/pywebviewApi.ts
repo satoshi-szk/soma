@@ -31,7 +31,6 @@ const callApi = async <M extends ApiMethod>(method: M, payload?: PayloadFor<M>):
 export const pywebviewApi = {
   health: () => callApi('health'),
   status: () => callApi('status'),
-  analysis_status: () => callApi('analysis_status'),
   playback_state: () => callApi('playback_state'),
   frontend_log: (payload: PayloadFor<'frontend_log'>) => callApi('frontend_log', payload),
   open_audio: () => callApi('open_audio'),
@@ -57,7 +56,6 @@ export const pywebviewApi = {
   export_audio: (payload: PayloadFor<'export_audio'>) => callApi('export_audio', payload),
   request_viewport_preview: (payload: PayloadFor<'request_viewport_preview'>) =>
     callApi('request_viewport_preview', payload),
-  viewport_preview_status: () => callApi('viewport_preview_status'),
 }
 
 export const isPywebviewApiAvailable = (): boolean => Boolean(getRawApi())

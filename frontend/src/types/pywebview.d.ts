@@ -6,7 +6,6 @@ declare global {
       api?: {
         health: () => Promise<unknown>
         status: () => Promise<unknown>
-        analysis_status: () => Promise<unknown>
         frontend_log: (level: string, message: string) => Promise<unknown>
         open_audio: () => Promise<unknown>
         new_project: () => Promise<unknown>
@@ -31,7 +30,6 @@ declare global {
         export_mpe: (payload: unknown) => Promise<unknown>
         export_audio: (payload: unknown) => Promise<unknown>
         request_viewport_preview: (payload: unknown) => Promise<unknown>
-        viewport_preview_status: () => Promise<unknown>
       }
     }
   }

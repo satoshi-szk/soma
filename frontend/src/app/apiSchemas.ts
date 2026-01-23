@@ -27,19 +27,11 @@ const spectrogramPreviewSchema = z.object({
   width: z.number(),
   height: z.number(),
   data: z.array(z.number()),
-  freq_min: z.number(),
-  freq_max: z.number(),
-  duration_sec: z.number(),
-})
-
-const viewportPreviewSchema = z.object({
-  width: z.number(),
-  height: z.number(),
-  data: z.array(z.number()),
   time_start: z.number(),
   time_end: z.number(),
   freq_min: z.number(),
   freq_max: z.number(),
+  duration_sec: z.number(),
 })
 
 const partialPointTupleSchema = z.tuple([z.number(), z.number(), z.number()])
@@ -76,13 +68,6 @@ const updateSettingsResponseSchema = z.union([
   errorStatusSchema,
 ])
 
-const analysisStatusResponseSchema = z.object({
-  status: z.literal('ok'),
-  state: z.enum(['idle', 'processing', 'ready', 'error']),
-  preview: spectrogramPreviewSchema.nullable(),
-  message: z.string().nullable().optional(),
-})
-
 const statusResponseSchema = z.object({
   status: z.literal('ok'),
   is_playing: z.boolean(),
@@ -101,7 +86,6 @@ const partialsResponseSchema = z.object({ status: z.literal('ok'), partials: z.a
 export const apiSchemas = {
   health: { response: okStatusSchema },
   status: { response: statusResponseSchema },
-  analysis_status: { response: analysisStatusResponseSchema },
   playback_state: { response: playbackStateResponseSchema },
   frontend_log: {
     payload: z.object({ level: z.string(), message: z.string() }),
@@ -186,18 +170,6 @@ export const apiSchemas = {
       width: z.number(),
       height: z.number(),
     }),
-    response: z.union([
-      z.object({ status: z.literal('processing'), request_id: z.string() }),
-      errorStatusSchema,
-    ]),
-  },
-  viewport_preview_status: {
-    response: z.object({
-      status: z.literal('ok'),
-      state: z.enum(['idle', 'processing', 'ready', 'cancelled', 'error']),
-      request_id: z.string().nullable(),
-      preview: viewportPreviewSchema.nullable(),
-      message: z.string().nullable().optional(),
-    }),
+    response: z.union([z.object({ status: z.literal('accepted') }), errorStatusSchema]),
   },
 } as const
