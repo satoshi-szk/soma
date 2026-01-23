@@ -110,6 +110,7 @@ def make_viewport_spectrogram(
     freq_max: float,
     width: int,
     height: int,
+    amp_reference: float | None = None,
 ) -> ViewportPreview:
     """Generate a high-resolution spectrogram for the specified viewport region."""
     if audio.size == 0 or time_end <= time_start:
@@ -166,7 +167,7 @@ def make_viewport_spectrogram(
         wavelet_bandwidth=settings.wavelet_bandwidth,
         wavelet_center_freq=settings.wavelet_center_freq,
     )
-    magnitude = _normalize_cwt(cwt_matrix)
+    magnitude = _normalize_cwt(cwt_matrix, reference_max=amp_reference)
 
     time_resampled = resample(magnitude, width, axis=1)
     resized = resample(time_resampled, height, axis=0)
@@ -337,12 +338,18 @@ def _cwt_magnitude(
     return np.asarray(np.abs(coefficients), dtype=np.float32)
 
 
-def _normalize_cwt(magnitude: np.ndarray) -> np.ndarray:
+def _normalize_cwt(magnitude: np.ndarray, reference_max: float | None = None) -> np.ndarray:
     """Normalize CWT magnitude for visualization.
 
     We use a fixed dB range relative to the peak instead of min/max normalization.
     Min/max tends to lift the noise floor (especially for narrowband signals like a sine),
     making ridges look unrealistically thick.
+
+    Args:
+        magnitude: CWT magnitude matrix.
+        reference_max: If provided, use this as the reference maximum instead of
+            computing from the magnitude. This ensures consistent brightness
+            across different zoom levels.
     """
     if magnitude.size == 0:
         return np.zeros_like(magnitude, dtype=np.float32)
@@ -350,7 +357,7 @@ def _normalize_cwt(magnitude: np.ndarray) -> np.ndarray:
     # Visual dynamic range in dB (0dB = peak, <= min_db -> black).
     min_db = -60.0
     eps = 1e-12
-    max_mag = float(np.max(magnitude))
+    max_mag = reference_max if reference_max is not None and reference_max > 0 else float(np.max(magnitude))
     if max_mag <= 0:
         return np.zeros_like(magnitude, dtype=np.float32)
 

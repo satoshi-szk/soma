@@ -353,6 +353,7 @@ class SomaDocument:
             audio = self.audio_data
             sample_rate = self.audio_info.sample_rate
             settings = self.settings
+            amp_reference = self._amp_reference
 
         def _worker() -> None:
             with self._lock:
@@ -370,6 +371,7 @@ class SomaDocument:
                     freq_max,
                     width,
                     height,
+                    amp_reference=amp_reference,
                 )
             except Exception as exc:
                 self._logger.exception("viewport preview generation failed")
