@@ -708,7 +708,7 @@ export function Workspace({
         <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center text-white/70">
           <div className="text-xs uppercase tracking-[0.3em]">No Audio Loaded</div>
           <button
-            className="rounded-none bg-white/90 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-strong)]"
+            className="rounded-md bg-white/90 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-strong)]"
             onClick={onOpenAudio}
           >
             Open Audio

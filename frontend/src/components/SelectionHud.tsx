@@ -21,14 +21,14 @@ export function SelectionHud({ selected, canMute, canDelete, onMute, onDelete, p
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-3">
         <button
-          className="rounded-none border border-[var(--panel-border)] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--accent-strong)]"
+          className="rounded-md border border-[var(--panel-border)] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--accent-strong)]"
           onClick={onMute}
           disabled={!canMute}
         >
           Mute
         </button>
         <button
-          className="rounded-none border border-[var(--panel-border)] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--accent-warm)]"
+          className="rounded-md border border-[var(--panel-border)] px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--accent-warm)]"
           onClick={onDelete}
           disabled={!canDelete}
         >
