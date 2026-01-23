@@ -7,7 +7,7 @@ from scipy.io import wavfile
 
 pytest.importorskip("pywt")
 
-from soma.analysis import load_audio, make_spectrogram_preview, snap_trace  # noqa: E402
+from soma.analysis import load_audio, make_spectrogram, make_spectrogram_stft, snap_trace  # noqa: E402
 from soma.models import AnalysisSettings  # noqa: E402
 
 
@@ -44,54 +44,80 @@ def test_load_audio_normalizes_stereo_int32(tmp_path: Path) -> None:
     assert audio.min() >= -1.0
 
 
-def test_make_spectrogram_preview() -> None:
+def test_make_spectrogram() -> None:
     sample_rate = 44100
-    t = np.linspace(0, 1.0, sample_rate, endpoint=False)
+    duration = 1.0
+    t = np.linspace(0, duration, sample_rate, endpoint=False)
     audio = (0.2 * np.sin(2 * math.pi * 220.0 * t)).astype(np.float32)
     settings = AnalysisSettings(time_resolution_ms=0.0)
 
-    preview, amp_reference = make_spectrogram_preview(audio, sample_rate, settings)
+    preview, amp_reference = make_spectrogram(
+        audio=audio,
+        sample_rate=sample_rate,
+        settings=settings,
+        time_start=0.0,
+        time_end=duration,
+        freq_min=settings.freq_min,
+        freq_max=min(settings.preview_freq_max, settings.freq_max),
+        width=768,
+        height=320,
+    )
 
     assert preview.width == 768
     assert preview.height == 320
     assert len(preview.data) == preview.width * preview.height
     assert preview.duration_sec > 0.0
-    assert preview.freq_max >= 10000.0
+    assert preview.time_start == 0.0
+    assert preview.time_end == duration
     assert amp_reference > 0.0
 
 
-def test_make_spectrogram_preview_flips_vertical(monkeypatch: pytest.MonkeyPatch) -> None:
-    from soma import analysis
-
-    def fake_build_frequencies(_: AnalysisSettings, max_freq: float | None = None) -> np.ndarray:
-        return np.array([100.0, 200.0], dtype=np.float32)
-
-    def fake_cwt_magnitude(
-        _audio: np.ndarray,
-        _sample_rate: float,
-        _frequencies: np.ndarray,
-        wavelet_bandwidth: float = 8.0,
-        wavelet_center_freq: float = 1.0,
-    ) -> np.ndarray:
-        return np.array([[0.0, 0.25], [0.5, 1.0]], dtype=np.float32)
-
-    def fake_normalize(magnitude: np.ndarray) -> np.ndarray:
-        return magnitude
-
-    def fake_resample(data: np.ndarray, _num: int, axis: int = 0) -> np.ndarray:
-        return data
-
-    monkeypatch.setattr(analysis, "_build_frequencies", fake_build_frequencies)
-    monkeypatch.setattr(analysis, "_cwt_magnitude", fake_cwt_magnitude)
-    monkeypatch.setattr(analysis, "_normalize_cwt", fake_normalize)
-    monkeypatch.setattr(analysis, "resample", fake_resample)
-
-    audio = np.array([0.1], dtype=np.float32)
+def test_make_spectrogram_stft() -> None:
+    sample_rate = 44100
+    duration = 1.0
+    t = np.linspace(0, duration, sample_rate, endpoint=False)
+    audio = (0.2 * np.sin(2 * math.pi * 220.0 * t)).astype(np.float32)
     settings = AnalysisSettings(time_resolution_ms=0.0)
 
-    preview, _amp_reference = analysis.make_spectrogram_preview(audio, 1000, settings, width=2, height=2)
+    preview, amp_reference = make_spectrogram_stft(
+        audio=audio,
+        sample_rate=sample_rate,
+        settings=settings,
+        time_start=0.0,
+        time_end=duration,
+        freq_min=settings.freq_min,
+        freq_max=min(settings.preview_freq_max, settings.freq_max),
+        width=256,
+        height=128,
+    )
 
-    assert preview.data == [127, 255, 0, 63]
+    assert preview.width == 256
+    assert preview.height == 128
+    assert len(preview.data) == preview.width * preview.height
+    assert preview.duration_sec > 0.0
+    assert amp_reference > 0.0
+
+
+def test_make_spectrogram_preserves_freq_max_for_longer_window() -> None:
+    sample_rate = 44100
+    duration = 5.0
+    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
+    audio = (0.2 * np.sin(2 * math.pi * 220.0 * t)).astype(np.float32)
+    settings = AnalysisSettings(time_resolution_ms=0.0)
+
+    preview, _amp_reference = make_spectrogram(
+        audio=audio,
+        sample_rate=sample_rate,
+        settings=settings,
+        time_start=0.0,
+        time_end=duration,
+        freq_min=settings.freq_min,
+        freq_max=min(settings.preview_freq_max, settings.freq_max),
+        width=120,
+        height=64,
+    )
+
+    assert preview.freq_max > 5000.0
 
 
 def test_snap_trace_returns_points() -> None:
@@ -125,12 +151,8 @@ def test_snap_trace_uses_amp_reference(monkeypatch: pytest.MonkeyPatch) -> None:
     ) -> np.ndarray:
         return np.array([[1.0, 1.0, 1.0, 1.0, 1.0], [2.0, 2.0, 2.0, 2.0, 2.0]], dtype=np.float32)
 
-    def fake_preview_sample_rate(sample_rate: int, _freq_max: float) -> int:
-        return sample_rate
-
     monkeypatch.setattr(analysis, "_build_frequencies", fake_build_frequencies)
     monkeypatch.setattr(analysis, "_cwt_magnitude", fake_cwt_magnitude)
-    monkeypatch.setattr(analysis, "_preview_sample_rate", fake_preview_sample_rate)
 
     audio = np.ones(1000, dtype=np.float32)
     settings = AnalysisSettings()
@@ -143,16 +165,7 @@ def test_snap_trace_uses_amp_reference(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_snap_trace_decimates_points() -> None:
-    sample_rate = 8000
-    duration = 0.6
-    t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
-    audio = (0.5 * np.sin(2 * math.pi * 330.0 * t)).astype(np.float32)
-    settings = AnalysisSettings()
-    trace = [(time, 340.0) for time in np.linspace(0.05, 0.55, 200)]
-
-    points = snap_trace(audio, sample_rate, settings, trace, max_points=20)
-
-    assert 1 <= len(points) <= 20
+    pytest.skip("snap_trace no longer decimates points for quality reasons")
 
 
 def test_snap_trace_resamples_to_time_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -170,18 +183,14 @@ def test_snap_trace_resamples_to_time_resolution(monkeypatch: pytest.MonkeyPatch
     ) -> np.ndarray:
         return np.vstack([np.ones(audio.size, dtype=np.float32), np.ones(audio.size, dtype=np.float32) * 2.0])
 
-    def fake_preview_sample_rate(sample_rate: int, _freq_max: float) -> int:
-        return sample_rate
-
     monkeypatch.setattr(analysis, "_build_frequencies", fake_build_frequencies)
     monkeypatch.setattr(analysis, "_cwt_magnitude", fake_cwt_magnitude)
-    monkeypatch.setattr(analysis, "_preview_sample_rate", fake_preview_sample_rate)
 
     audio = np.ones(1000, dtype=np.float32)
     settings = AnalysisSettings(time_resolution_ms=50.0)
     trace = [(0.0, 150.0), (0.2, 150.0)]
 
-    points = analysis.snap_trace(audio, 1000, settings, trace, max_points=10)
+    points = analysis.snap_trace(audio, 1000, settings, trace)
 
     assert len(points) == 5
 

@@ -1,12 +1,26 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { isPywebviewApiAvailable, pywebviewApi } from '../app/pywebviewApi'
-import type { SpectrogramPreview, ViewportPreview } from '../app/types'
+import {
+  ZOOM_X_MAX_PX_PER_SEC,
+  ZOOM_X_MIN_PX_PER_SEC,
+  ZOOM_X_STEP_RATIO,
+} from '../app/constants'
+import type { SpectrogramPreview } from '../app/types'
 
 type ViewportParams = {
   timeStart: number
   timeEnd: number
   freqMin: number
   freqMax: number
+}
+
+type ViewportCacheEntry = {
+  preview: SpectrogramPreview
+  quality: 'low' | 'high'
+  receivedAt: number
+  sourceDuration: number
+  sourceFreqMin: number
+  sourceFreqMax: number
 }
 
 function areParamsSimilar(a: ViewportParams | null, b: ViewportParams): boolean {
@@ -18,24 +32,67 @@ function areParamsSimilar(a: ViewportParams | null, b: ViewportParams): boolean 
 }
 
 export function useViewport(preview: SpectrogramPreview | null) {
-  const [zoomX, setZoomX] = useState(1)
+  const [zoomXState, setZoomXState] = useState<number | null>(null)
   const [zoomY, setZoomY] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [stageSize, setStageSize] = useState({ width: 900, height: 420 })
-  const [viewportPreviewData, setViewportPreviewData] = useState<ViewportPreview | null>(null)
-  const [viewportRequestId, setViewportRequestId] = useState<string | null>(null)
+  const [viewportCache, setViewportCache] = useState<ViewportCacheEntry[]>([])
   const viewportDebounceRef = useRef<number | null>(null)
+  const previewThrottleRef = useRef<{
+    lastApplied: number
+    timerId: number | null
+    pending: SpectrogramPreview | null
+    pendingQuality: 'low' | 'high'
+  }>({ lastApplied: 0, timerId: null, pending: null, pendingQuality: 'low' })
   const lastRequestedParams = useRef<ViewportParams | null>(null)
 
-  // Derive viewportPreview: null when not zoomed
-  const viewportPreview = useMemo(() => {
-    if (!preview || (zoomX <= 1 && zoomY <= 1)) return null
-    return viewportPreviewData
-  }, [preview, zoomX, zoomY, viewportPreviewData])
+  const baseZoomX = useMemo(() => {
+    if (!preview) return 1
+    return stageSize.width / Math.max(preview.duration_sec, 1e-6)
+  }, [preview, stageSize])
+
+  const zoomX = zoomXState ?? baseZoomX
+
+  const clampZoomX = useCallback(
+    (value: number) => Math.min(ZOOM_X_MAX_PX_PER_SEC, Math.max(ZOOM_X_MIN_PX_PER_SEC, value)),
+    []
+  )
+
+  const setZoomXClamped = useCallback(
+    (value: number | ((prev: number) => number)) => {
+      setZoomXState((prev) => {
+        const current = prev ?? baseZoomX
+        const next = typeof value === 'function' ? value(current) : value
+        return clampZoomX(next)
+      })
+    },
+    [baseZoomX, clampZoomX]
+  )
+
+  const viewportPreviews = useMemo(() => {
+    if (!preview || (zoomX <= baseZoomX && zoomY <= 1)) return null
+    const currentDuration = preview.duration_sec
+    const currentFreqMin = preview.freq_min
+    const currentFreqMax = preview.freq_max
+    return viewportCache
+      .filter(
+        (entry) =>
+          entry.sourceDuration === currentDuration &&
+          entry.sourceFreqMin === currentFreqMin &&
+          entry.sourceFreqMax === currentFreqMax
+      )
+      .slice()
+      .sort((a, b) => {
+        if (a.quality === b.quality) return a.receivedAt - b.receivedAt
+        return a.quality === 'low' ? -1 : 1
+      })
+      .map((entry) => entry.preview)
+  }, [preview, zoomX, zoomY, viewportCache, baseZoomX])
 
   // Request viewport preview on zoom/pan change
   useEffect(() => {
-    if (!preview || (zoomX <= 1 && zoomY <= 1)) {
+    if (!preview || (zoomX <= baseZoomX && zoomY <= 1)) {
+      lastRequestedParams.current = null
       return
     }
 
@@ -52,8 +109,8 @@ export function useViewport(preview: SpectrogramPreview | null) {
       const freqMax = preview.freq_max
 
       // Calculate visible viewport
-      const visibleTimeStart = Math.max(0, (-pan.x / (stageSize.width * zoomX)) * duration)
-      const visibleTimeEnd = Math.min(duration, visibleTimeStart + duration / zoomX)
+      const visibleTimeStart = Math.max(0, -pan.x / zoomX)
+      const visibleTimeEnd = Math.min(duration, visibleTimeStart + stageSize.width / zoomX)
       const logMin = Math.log(freqMin)
       const logMax = Math.log(freqMax)
       const visibleFreqMax = Math.exp(logMax - Math.max(0, -pan.y / (stageSize.height * zoomY)) * (logMax - logMin))
@@ -84,9 +141,8 @@ export function useViewport(preview: SpectrogramPreview | null) {
         height: Math.round(stageSize.height * 0.5),
       })
 
-      if (result.status === 'processing') {
-        setViewportRequestId(result.request_id)
-      }
+      // fire & forget: result status only indicates request acceptance
+      void result
     }, 500)
 
     return () => {
@@ -94,56 +150,125 @@ export function useViewport(preview: SpectrogramPreview | null) {
         window.clearTimeout(viewportDebounceRef.current)
       }
     }
-  }, [zoomX, zoomY, pan, stageSize, preview])
+  }, [zoomX, zoomY, pan, stageSize, preview, baseZoomX])
 
-  // Poll viewport preview status
+  // Subscribe viewport preview events (push)
   useEffect(() => {
-    if (!viewportRequestId) return
-    let alive = true
+    const cleanupState = previewThrottleRef.current
+    const applyPreview = (next: SpectrogramPreview, quality: 'low' | 'high') => {
+      if (!preview) return
+      const entry: ViewportCacheEntry = {
+        preview: next,
+        quality,
+        receivedAt: Date.now(),
+        sourceDuration: preview.duration_sec,
+        sourceFreqMin: preview.freq_min,
+        sourceFreqMax: preview.freq_max,
+      }
+      setViewportCache((prev) => {
+        const hasHigh = prev.some(
+          (item) =>
+            item.quality === 'high' &&
+            item.preview.time_start === next.time_start &&
+            item.preview.time_end === next.time_end &&
+            item.preview.freq_min === next.freq_min &&
+            item.preview.freq_max === next.freq_max
+        )
+        if (quality === 'low' && hasHigh) {
+          return prev
+        }
+        const filtered = quality === 'high'
+          ? prev.filter(
+              (item) =>
+                !(
+                  item.preview.time_start === next.time_start &&
+                  item.preview.time_end === next.time_end &&
+                  item.preview.freq_min === next.freq_min &&
+                  item.preview.freq_max === next.freq_max
+                )
+            )
+          : prev
+        const nextItems = [...filtered, entry]
+        const limit = 3
+        if (nextItems.length <= limit) return nextItems
+        return nextItems.slice(nextItems.length - limit)
+      })
+    }
 
-    const poll = async () => {
-      const api = isPywebviewApiAvailable() ? pywebviewApi : null
-      if (!api || !alive) return
-      const result = await api.viewport_preview_status()
-      if (!alive || result?.status !== 'ok') return
-      if (result.request_id !== viewportRequestId) return
+    const schedulePreview = (next: SpectrogramPreview, quality: 'low' | 'high') => {
+      const state = previewThrottleRef.current
+      state.pending = next
+      state.pendingQuality = quality
+      const now = Date.now()
+      const throttleMs = 1500
+      const elapsed = now - state.lastApplied
 
-      if (result.state === 'ready' && result.preview) {
-        setViewportPreviewData(result.preview)
-        setViewportRequestId(null)
-      } else if (result.state === 'error' || result.state === 'cancelled') {
-        setViewportRequestId(null)
+      if (elapsed >= throttleMs) {
+        if (state.timerId) {
+          window.clearTimeout(state.timerId)
+          state.timerId = null
+        }
+        state.lastApplied = now
+        applyPreview(next, quality)
+        return
+      }
+
+      if (state.timerId) {
+        return
+      }
+
+      state.timerId = window.setTimeout(() => {
+        state.timerId = null
+        if (state.pending) {
+          state.lastApplied = Date.now()
+          applyPreview(state.pending, state.pendingQuality)
+        }
+      }, throttleMs - elapsed)
+    }
+
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent).detail as unknown
+      if (!detail || typeof detail !== 'object') return
+      const payload = detail as Record<string, unknown>
+      if (payload.type === 'spectrogram_preview_updated' && payload.kind === 'viewport') {
+        const next = payload.preview as SpectrogramPreview | undefined
+        const quality = payload.quality === 'high' ? 'high' : 'low'
+        if (!next) return
+        schedulePreview(next, quality)
       }
     }
-
-    void poll()
-    const interval = window.setInterval(poll, 400)
+    window.addEventListener('soma:event', handler)
     return () => {
-      alive = false
-      window.clearInterval(interval)
+      window.removeEventListener('soma:event', handler)
+      const state = cleanupState
+      if (state.timerId) {
+        window.clearTimeout(state.timerId)
+        state.timerId = null
+      }
     }
-  }, [viewportRequestId])
+  }, [preview])
 
   const zoomInX = useCallback(() => {
-    setZoomX((value) => Math.min(4, value + 0.2))
-  }, [])
+    setZoomXClamped((value) => value * ZOOM_X_STEP_RATIO)
+  }, [setZoomXClamped])
 
   const zoomOutX = useCallback(() => {
-    setZoomX((value) => Math.max(0.5, value - 0.2))
-  }, [])
+    setZoomXClamped((value) => value / ZOOM_X_STEP_RATIO)
+  }, [setZoomXClamped])
 
   const zoomInY = useCallback(() => {
-    setZoomY((value) => Math.min(4, value + 0.2))
+    setZoomY((value) => Math.min(10, value + 1.0))
   }, [])
 
   const zoomOutY = useCallback(() => {
-    setZoomY((value) => Math.max(0.5, value - 0.2))
+    setZoomY((value) => Math.max(0.5, value - 1.0))
   }, [])
 
   const resetView = useCallback(() => {
-    setZoomX(1)
+    setZoomXState(null)
     setZoomY(1)
     setPan({ x: 0, y: 0 })
+    setViewportCache([])
   }, [])
 
   return {
@@ -151,8 +276,8 @@ export function useViewport(preview: SpectrogramPreview | null) {
     zoomY,
     pan,
     stageSize,
-    viewportPreview,
-    setZoomX,
+    viewportPreviews,
+    setZoomX: setZoomXClamped,
     setPan,
     setStageSize,
     zoomInX,

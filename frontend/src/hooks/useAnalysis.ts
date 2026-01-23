@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { isPywebviewApiAvailable, pywebviewApi } from '../app/pywebviewApi'
 import { DEFAULT_SETTINGS } from '../app/constants'
 import { toPartial } from '../app/utils'
@@ -21,32 +21,77 @@ export function useAnalysis(reportError: ReportError) {
   const [settings, setSettings] = useState<AnalysisSettings>(DEFAULT_SETTINGS)
 
   const flushUi = useCallback(() => new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve())), [])
+  const previewThrottleRef = useRef<{
+    lastApplied: number
+    timerId: number | null
+    pending: SpectrogramPreview | null
+  }>({ lastApplied: 0, timerId: null, pending: null })
 
-  // Poll analysis status
+  // Subscribe preview events (push)
   useEffect(() => {
-    if (analysisState !== 'analyzing') return
-    let alive = true
-    const poll = async () => {
-      const api = isPywebviewApiAvailable() ? pywebviewApi : null
-      if (!api) return
-      const result = await api.analysis_status()
-      if (!alive || result?.status !== 'ok') return
-      if (result.state === 'ready' && result.preview) {
-        setPreview(result.preview)
-        setAnalysisState('idle')
-        setAnalysisError(null)
-      } else if (result.state === 'error') {
+    const cleanupState = previewThrottleRef.current
+    const applyPreview = (next: SpectrogramPreview) => {
+      setPreview(next)
+      setAnalysisState('idle')
+      setAnalysisError(null)
+    }
+
+    const schedulePreview = (next: SpectrogramPreview) => {
+      const state = previewThrottleRef.current
+      state.pending = next
+      const now = Date.now()
+      const throttleMs = 1500
+      const elapsed = now - state.lastApplied
+
+      if (elapsed >= throttleMs) {
+        if (state.timerId) {
+          window.clearTimeout(state.timerId)
+          state.timerId = null
+        }
+        state.lastApplied = now
+        applyPreview(next)
+        return
+      }
+
+      if (state.timerId) {
+        return
+      }
+
+      state.timerId = window.setTimeout(() => {
+        state.timerId = null
+        if (state.pending) {
+          state.lastApplied = Date.now()
+          applyPreview(state.pending)
+        }
+      }, throttleMs - elapsed)
+    }
+
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent).detail as unknown
+      if (!detail || typeof detail !== 'object') return
+      const payload = detail as Record<string, unknown>
+      if (payload.type === 'spectrogram_preview_updated' && payload.kind === 'overview') {
+        const next = payload.preview as SpectrogramPreview | undefined
+        if (!next) return
+        schedulePreview(next)
+      }
+      if (payload.type === 'spectrogram_preview_error' && payload.kind === 'overview') {
+        const message = typeof payload.message === 'string' ? payload.message : 'Preview failed.'
         setAnalysisState('error')
-        setAnalysisError(result.message ?? 'Analysis failed.')
+        setAnalysisError(message)
+        reportError('Preview', message)
       }
     }
-    void poll()
-    const interval = window.setInterval(poll, 500)
+    window.addEventListener('soma:event', handler)
     return () => {
-      alive = false
-      window.clearInterval(interval)
+      window.removeEventListener('soma:event', handler)
+      const state = cleanupState
+      if (state.timerId) {
+        window.clearTimeout(state.timerId)
+        state.timerId = null
+      }
     }
-  }, [analysisState])
+  }, [reportError])
 
   const openAudio = useCallback(async (): Promise<AnalysisResult | null> => {
     const api = isPywebviewApiAvailable() ? pywebviewApi : null

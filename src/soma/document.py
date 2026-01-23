@@ -2,15 +2,16 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 import uuid
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 
-from soma.analysis import make_spectrogram_preview, make_viewport_spectrogram, snap_trace
+from soma.analysis import make_spectrogram, make_spectrogram_stft, snap_trace
 from soma.models import (
     AnalysisSettings,
     AudioInfo,
@@ -18,7 +19,6 @@ from soma.models import (
     PartialPoint,
     SourceInfo,
     SpectrogramPreview,
-    ViewportPreview,
     generate_bright_color,
 )
 from soma.partial_store import PartialStore
@@ -31,6 +31,9 @@ from soma.persistence import (
     parse_source,
 )
 from soma.synth import AudioPlayer, Synthesizer
+
+_CWT_PREVIEW_WINDOW_THRESHOLD_SEC = 30.0
+_CWT_HIGH_PREVIEW_DEBOUNCE_SEC = 1.5
 
 
 @dataclass
@@ -80,15 +83,17 @@ class UndoRedoManager:
 
 
 class SomaDocument:
-    def __init__(self) -> None:
+    def __init__(self, event_sink: Callable[[dict[str, Any]], None] | None = None) -> None:
         self.audio_info: AudioInfo | None = None
         self.audio_data: np.ndarray | None = None
         self.settings = AnalysisSettings()
         self.preview: SpectrogramPreview | None = None
         self._amp_reference: float | None = None
+        self._stft_amp_reference: float | None = None
         self.preview_state = "idle"
         self.preview_error: str | None = None
         self._preview_thread: threading.Thread | None = None
+        self._preview_request_id: str | None = None
         self.store = PartialStore()
         self.project_path: Path | None = None
         self.source_info: SourceInfo | None = None
@@ -99,9 +104,8 @@ class SomaDocument:
         self._is_resynthesizing = False
         self._logger = logging.getLogger(__name__)
         self._viewport_request_id: str | None = None
-        self._viewport_preview: ViewportPreview | None = None
-        self._viewport_state: str = "idle"
-        self._viewport_error: str | None = None
+        self._viewport_preview: SpectrogramPreview | None = None
+        self._event_sink = event_sink
 
     def new_project(self) -> None:
         self.audio_info = None
@@ -109,6 +113,7 @@ class SomaDocument:
         self.settings = AnalysisSettings()
         self.preview = None
         self._amp_reference = None
+        self._stft_amp_reference = None
         self.store = PartialStore()
         self.project_path = None
         self.source_info = None
@@ -116,8 +121,29 @@ class SomaDocument:
         self.synth.reset(sample_rate=44100, duration_sec=0.0)
         self._viewport_request_id = None
         self._viewport_preview = None
-        self._viewport_state = "idle"
-        self._viewport_error = None
+        self._preview_request_id = None
+
+    def _emit(self, payload: dict[str, Any]) -> None:
+        if self._event_sink is None:
+            return
+        try:
+            self._event_sink(payload)
+        except Exception:  # pragma: no cover
+            self._logger.exception("event_sink failed")
+
+    def _emit_spectrogram_preview(self, kind: str, quality: str, final: bool, preview: SpectrogramPreview) -> None:
+        self._emit(
+            {
+                "type": "spectrogram_preview_updated",
+                "kind": kind,
+                "quality": quality,
+                "final": final,
+                "preview": preview.to_dict(),
+            }
+        )
+
+    def _emit_spectrogram_error(self, kind: str, message: str) -> None:
+        self._emit({"type": "spectrogram_preview_error", "kind": kind, "message": message})
 
     def load_audio(self, path: Path, max_duration_sec: float | None = None) -> AudioInfo:
         from soma.analysis import load_audio
@@ -133,6 +159,7 @@ class SomaDocument:
         )
         self.preview = None
         self._amp_reference = None
+        self._stft_amp_reference = None
         self.preview_state = "idle"
         self.preview_error = None
         self.synth.reset(sample_rate=info.sample_rate, duration_sec=info.duration_sec)
@@ -298,29 +325,103 @@ class SomaDocument:
     def start_preview_async(self) -> None:
         if self.audio_data is None or self.audio_info is None:
             return
+        request_id = str(uuid.uuid4())
         with self._lock:
-            if self._preview_thread and self._preview_thread.is_alive():
-                return
+            self._preview_request_id = request_id
             self.preview_state = "processing"
             self.preview_error = None
 
             audio = self.audio_data
             sample_rate = self.audio_info.sample_rate
             settings = self.settings
+            stft_reference = self._stft_amp_reference
+            cwt_reference = self._amp_reference
 
         def _worker() -> None:
+            with self._lock:
+                if self._preview_request_id != request_id:
+                    return
+            duration = audio.shape[0] / float(sample_rate) if audio.size else 0.0
+            freq_max = min(settings.preview_freq_max, settings.freq_max)
+
             try:
-                preview, amp_reference = make_spectrogram_preview(audio, sample_rate, settings)
-            except Exception as exc:  # pragma: no cover - surface in UI via status
-                self._logger.exception("preview generation failed")
+                low_preview, low_ref = make_spectrogram_stft(
+                    audio=audio,
+                    sample_rate=sample_rate,
+                    settings=settings,
+                    time_start=0.0,
+                    time_end=duration,
+                    freq_min=settings.freq_min,
+                    freq_max=freq_max,
+                    width=768,
+                    height=320,
+                    amp_reference=stft_reference,
+                )
+            except Exception as exc:  # pragma: no cover - surface errors to UI
+                self._logger.exception("STFT preview generation failed")
                 with self._lock:
+                    if self._preview_request_id != request_id:
+                        return
                     self.preview_state = "error"
                     self.preview_error = str(exc)
+                self._emit_spectrogram_error("overview", str(exc))
                 return
+
             with self._lock:
-                self.preview = preview
-                self._amp_reference = amp_reference
+                if self._preview_request_id != request_id:
+                    return
+                self.preview = low_preview
+                self._stft_amp_reference = low_ref
+
+            should_upgrade = duration <= _CWT_PREVIEW_WINDOW_THRESHOLD_SEC
+            self._emit_spectrogram_preview("overview", "low", final=not should_upgrade, preview=low_preview)
+
+            if not should_upgrade:
+                with self._lock:
+                    if self._preview_request_id != request_id:
+                        return
+                    self.preview_state = "ready"
+                return
+
+            with self._lock:
+                if self._preview_request_id != request_id:
+                    return
+            time.sleep(_CWT_HIGH_PREVIEW_DEBOUNCE_SEC)
+            with self._lock:
+                if self._preview_request_id != request_id:
+                    return
+
+            try:
+                high_preview, high_ref = make_spectrogram(
+                    audio=audio,
+                    sample_rate=sample_rate,
+                    settings=settings,
+                    time_start=0.0,
+                    time_end=duration,
+                    freq_min=settings.freq_min,
+                    freq_max=freq_max,
+                    width=768,
+                    height=320,
+                    amp_reference=cwt_reference,
+                )
+            except Exception as exc:  # pragma: no cover - surface errors to UI
+                self._logger.exception("CWT preview generation failed")
+                with self._lock:
+                    if self._preview_request_id != request_id:
+                        return
+                    self.preview_state = "error"
+                    self.preview_error = str(exc)
+                self._emit_spectrogram_error("overview", str(exc))
+                return
+
+            with self._lock:
+                if self._preview_request_id != request_id:
+                    return
+                self.preview = high_preview
+                self._amp_reference = high_ref
                 self.preview_state = "ready"
+
+            self._emit_spectrogram_preview("overview", "high", final=True, preview=high_preview)
 
         thread = threading.Thread(target=_worker, name="soma-preview", daemon=True)
         with self._lock:
@@ -346,14 +447,13 @@ class SomaDocument:
 
         with self._lock:
             self._viewport_request_id = request_id
-            self._viewport_state = "processing"
             self._viewport_preview = None
-            self._viewport_error = None
 
             audio = self.audio_data
             sample_rate = self.audio_info.sample_rate
             settings = self.settings
-            amp_reference = self._amp_reference
+            cwt_reference = self._amp_reference
+            stft_reference = self._stft_amp_reference
 
         def _worker() -> None:
             with self._lock:
@@ -361,45 +461,79 @@ class SomaDocument:
                     return
 
             try:
-                preview = make_viewport_spectrogram(
-                    audio,
-                    sample_rate,
-                    settings,
-                    time_start,
-                    time_end,
-                    freq_min,
-                    freq_max,
-                    width,
-                    height,
-                    amp_reference=amp_reference,
+                width_clamped = int(np.clip(width, 16, 1536))
+                height_clamped = int(np.clip(height, 16, 1024))
+                low_preview, low_ref = make_spectrogram_stft(
+                    audio=audio,
+                    sample_rate=sample_rate,
+                    settings=settings,
+                    time_start=time_start,
+                    time_end=time_end,
+                    freq_min=freq_min,
+                    freq_max=freq_max,
+                    width=width_clamped,
+                    height=height_clamped,
+                    amp_reference=stft_reference,
                 )
             except Exception as exc:
-                self._logger.exception("viewport preview generation failed")
-                with self._lock:
-                    if self._viewport_request_id != request_id:
-                        return
-                    self._viewport_state = "error"
-                    self._viewport_error = str(exc)
+                self._logger.exception("STFT viewport preview generation failed")
+                if self._viewport_request_id == request_id:
+                    self._emit_spectrogram_error("viewport", str(exc))
                 return
 
             with self._lock:
                 if self._viewport_request_id != request_id:
                     return
-                self._viewport_preview = preview
-                self._viewport_state = "ready"
+                self._viewport_preview = low_preview
+                if self._stft_amp_reference is None:
+                    self._stft_amp_reference = low_ref
+
+            window_duration = max(0.0, float(time_end - time_start))
+            should_upgrade = window_duration <= _CWT_PREVIEW_WINDOW_THRESHOLD_SEC
+            self._emit_spectrogram_preview("viewport", "low", final=not should_upgrade, preview=low_preview)
+
+            if not should_upgrade:
+                return
+
+            with self._lock:
+                if self._viewport_request_id != request_id:
+                    return
+            time.sleep(_CWT_HIGH_PREVIEW_DEBOUNCE_SEC)
+            with self._lock:
+                if self._viewport_request_id != request_id:
+                    return
+
+            try:
+                high_preview, high_ref = make_spectrogram(
+                    audio=audio,
+                    sample_rate=sample_rate,
+                    settings=settings,
+                    time_start=time_start,
+                    time_end=time_end,
+                    freq_min=freq_min,
+                    freq_max=freq_max,
+                    width=width_clamped,
+                    height=height_clamped,
+                    amp_reference=cwt_reference,
+                )
+            except Exception as exc:
+                self._logger.exception("CWT viewport preview generation failed")
+                if self._viewport_request_id == request_id:
+                    self._emit_spectrogram_error("viewport", str(exc))
+                return
+
+            with self._lock:
+                if self._viewport_request_id != request_id:
+                    return
+                self._viewport_preview = high_preview
+                if self._amp_reference is None:
+                    self._amp_reference = high_ref
+
+            self._emit_spectrogram_preview("viewport", "high", final=True, preview=high_preview)
 
         thread = threading.Thread(target=_worker, name="soma-viewport-preview", daemon=True)
         thread.start()
         return request_id
-
-    def get_viewport_preview_status(self) -> tuple[str, ViewportPreview | None, str | None, str | None]:
-        with self._lock:
-            return (
-                self._viewport_state,
-                self._viewport_preview,
-                self._viewport_error,
-                self._viewport_request_id,
-            )
 
     def play(self, mix_ratio: float, loop: bool) -> None:
         if self.audio_info is None:
@@ -495,11 +629,7 @@ class SomaDocument:
         if state.settings is not None:
             self.settings = state.settings
             if self.audio_data is not None and self.audio_info is not None:
-                preview, amp_reference = make_spectrogram_preview(
-                    self.audio_data, self.audio_info.sample_rate, self.settings
-                )
-                self.preview = preview
-                self._amp_reference = amp_reference
+                self.start_preview_async()
         if state.partials is None:
             return
         for partial_id, snapshot in state.partials.items():

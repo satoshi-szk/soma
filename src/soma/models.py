@@ -26,23 +26,11 @@ class SpectrogramPreview:
     width: int
     height: int
     data: list[int]
-    freq_min: float
-    freq_max: float
-    duration_sec: float
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
-
-
-@dataclass(frozen=True)
-class ViewportPreview:
-    width: int
-    height: int
-    data: list[int]
     time_start: float
     time_end: float
     freq_min: float
     freq_max: float
+    duration_sec: float
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

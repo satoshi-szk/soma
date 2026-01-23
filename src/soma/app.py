@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import sys
@@ -38,6 +39,20 @@ from soma.models import AnalysisSettings, PartialPoint
 
 logger = logging.getLogger(__name__)
 _frontend_log_lock = threading.Lock()
+_frontend_event_lock = threading.Lock()
+
+
+def _dispatch_frontend_event(payload: dict[str, Any]) -> None:
+    window = webview.windows[0] if webview.windows else None
+    if window is None:
+        return
+    try:
+        detail = json.dumps(payload, ensure_ascii=False)
+        script = f"window.dispatchEvent(new CustomEvent('soma:event', {{ detail: {detail} }}));"
+        with _frontend_event_lock:
+            window.evaluate_js(script)
+    except Exception:
+        logger.exception("failed to dispatch frontend event")
 
 
 def _summarize_payload(value: Any) -> Any:
@@ -89,33 +104,10 @@ def _get_wav_duration_sec(path: Path) -> float:
 
 def _check_audio_duration(window: webview.Window, path: Path) -> dict[str, Any] | None:
     try:
-        duration_sec = _get_wav_duration_sec(path)
+        _get_wav_duration_sec(path)
     except Exception:
         logger.exception("Failed to read audio header: %s", path)
         return {"status": "error", "message": "オーディオファイルを読み込めませんでした。"}
-
-    if duration_sec >= 30.0:
-        window.create_confirmation_dialog(
-            "Error",
-            "30秒以上のオーディオファイルは読み込みに非常に時間がかかるため読み込めません。\n"
-            "ファイルを分割して読み込むことを推奨します。",
-        )
-        return {
-            "status": "error",
-            "message": (
-                "30秒以上のオーディオファイルは読み込みに非常に時間がかかるため読み込めません。"
-                "ファイルを分割して読み込むことを推奨します。"
-            ),
-        }
-
-    if duration_sec >= 10.0:
-        ok = window.create_confirmation_dialog(
-            "Warning",
-            "この音声ファイルは読み込みに時間がかかる可能性があります。\n読み込みますか？",
-        )
-        if not ok:
-            return {"status": "cancelled"}
-
     return None
 
 
@@ -135,7 +127,7 @@ def _validated_payload[PayloadT: PayloadBase](
 
 class SomaApi:
     def __init__(self) -> None:
-        self._doc = SomaDocument()
+        self._doc = SomaDocument(event_sink=_dispatch_frontend_event)
         self._last_audio_path: str | None = None
         self._frontend_log_path = get_session_log_dir("soma") / "frontend.log"
 
@@ -426,15 +418,6 @@ class SomaApi:
     def playback_state(self) -> dict[str, Any]:
         return {"status": "ok", "position": self._doc.playback_position()}
 
-    def analysis_status(self) -> dict[str, Any]:
-        state, preview, error = self._doc.get_preview_status()
-        return {
-            "status": "ok",
-            "state": state,
-            "preview": preview.to_dict() if preview else None,
-            "message": error,
-        }
-
     def request_viewport_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
             parsed = _validated_payload(RequestViewportPreviewPayload, payload, "request_viewport_preview")
@@ -450,20 +433,10 @@ class SomaApi:
             )
             if not request_id:
                 return {"status": "error", "message": "No audio loaded."}
-            return {"status": "processing", "request_id": request_id}
+            return {"status": "accepted"}
         except Exception as exc:
             logger.exception("request_viewport_preview failed")
             return {"status": "error", "message": str(exc)}
-
-    def viewport_preview_status(self) -> dict[str, Any]:
-        state, preview, error, request_id = self._doc.get_viewport_preview_status()
-        return {
-            "status": "ok",
-            "state": state,
-            "request_id": request_id,
-            "preview": preview.to_dict() if preview else None,
-            "message": error,
-        }
 
     def frontend_log(self, level: str, message: str) -> dict[str, Any]:
         timestamp = datetime.now(UTC).isoformat(timespec="milliseconds")
