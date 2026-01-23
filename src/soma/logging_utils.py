@@ -15,6 +15,7 @@ _session_log_dir: Path | None = None
 
 def configure_logging(app_name: str = "soma") -> None:
     force_dev = os.environ.get("SOMA_DEV", "").lower() in {"1", "true", "yes"}
+    log_level = logging.DEBUG if force_dev else logging.INFO
     log_dir = get_session_log_dir(app_name, force_dev)
     log_dir.mkdir(parents=True, exist_ok=True)
     log_path = log_dir / f"{app_name}.log"
@@ -25,15 +26,15 @@ def configure_logging(app_name: str = "soma") -> None:
     )
 
     file_handler = RotatingFileHandler(log_path, maxBytes=1_000_000, backupCount=3, encoding="utf-8")
-    file_handler.setLevel(logging.INFO)
+    file_handler.setLevel(log_level)
     file_handler.setFormatter(formatter)
 
     console_handler = logging.StreamHandler()
-    console_handler.setLevel(logging.INFO)
+    console_handler.setLevel(log_level)
     console_handler.setFormatter(formatter)
 
     root = logging.getLogger()
-    root.setLevel(logging.INFO)
+    root.setLevel(log_level)
     existing_files = {getattr(handler, "baseFilename", None) for handler in root.handlers}
     if str(log_path) not in existing_files:
         root.addHandler(file_handler)

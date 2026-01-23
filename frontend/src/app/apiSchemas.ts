@@ -82,6 +82,7 @@ const playbackStateResponseSchema = z.object({
 
 const partialResponseSchema = z.object({ status: z.literal('ok'), partial: partialSchema })
 const partialsResponseSchema = z.object({ status: z.literal('ok'), partials: z.array(partialSchema) })
+const acceptedStatusSchema = z.object({ status: z.literal('accepted'), request_id: z.string() })
 
 export const apiSchemas = {
   health: { response: okStatusSchema },
@@ -104,7 +105,7 @@ export const apiSchemas = {
   update_settings: { payload: analysisSettingsSchema, response: updateSettingsResponseSchema },
   trace_partial: {
     payload: z.object({ trace: z.array(z.tuple([z.number(), z.number()])) }),
-    response: z.union([partialResponseSchema, errorStatusSchema]),
+    response: z.union([acceptedStatusSchema, errorStatusSchema]),
   },
   erase_partial: {
     payload: z.object({ trace: z.array(z.tuple([z.number(), z.number()])), radius_hz: z.number().optional() }),

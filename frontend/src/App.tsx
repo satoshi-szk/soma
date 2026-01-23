@@ -45,7 +45,7 @@ function App() {
   const analysis = useAnalysis(reportError)
   const partialsHook = usePartials(reportError)
   const playback = usePlayback(reportError, analysis.analysisState)
-  const viewport = useViewport(analysis.preview)
+  const viewport = useViewport(analysis.preview, reportError)
 
   useKeyboardShortcuts({
     onToolChange: setActiveTool,
@@ -59,6 +59,28 @@ function App() {
   useEffect(() => {
     const frame = window.requestAnimationFrame(() => setReady(true))
     return () => window.cancelAnimationFrame(frame)
+  }, [])
+
+  useEffect(() => {
+    if (typeof PerformanceObserver === 'undefined') {
+      console.warn('[Perf] PerformanceObserver not available')
+      return
+    }
+    const supported = PerformanceObserver.supportedEntryTypes ?? []
+    if (!supported.includes('longtask')) {
+      console.warn('[Perf] Long Task API not supported')
+      return
+    }
+    const observer = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        const duration = entry.duration
+        if (duration >= 50) {
+          console.warn(`[Perf] longtask ${duration.toFixed(1)}ms`)
+        }
+      }
+    })
+    observer.observe({ entryTypes: ['longtask'] })
+    return () => observer.disconnect()
   }, [])
 
   useEffect(() => {
