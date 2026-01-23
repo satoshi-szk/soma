@@ -286,6 +286,133 @@ def make_spectrogram_stft(
     ), computed_amp_reference
 
 
+def _stft_peak_location(
+    audio_segment: np.ndarray,
+    sample_rate: int,
+    freq_min: float,
+    freq_max: float,
+    width: int,
+) -> tuple[int, float]:
+    if audio_segment.size < 32:
+        return 0, float(freq_min)
+
+    nperseg = 4096 if sample_rate >= 48000 else 2048
+    nperseg = int(min(nperseg, max(256, audio_segment.size)))
+    if nperseg & (nperseg - 1) != 0:
+        nperseg = 1 << int(np.floor(np.log2(nperseg)))
+        nperseg = max(256, nperseg)
+
+    window = np.hanning(nperseg).astype(np.float64)
+    fft_freqs = np.fft.rfftfreq(nperseg, d=1.0 / float(sample_rate)).astype(np.float64)
+    if fft_freqs.size < 2:
+        return 0, float(freq_min)
+
+    freq_mask = (fft_freqs >= freq_min) & (fft_freqs <= freq_max)
+    if not np.any(freq_mask):
+        freq_mask = np.ones_like(fft_freqs, dtype=bool)
+
+    frame_centers = np.linspace(0, audio_segment.size - 1, max(1, width), dtype=np.int64)
+    half = nperseg // 2
+    best_mag = -1.0
+    best_center = int(frame_centers[0]) if frame_centers.size else 0
+    best_freq = float(freq_min)
+
+    audio_f64 = audio_segment.astype(np.float64, copy=False)
+    freq_indices = np.flatnonzero(freq_mask)
+    for center in frame_centers.tolist():
+        start = int(center) - half
+        end = start + nperseg
+        if start < 0 or end > audio_segment.size:
+            padded = np.zeros(nperseg, dtype=np.float64)
+            src_start = max(0, start)
+            src_end = min(audio_segment.size, end)
+            dst_start = src_start - start
+            dst_end = dst_start + (src_end - src_start)
+            padded[dst_start:dst_end] = audio_f64[src_start:src_end]
+            segment = padded
+        else:
+            segment = audio_f64[start:end]
+        spectrum = np.abs(np.fft.rfft(segment * window, n=nperseg))
+        masked = spectrum[freq_indices]
+        if masked.size == 0:
+            continue
+        local_idx = int(np.argmax(masked))
+        local_mag = float(masked[local_idx])
+        if local_mag > best_mag:
+            best_mag = local_mag
+            best_center = int(center)
+            best_freq = float(fft_freqs[freq_indices[local_idx]])
+
+    return best_center, best_freq
+
+
+def estimate_cwt_amp_reference(
+    audio: np.ndarray,
+    sample_rate: int,
+    settings: AnalysisSettings,
+    time_start: float = 0.0,
+    time_end: float | None = None,
+    freq_min: float | None = None,
+    freq_max: float | None = None,
+    stft_width: int = 512,
+    window_ms: float = 200.0,
+) -> float:
+    """Estimate a stable CWT amplitude reference using STFT for localization."""
+    if audio.size == 0:
+        return 1.0
+
+    total_duration = audio.shape[0] / float(sample_rate)
+    start_time = max(0.0, min(time_start, total_duration))
+    end_time = total_duration if time_end is None else max(start_time + 1e-6, min(time_end, total_duration))
+    start_sample = int(start_time * sample_rate)
+    end_sample = int(end_time * sample_rate)
+    audio_segment = _to_float32(audio[start_sample:end_sample])
+    if audio_segment.size < 32:
+        return 1.0
+
+    effective_freq_min = max(settings.freq_min, 1.0) if freq_min is None else max(freq_min, 1.0)
+    effective_freq_max = (
+        min(settings.freq_max, sample_rate * 0.5) if freq_max is None else min(freq_max, sample_rate * 0.5)
+    )
+    effective_freq_max = max(effective_freq_max, effective_freq_min * 1.001)
+
+    peak_center, _ = _stft_peak_location(
+        audio_segment,
+        sample_rate,
+        effective_freq_min,
+        effective_freq_max,
+        width=stft_width,
+    )
+    window_samples = max(32, int(sample_rate * window_ms / 1000.0))
+    half_window = window_samples // 2
+    center_sample = start_sample + peak_center
+    window_start = max(0, center_sample - half_window)
+    window_end = min(audio.shape[0], center_sample + half_window)
+    window = _to_float32(audio[window_start:window_end])
+    if window.size < 32:
+        return 1.0
+
+    frequencies = _build_frequencies(
+        AnalysisSettings(
+            freq_min=effective_freq_min,
+            freq_max=effective_freq_max,
+            bins_per_octave=settings.bins_per_octave,
+            wavelet_bandwidth=settings.wavelet_bandwidth,
+            wavelet_center_freq=settings.wavelet_center_freq,
+        ),
+        max_freq=effective_freq_max,
+    )
+    magnitude = _cwt_magnitude(
+        window,
+        sample_rate,
+        frequencies,
+        wavelet_bandwidth=settings.wavelet_bandwidth,
+        wavelet_center_freq=settings.wavelet_center_freq,
+    )
+    max_mag = float(np.max(magnitude)) if magnitude.size else 0.0
+    return max_mag if max_mag > 0 else 1.0
+
+
 def snap_trace(
     audio: np.ndarray,
     sample_rate: int,
@@ -351,6 +478,7 @@ def snap_trace(
         peak_amp = float(spectrum[closest_idx])
         window_max = float(np.max(magnitude))
         normalizer = amp_reference if amp_reference and amp_reference > 0 else window_max
+        normalizer = max(normalizer, window_max)
         normalized_amp = float(np.clip(peak_amp / (normalizer + 1e-8), 0.0, 1.0))
         points.append(PartialPoint(time=time_sec, freq=peak_freq, amp=normalized_amp))
 

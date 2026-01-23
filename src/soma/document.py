@@ -11,7 +11,7 @@ from typing import Any
 
 import numpy as np
 
-from soma.analysis import make_spectrogram, make_spectrogram_stft, snap_trace
+from soma.analysis import estimate_cwt_amp_reference, make_spectrogram, make_spectrogram_stft, snap_trace
 from soma.models import (
     AnalysisSettings,
     AudioInfo,
@@ -90,6 +90,7 @@ class SomaDocument:
         self.preview: SpectrogramPreview | None = None
         self._amp_reference: float | None = None
         self._stft_amp_reference: float | None = None
+        self._snap_amp_reference: float | None = None
         self.preview_state = "idle"
         self.preview_error: str | None = None
         self._preview_thread: threading.Thread | None = None
@@ -114,6 +115,7 @@ class SomaDocument:
         self.preview = None
         self._amp_reference = None
         self._stft_amp_reference = None
+        self._snap_amp_reference = None
         self.store = PartialStore()
         self.project_path = None
         self.source_info = None
@@ -160,6 +162,7 @@ class SomaDocument:
         self.preview = None
         self._amp_reference = None
         self._stft_amp_reference = None
+        self._snap_amp_reference = None
         self.preview_state = "idle"
         self.preview_error = None
         self.synth.reset(sample_rate=info.sample_rate, duration_sec=info.duration_sec)
@@ -169,6 +172,7 @@ class SomaDocument:
     def set_settings(self, settings: AnalysisSettings) -> SpectrogramPreview | None:
         before = self._snapshot_state(include_settings=True)
         self.settings = settings
+        self._snap_amp_reference = None
         if self.audio_data is None or self.audio_info is None:
             after = self._snapshot_state(include_settings=True)
             self.undo_manager.push(HistoryEntry(before=before, after=after))
@@ -181,12 +185,13 @@ class SomaDocument:
     def snap_partial(self, trace: list[tuple[float, float]]) -> Partial | None:
         if self.audio_data is None or self.audio_info is None:
             return None
+        amp_reference = self._ensure_snap_amp_reference() or self._amp_reference
         snapped = snap_trace(
             self.audio_data,
             self.audio_info.sample_rate,
             self.settings,
             trace,
-            amp_reference=self._amp_reference,
+            amp_reference=amp_reference,
         )
         if len(snapped) < 2:
             return None
@@ -198,6 +203,33 @@ class SomaDocument:
         after = self._snapshot_state(partial_ids=[partial_id])
         self.undo_manager.push(HistoryEntry(before=before, after=after))
         return partial
+
+    def _ensure_snap_amp_reference(self) -> float | None:
+        with self._lock:
+            if self._snap_amp_reference is not None:
+                return self._snap_amp_reference
+            if self.audio_data is None or self.audio_info is None:
+                return None
+            audio = self.audio_data
+            sample_rate = self.audio_info.sample_rate
+            settings = self.settings
+
+        try:
+            reference = estimate_cwt_amp_reference(
+                audio=audio,
+                sample_rate=sample_rate,
+                settings=settings,
+                freq_min=settings.freq_min,
+                freq_max=settings.freq_max,
+            )
+        except Exception:  # pragma: no cover - keep snapping usable
+            self._logger.exception("snap amp reference estimation failed")
+            return None
+
+        with self._lock:
+            if self.audio_data is audio and self._snap_amp_reference is None:
+                self._snap_amp_reference = reference
+            return self._snap_amp_reference
 
     def erase_path(self, trace: list[tuple[float, float]], radius_hz: float = 40.0) -> list[Partial]:
         if not trace:
