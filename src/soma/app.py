@@ -253,7 +253,7 @@ class SomaApi:
         except Exception as exc:  # pragma: no cover
             logger.exception("save_project_as failed")
             return {"status": "error", "message": str(exc)}
-        return {"status": "ok", "path": str(path)}
+        return {"status": "ok", "path": str(self._doc.project_path)}
 
     def update_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         parsed = _validated_payload(UpdateSettingsPayload, payload, "update_settings")

@@ -589,6 +589,7 @@ class SomaDocument:
     def save_project(self, path: Path) -> None:
         if self.source_info is None or self.audio_info is None:
             raise ValueError("No audio loaded")
+        path = _ensure_soma_extension(path)
         payload = build_project_payload(self.source_info, self.settings, self.store.all())
         from soma.persistence import save_project
 
@@ -668,6 +669,12 @@ class SomaDocument:
             project_path=self.project_path,
             source_info=self.source_info,
         )
+
+
+def _ensure_soma_extension(path: Path) -> Path:
+    if path.name.lower().endswith(".soma"):
+        return path
+    return path.with_name(f"{path.name}.soma")
 
 
 def _intersects_trace(partial: Partial, trace: list[tuple[float, float]], radius_hz: float) -> bool:
