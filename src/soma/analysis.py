@@ -537,7 +537,13 @@ def _cwt_magnitude(
     wavelet = pywt.ContinuousWavelet(f"cmor{bw:.1f}-{cf:.1f}")
     center_freq = pywt.central_frequency(wavelet)
     scales = center_freq * sample_rate / frequencies
-    coefficients, _ = pywt.cwt(audio, scales, wavelet, sampling_period=1.0 / sample_rate)
+    coefficients, _ = pywt.cwt(
+        audio,
+        scales,
+        wavelet,
+        sampling_period=1.0 / sample_rate,
+        method="fft",
+    )
     coefficients = np.asarray(coefficients)
     return np.asarray(np.abs(coefficients), dtype=np.float32)
 
