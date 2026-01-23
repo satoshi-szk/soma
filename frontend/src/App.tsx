@@ -3,7 +3,6 @@ import { AnalysisSettingsModal } from './components/modals/AnalysisSettingsModal
 import { ExportModal } from './components/modals/ExportModal'
 import { HeaderToolbar } from './components/HeaderToolbar'
 import { Workspace } from './components/Workspace'
-import { AudioInfoPanel } from './components/AudioInfoPanel'
 import { StatusBar } from './components/StatusBar'
 import type { ToolId } from './app/types'
 import { formatDuration, formatNote } from './app/utils'
@@ -29,7 +28,7 @@ function App() {
   const [showExportModal, setShowExportModal] = useState(false)
   const [exportTab, setExportTab] = useState<'mpe' | 'audio'>('mpe')
   const [pitchBendRange, setPitchBendRange] = useState(48)
-  const [ampMapping, setAmpMapping] = useState('velocity')
+  const [ampMapping, setAmpMapping] = useState('cc74')
   const [exportSampleRate, setExportSampleRate] = useState(44100)
   const [exportBitDepth, setExportBitDepth] = useState(16)
   const [exportType, setExportType] = useState<'sine' | 'cv'>('sine')
@@ -52,6 +51,9 @@ function App() {
     onToolChange: setActiveTool,
     onUndo: partialsHook.undo,
     onRedo: partialsHook.redo,
+    onPlayToggle: () => {
+      if (analysis.analysisState !== 'analyzing') playback.togglePlay()
+    },
   })
 
   useEffect(() => {
@@ -113,6 +115,10 @@ function App() {
     }
     if (label === 'Analysis Settings...') {
       setShowAnalysisModal(true)
+      return
+    }
+    if (label === 'Export...') {
+      setShowExportModal(true)
       return
     }
     if (label === 'Zoom In') {
@@ -211,6 +217,10 @@ function App() {
     setShowExportModal(false)
   }
 
+  const handlePlayToggle = () => {
+    if (analysis.analysisState !== 'analyzing') playback.togglePlay()
+  }
+
   const statusLabel =
     analysis.analysisState === 'analyzing'
       ? 'Analyzing'
@@ -243,11 +253,22 @@ function App() {
     return `Time ${value.toFixed(4)} px/ms`
   }, [analysis.preview, viewport.zoomX])
 
+  const audioInfoLabel = useMemo(() => {
+    if (!analysis.audioInfo) return 'No audio loaded'
+    const base = `${analysis.audioInfo.name} — ${analysis.audioInfo.sample_rate} Hz | ${analysis.audioInfo.channels} ch | ${formatDuration(
+      analysis.audioInfo.duration_sec
+    )}`
+    const extras: string[] = []
+    if (analysis.audioInfo.truncated) extras.push('Preview 30s')
+    if (analysis.analysisError) extras.push(analysis.analysisError)
+    if (extras.length === 0) return base
+    return `${base} | ${extras.join(' | ')}`
+  }, [analysis.audioInfo, analysis.analysisError])
+
   return (
     <div className={`page ${ready ? 'is-ready' : ''} h-screen`}>
       <div className="mx-auto flex h-full w-full max-w-none flex-col gap-4 px-4 pb-6 pt-6 sm:px-6">
         <HeaderToolbar
-          apiBadge={apiBadge}
           menuOpen={menuOpen}
           activeTool={activeTool}
           isPlaying={playback.isPlaying}
@@ -258,18 +279,22 @@ function App() {
           onMenuAction={handleMenuAction}
           onToolChange={setActiveTool}
           onStop={playback.stop}
-          onPlayToggle={playback.togglePlay}
+          onPlayToggle={handlePlayToggle}
           onLoopToggle={playback.toggleLoop}
           onMixChange={playback.setMixValue}
-          onExport={() => setShowExportModal(true)}
           menuRef={menuRef}
           playDisabled={analysis.analysisState === 'analyzing'}
         />
 
         <main className="flex h-full flex-1 min-h-0 flex-col gap-4">
           <section className="panel flex flex-1 min-h-0 flex-col rounded-none px-4 py-4">
-            <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.22em] text-[var(--muted)]">
-              <span>Workspace</span>
+            <div className="flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.22em] text-[var(--muted)]">
+              <span className="flex min-w-0 items-center gap-3">
+                <span>Workspace</span>
+                <span className="min-w-0 truncate font-mono text-[10px] normal-case tracking-normal text-[var(--muted)]">
+                  {audioInfoLabel}
+                </span>
+              </span>
               <span className="font-mono text-[10px]">{timeScaleLabel}</span>
             </div>
             <div className="mt-3 flex-1 min-h-0 h-full">
@@ -305,17 +330,9 @@ function App() {
               />
             </div>
           </section>
-
-          <section>
-            <AudioInfoPanel
-              audioInfo={analysis.audioInfo}
-              analysisError={analysis.analysisError}
-              statusNote={statusNote}
-            />
-          </section>
         </main>
 
-        <StatusBar statusLabel={statusLabel} cursorLabel={cursorLabel} statusNote={statusNote} />
+        <StatusBar statusLabel={statusLabel} cursorLabel={cursorLabel} statusNote={statusNote} apiBadge={apiBadge} />
       </div>
 
       {showAnalysisModal ? (

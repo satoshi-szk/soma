@@ -35,7 +35,7 @@ export const ZOOM_X_STEP_RATIO = 2.0
 export const MENU_SECTIONS = [
   {
     label: 'Project',
-    items: ['New Project', 'Open Project...', 'Open Audio...', 'Save Project', 'Save As...'],
+    items: ['New Project', 'Open Project...', 'Open Audio...', 'Save Project', 'Save As...', 'Export...'],
   },
   { label: 'Analysis', items: ['Analysis Settings...', 'Plugin Manager...'] },
   { label: 'View', items: ['Zoom In', 'Zoom Out', 'Reset View'] },

@@ -52,7 +52,6 @@ export function ExportModal({
             <label>
               Amplitude Mapping
               <select value={amplitudeMapping} onChange={(event) => onAmplitudeMappingChange(event.target.value)}>
-                <option value="velocity">Velocity</option>
                 <option value="pressure">Pressure</option>
                 <option value="cc74">CC74</option>
               </select>

@@ -2,7 +2,6 @@ import type { ToolId } from '../app/types'
 import { MENU_SECTIONS, TOOL_KEYS, TOOL_LIST } from '../app/constants'
 
 export type HeaderToolbarProps = {
-  apiBadge: string
   menuOpen: boolean
   activeTool: ToolId
   isPlaying: boolean
@@ -17,12 +16,10 @@ export type HeaderToolbarProps = {
   onPlayToggle: () => void
   onLoopToggle: () => void
   onMixChange: (value: number) => void
-  onExport: () => void
   menuRef: React.RefObject<HTMLDivElement | null>
 }
 
 export function HeaderToolbar({
-  apiBadge,
   menuOpen,
   activeTool,
   isPlaying,
@@ -37,7 +34,6 @@ export function HeaderToolbar({
   onPlayToggle,
   onLoopToggle,
   onMixChange,
-  onExport,
   menuRef,
 }: HeaderToolbarProps) {
   return (
@@ -45,14 +41,18 @@ export function HeaderToolbar({
       <div className="flex items-center gap-4">
         <div className="relative" ref={menuRef}>
           <button
-            className="rounded-none border border-[var(--panel-border)] bg-white px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-strong)]"
+            className="flex h-9 w-10 flex-col items-center justify-center gap-1 rounded-md border border-[var(--panel-border)] bg-white text-[var(--accent-strong)]"
             onClick={onMenuToggle}
             aria-expanded={menuOpen}
+            aria-label="Menu"
           >
-            Menu
+            <span className="sr-only">Menu</span>
+            <span className="h-0.5 w-4 rounded-full bg-[var(--accent-strong)]" />
+            <span className="h-0.5 w-4 rounded-full bg-[var(--accent-strong)]" />
+            <span className="h-0.5 w-4 rounded-full bg-[var(--accent-strong)]" />
           </button>
           {menuOpen ? (
-            <div className="absolute left-0 top-[calc(100%+8px)] z-20 w-56 rounded-none border border-[var(--panel-border)] bg-white p-3 text-xs shadow-lg">
+            <div className="absolute left-0 top-[calc(100%+8px)] z-20 w-56 rounded-md border border-[var(--panel-border)] bg-white p-3 text-xs shadow-lg">
               {MENU_SECTIONS.map((section) => (
                 <div key={section.label} className="border-b border-[var(--panel-border)] py-2 last:border-b-0">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
@@ -62,7 +62,7 @@ export function HeaderToolbar({
                     {section.items.map((item) => (
                       <button
                         key={item}
-                        className="rounded-none px-2 py-1 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ink)] hover:bg-[var(--panel-strong)]"
+                        className="rounded-md px-2 py-1 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--ink)] hover:bg-[var(--panel-strong)]"
                         onClick={() => onMenuAction(item)}
                       >
                         {item}
@@ -74,26 +74,19 @@ export function HeaderToolbar({
             </div>
           ) : null}
         </div>
-        <div>
-          <div className="text-xl font-semibold tracking-[0.2em] text-[var(--ink)]">SOMA</div>
-          <div className="text-[10px] uppercase tracking-[0.3em] text-[var(--muted)]">Sonic Observation</div>
-        </div>
-        <span className="rounded-none border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">
-          {apiBadge}
-        </span>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2 rounded-none border border-[var(--panel-border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--ink)]">
+        <div className="flex items-center gap-2 rounded-md border border-[var(--panel-border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--ink)]">
           <button
             onClick={onStop}
-            className="rounded-none border border-transparent px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)] hover:border-[var(--panel-border)]"
+            className="rounded-md border border-transparent px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)] hover:border-[var(--panel-border)]"
           >
             Stop
           </button>
           <button
             onClick={onPlayToggle}
-            className={`rounded-none px-4 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
+            className={`rounded-md px-4 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
               playDisabled
                 ? 'bg-[var(--panel-strong)] text-[var(--muted)]'
                 : 'bg-[var(--accent)] text-white'
@@ -104,7 +97,7 @@ export function HeaderToolbar({
           </button>
           <button
             onClick={onLoopToggle}
-            className={`rounded-none px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
+            className={`rounded-md px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
               isLooping
                 ? 'bg-[var(--accent-warm)] text-white'
                 : 'border border-[var(--panel-border)] text-[var(--muted)]'
@@ -127,18 +120,18 @@ export function HeaderToolbar({
             onChange={(event) => onMixChange(Number(event.target.value))}
           />
         </div>
-        <div className="rounded-none border border-[var(--panel-border)] bg-[var(--panel-strong)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-strong)]">
+        <div className="rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-strong)]">
           {playbackTimeLabel}
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <div className="grid grid-cols-2 gap-2 rounded-none border border-[var(--panel-border)] bg-white p-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)] lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 rounded-md border border-[var(--panel-border)] bg-white p-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)] lg:grid-cols-4">
           {TOOL_LIST.map((tool) => (
             <button
               key={tool.id}
               onClick={() => onToolChange(tool.id)}
-              className={`rounded-none px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] ${
+              className={`rounded-md px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] ${
                 activeTool === tool.id
                   ? 'bg-[var(--accent)] text-white'
                   : 'text-[var(--muted)] hover:bg-[var(--panel-strong)]'
@@ -149,12 +142,6 @@ export function HeaderToolbar({
             </button>
           ))}
         </div>
-        <button
-          className="rounded-none bg-[var(--accent-warm)] px-5 py-2 text-[11px] font-semibold uppercase tracking-[0.22em] text-white"
-          onClick={onExport}
-        >
-          Export
-        </button>
       </div>
     </header>
   )
