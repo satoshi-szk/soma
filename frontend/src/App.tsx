@@ -95,14 +95,6 @@ function App() {
       }
       return
     }
-    if (label === 'Open Audio...') {
-      const result = await analysis.openAudio()
-      if (result) {
-        partialsHook.setPartials(result.partials)
-        setStatusNote('Audio loaded')
-      }
-      return
-    }
     if (label === 'Save Project') {
       const success = await analysis.saveProject()
       if (success) setStatusNote('Project saved')
