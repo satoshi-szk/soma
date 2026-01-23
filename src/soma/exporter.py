@@ -75,6 +75,7 @@ def export_audio(
 def _build_mpe_file(partials: list[Partial], settings: MpeExportSettings) -> MidiFile:
     midi = MidiFile(ticks_per_beat=settings.ticks_per_beat)
     tempo = bpm2tempo(settings.bpm)
+    ticks_per_bar = settings.ticks_per_beat * 4
 
     master = MidiTrack()
     master.append(MetaMessage("set_tempo", tempo=tempo, time=0))
@@ -87,15 +88,32 @@ def _build_mpe_file(partials: list[Partial], settings: MpeExportSettings) -> Mid
         channel = (idx % 15) + 1
         events.extend(_partial_events(partial, channel, settings, amp_reference))
 
-    track = MidiTrack()
-    track.extend(_pitch_bend_rpn_messages(0, settings.pitch_bend_range))
-    for channel in range(1, 16):
-        track.extend(_pitch_bend_rpn_messages(channel, settings.pitch_bend_range))
+    # Calculate total duration in ticks for bar-based RPN insertion
+    max_time_sec = max((t for t, _ in events), default=0.0)
+    max_tick = int(second2tick(max_time_sec, settings.ticks_per_beat, tempo))
 
-    events.sort(key=lambda item: item[0])
-    last_tick = 0
+    # Generate RPN events at the beginning of each bar
+    rpn_events: list[tuple[int, Message]] = []
+    bar_tick = 0
+    while bar_tick <= max_tick:
+        for channel in range(16):
+            for msg in _pitch_bend_rpn_messages(channel, settings.pitch_bend_range):
+                rpn_events.append((bar_tick, msg.copy()))
+        bar_tick += ticks_per_bar
+
+    # Convert note events to tick-based
+    tick_events: list[tuple[int, Message]] = []
     for time_sec, message in events:
         tick = int(second2tick(time_sec, settings.ticks_per_beat, tempo))
+        tick_events.append((tick, message))
+
+    # Merge and sort all events
+    all_events = rpn_events + tick_events
+    all_events.sort(key=lambda item: item[0])
+
+    track = MidiTrack()
+    last_tick = 0
+    for tick, message in all_events:
         delta = max(0, tick - last_tick)
         message.time = delta
         track.append(message)
@@ -165,13 +183,27 @@ def _allocate_channels(partials: list[Partial], max_channels: int) -> list[list[
 
 
 def _pitch_bend_rpn_messages(channel: int, semitone_range: int) -> list[Message]:
+    """Generate RPN messages for pitch bend range setting.
+
+    Sends the sequence twice (2 ticks) to handle DAW loop playback
+    that may skip the first tick. Ends with RPN NULL to prevent
+    subsequent Data Entry from being misinterpreted.
+    """
     msb = min(127, max(0, semitone_range))
-    return [
-        Message("control_change", control=101, value=0, channel=channel),
-        Message("control_change", control=100, value=0, channel=channel),
-        Message("control_change", control=6, value=msb, channel=channel),
-        Message("control_change", control=38, value=0, channel=channel),
-    ]
+    messages: list[Message] = []
+    for _ in range(2):
+        messages.extend([
+            Message("control_change", control=101, value=0, channel=channel),
+            Message("control_change", control=100, value=0, channel=channel),
+            Message("control_change", control=6, value=msb, channel=channel),
+            Message("control_change", control=38, value=0, channel=channel),
+        ])
+    # RPN NULL to terminate the RPN sequence
+    messages.extend([
+        Message("control_change", control=101, value=127, channel=channel),
+        Message("control_change", control=100, value=127, channel=channel),
+    ])
+    return messages
 
 
 def _freq_to_midi(freq: float) -> int:
