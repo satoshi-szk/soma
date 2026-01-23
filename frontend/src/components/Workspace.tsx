@@ -95,16 +95,12 @@ export function Workspace({
   const [draggedPartial, setDraggedPartial] = useState<Partial | null>(null)
   const [hudPosition, setHudPosition] = useState({ x: 16, y: 16 })
   const [isDragActive, setIsDragActive] = useState(false)
-  const [viewportImageVersion, setViewportImageVersion] = useState(0)
+  const [viewportImageCache, setViewportImageCache] = useState(
+    new Map<string, ImageBitmap>()
+  )
   const viewportWorkerRef = useRef<Worker | null>(null)
-  const viewportImageCacheRef = useRef(new Map<string, ImageBitmap | HTMLCanvasElement>())
   const viewportPendingRef = useRef(new Set<string>())
-  const perfRef = useRef({
-    lastFrame: 0,
-    lastLog: 0,
-    activeUntil: 0,
-    rafId: 0,
-  })
+  const desiredViewportKeysRef = useRef<Set<string>>(new Set())
   const automationLaneHeight = 120
   const automationPadding = { top: 18, bottom: 16 }
 
@@ -124,7 +120,7 @@ export function Workspace({
 
   useEffect(() => {
     if (typeof OffscreenCanvas === 'undefined') {
-      console.warn('[ViewportWorker] OffscreenCanvas not available, falling back to main thread')
+      console.warn('[ViewportWorker] OffscreenCanvas not available, viewport rendering disabled')
       return
     }
     const worker = new Worker(new URL('../workers/viewportRenderer.ts', import.meta.url), { type: 'module' })
@@ -135,10 +131,23 @@ export function Workspace({
         bitmap?: ImageBitmap
         message?: string
       }
-      if (payload.type === 'result' && payload.bitmap) {
+      if (payload.type === 'result') {
+        const bitmap = payload.bitmap
+        if (!bitmap) {
+          return
+        }
         viewportPendingRef.current.delete(payload.key)
-        viewportImageCacheRef.current.set(payload.key, payload.bitmap)
-        setViewportImageVersion((value) => value + 1)
+        setViewportImageCache((prev) => {
+          const next = new Map(prev)
+          next.set(payload.key, bitmap)
+          for (const [key, image] of next) {
+            if (!desiredViewportKeysRef.current.has(key)) {
+              image.close()
+              next.delete(key)
+            }
+          }
+          return next
+        })
       } else if (payload.type === 'error') {
         viewportPendingRef.current.delete(payload.key)
         console.warn(`[ViewportWorker] ${payload.message ?? 'render failed'}`)
@@ -296,8 +305,6 @@ export function Workspace({
 
   const previewImage = useMemo(() => {
     if (!preview) return null
-    // eslint-disable-next-line react-hooks/purity
-    const start = performance.now()
     const canvas = document.createElement('canvas')
     canvas.width = preview.width
     canvas.height = preview.height
@@ -316,11 +323,6 @@ export function Workspace({
       image.data[offset + 3] = 255
     }
     ctx.putImageData(image, 0, 0)
-    // eslint-disable-next-line react-hooks/purity
-    const elapsed = performance.now() - start
-    if (elapsed > 50) {
-      console.warn(`[Perf] previewImage build ${elapsed.toFixed(1)}ms (${preview.width}x${preview.height})`)
-    }
     return canvas
   }, [preview, settings])
 
@@ -337,34 +339,6 @@ export function Workspace({
         settings.brightness,
         settings.contrast,
       ].join('|'),
-    [settings],
-  )
-
-  const buildViewportCanvas = useCallback(
-    (current: SpectrogramPreview) => {
-      const canvas = document.createElement('canvas')
-      canvas.width = current.width
-      canvas.height = current.height
-      const ctx = canvas.getContext('2d')
-      if (!ctx) return null
-      const image = ctx.createImageData(current.width, current.height)
-      for (let i = 0; i < current.data.length; i += 1) {
-        const normalized = current.data[i] / 255
-        const adjusted = Math.min(
-          1,
-          Math.max(0, (normalized - 0.5) * settings.contrast + 0.5 + settings.brightness)
-        )
-        const value = Math.round(adjusted * 255)
-        const color = mapColor(settings.color_map, value)
-        const offset = i * 4
-        image.data[offset] = color[0]
-        image.data[offset + 1] = color[1]
-        image.data[offset + 2] = color[2]
-        image.data[offset + 3] = 255
-      }
-      ctx.putImageData(image, 0, 0)
-      return canvas
-    },
     [settings],
   )
 
@@ -390,7 +364,7 @@ export function Workspace({
       const key = buildViewportKey(current)
       desiredKeys.add(key)
 
-      if (viewportImageCacheRef.current.has(key) || viewportPendingRef.current.has(key)) {
+      if (viewportImageCache.has(key) || viewportPendingRef.current.has(key)) {
         continue
       }
 
@@ -407,45 +381,45 @@ export function Workspace({
           brightness: settings.brightness,
           contrast: settings.contrast,
         })
-      } else {
-        const canvas = buildViewportCanvas(current)
-        if (canvas) {
-          viewportImageCacheRef.current.set(key, canvas)
-          setViewportImageVersion((value) => value + 1)
-        }
       }
     }
 
-    for (const key of viewportImageCacheRef.current.keys()) {
-      if (!desiredKeys.has(key)) {
-        const image = viewportImageCacheRef.current.get(key)
-        if (image && 'close' in image) {
-          image.close()
-        }
-        viewportImageCacheRef.current.delete(key)
-      }
-    }
+    desiredViewportKeysRef.current = desiredKeys
     for (const key of viewportPendingRef.current) {
       if (!desiredKeys.has(key)) {
         viewportPendingRef.current.delete(key)
       }
     }
-  }, [viewportPreviews, settings, buildViewportKey, buildViewportCanvas])
+    window.setTimeout(() => {
+      setViewportImageCache((prev) => {
+        if (desiredViewportKeysRef.current.size === 0 && prev.size === 0) {
+          return prev
+        }
+        let updated = false
+        const next = new Map(prev)
+        for (const [key, image] of next) {
+          if (!desiredViewportKeysRef.current.has(key)) {
+            image.close()
+            next.delete(key)
+            updated = true
+          }
+        }
+        return updated ? next : prev
+      })
+    }, 0)
+  }, [viewportPreviews, settings, buildViewportKey, viewportImageCache])
 
-  const viewportPreviewImages = useMemo(() => {
+  const viewportImages = useMemo(() => {
     if (!viewportPreviews || viewportPreviews.length === 0) return []
-    void viewportImageVersion
     return viewportPreviews
       .map((current) => {
         const key = buildViewportKey(current)
-        const image = viewportImageCacheRef.current.get(key)
+        const image = viewportImageCache.get(key)
         if (!image) return null
         return { preview: current, image }
       })
-      .filter(
-        (item): item is { preview: SpectrogramPreview; image: HTMLCanvasElement | ImageBitmap } => item !== null
-      )
-  }, [viewportPreviews, buildViewportKey, viewportImageVersion])
+      .filter((item): item is { preview: SpectrogramPreview; image: ImageBitmap } => item !== null)
+  }, [viewportPreviews, viewportImageCache, buildViewportKey])
 
   const contentOffset = useMemo(() => ({ x: 0, y: 28 }), [])
   const spectrogramAreaHeight = Math.max(1, stageSize.height - automationLaneHeight)
@@ -564,27 +538,6 @@ export function Workspace({
     [preview, duration, pan, scale, freqMin, freqMax, contentOffset],
   )
 
-  const startPerfMonitor = () => {
-    const now = performance.now()
-    const ref = perfRef.current
-    ref.activeUntil = now + 1200
-    if (ref.rafId) return
-    const tick = (timestamp: number) => {
-      const delta = ref.lastFrame ? timestamp - ref.lastFrame : 0
-      ref.lastFrame = timestamp
-      if (delta > 50 && timestamp - ref.lastLog > 500) {
-        console.warn(`[Perf] frame gap ${delta.toFixed(1)}ms during zoom/pan`)
-        ref.lastLog = timestamp
-      }
-      if (timestamp < ref.activeUntil) {
-        ref.rafId = window.requestAnimationFrame(tick)
-      } else {
-        ref.rafId = 0
-      }
-    }
-    ref.rafId = window.requestAnimationFrame(tick)
-  }
-
   const onStageWheel = (event: KonvaEventObject<WheelEvent>) => {
     event.evt.preventDefault()
     const stage = event.target.getStage()
@@ -599,7 +552,6 @@ export function Workspace({
         y: pan.y - event.evt.deltaY,
       }
       onPanChange(nextPan)
-      startPerfMonitor()
       return
     }
     // Horizontal zoom only (time axis)
@@ -620,7 +572,6 @@ export function Workspace({
 
     onZoomXChange(clampedX)
     onPanChange(newPan)
-    startPerfMonitor()
   }
 
   const handleStageMouseDown = (event: KonvaEventObject<MouseEvent>) => {
@@ -869,8 +820,8 @@ export function Workspace({
             {previewImage ? (
               <KonvaImage image={previewImage} width={preview?.width} height={preview?.height} opacity={0.85} />
             ) : null}
-            {viewportPreviewImages.length > 0 && viewportPositions.length > 0
-              ? viewportPreviewImages.map((item) => {
+            {viewportImages.length > 0 && viewportPositions.length > 0
+              ? viewportImages.map((item) => {
                   const position = viewportPositions.find((entry) => entry.preview === item.preview)
                   if (!position) return null
                   return (

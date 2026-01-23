@@ -62,28 +62,6 @@ function App() {
   }, [])
 
   useEffect(() => {
-    if (typeof PerformanceObserver === 'undefined') {
-      console.warn('[Perf] PerformanceObserver not available')
-      return
-    }
-    const supported = PerformanceObserver.supportedEntryTypes ?? []
-    if (!supported.includes('longtask')) {
-      console.warn('[Perf] Long Task API not supported')
-      return
-    }
-    const observer = new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) {
-        const duration = entry.duration
-        if (duration >= 50) {
-          console.warn(`[Perf] longtask ${duration.toFixed(1)}ms`)
-        }
-      }
-    })
-    observer.observe({ entryTypes: ['longtask'] })
-    return () => observer.disconnect()
-  }, [])
-
-  useEffect(() => {
     if (!menuOpen) return
     const closeMenu = (event: MouseEvent) => {
       if (!menuRef.current?.contains(event.target as Node)) {
