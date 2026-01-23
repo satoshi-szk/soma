@@ -22,24 +22,48 @@ a = Analysis(
     excludes=[],
     noarchive=False,
 )
+
 pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+
 exe = EXE(
     pyz,
     a.scripts,
-    a.binaries,
-    a.datas,
     [],
+    exclude_binaries=True,
     name="soma",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
-    upx_exclude=[],
-    runtime_tmpdir=None,
     console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
+)
+
+coll = COLLECT(
+    exe,
+    a.binaries,
+    a.datas,
+    strip=False,
+    upx=True,
+    upx_exclude=[],
+    name="soma",
+)
+
+app = BUNDLE(
+    coll,
+    name="SOMA.app",
+    icon=None,
+    bundle_identifier="com.soma.app",
+    info_plist={
+        "CFBundleName": "SOMA",
+        "CFBundleDisplayName": "SOMA",
+        "CFBundleVersion": "0.1.0",
+        "CFBundleShortVersionString": "0.1.0",
+        "NSHighResolutionCapable": True,
+        "NSMicrophoneUsageDescription": "SOMA needs microphone access for audio analysis.",
+    },
 )
