@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import multiprocessing
 import os
 import sys
 import tempfile
@@ -707,6 +708,10 @@ CONSOLE_HOOK_JS = r"""
 
 
 def main() -> None:
+    # Required for multiprocessing to work correctly in frozen (PyInstaller) apps on macOS.
+    # Without this, child processes re-execute main() causing infinite window spawning.
+    multiprocessing.freeze_support()
+
     configure_logging()
     force_dev = os.environ.get("SOMA_DEV", "").lower() in {"1", "true", "yes"}
     url = resolve_frontend_url()
