@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -11,7 +10,7 @@ from typing import Any
 
 import numpy as np
 
-from soma.analysis import make_spectrogram, make_spectrogram_stft, snap_trace
+from soma.analysis import estimate_cwt_amp_reference, make_spectrogram_stft
 from soma.models import (
     AnalysisSettings,
     AudioInfo,
@@ -31,9 +30,9 @@ from soma.persistence import (
     parse_source,
 )
 from soma.synth import AudioPlayer, Synthesizer
+from soma.workers import ComputeManager, SnapParams, ViewportParams
 
 _CWT_PREVIEW_WINDOW_THRESHOLD_SEC = 30.0
-_CWT_HIGH_PREVIEW_DEBOUNCE_SEC = 1.5
 
 
 @dataclass
@@ -90,10 +89,9 @@ class SomaDocument:
         self.preview: SpectrogramPreview | None = None
         self._amp_reference: float | None = None
         self._stft_amp_reference: float | None = None
+        self._snap_amp_reference: float | None = None
         self.preview_state = "idle"
         self.preview_error: str | None = None
-        self._preview_thread: threading.Thread | None = None
-        self._preview_request_id: str | None = None
         self.store = PartialStore()
         self.project_path: Path | None = None
         self.source_info: SourceInfo | None = None
@@ -106,14 +104,26 @@ class SomaDocument:
         self._viewport_request_id: str | None = None
         self._viewport_preview: SpectrogramPreview | None = None
         self._event_sink = event_sink
+        self._pending_snap_request_id: str | None = None
+        self._pending_snap_trace: list[tuple[float, float]] | None = None
+
+        # Initialize compute manager for background processing
+        self._compute_manager = ComputeManager(
+            viewport_callback=self._on_viewport_result,
+            snap_callback=self._on_snap_result,
+        )
 
     def new_project(self) -> None:
+        # Cancel any pending computations
+        self._compute_manager.cancel_all()
+
         self.audio_info = None
         self.audio_data = None
         self.settings = AnalysisSettings()
         self.preview = None
         self._amp_reference = None
         self._stft_amp_reference = None
+        self._snap_amp_reference = None
         self.store = PartialStore()
         self.project_path = None
         self.source_info = None
@@ -121,7 +131,8 @@ class SomaDocument:
         self.synth.reset(sample_rate=44100, duration_sec=0.0)
         self._viewport_request_id = None
         self._viewport_preview = None
-        self._preview_request_id = None
+        self._pending_snap_request_id = None
+        self._pending_snap_trace = None
 
     def _emit(self, payload: dict[str, Any]) -> None:
         if self._event_sink is None:
@@ -145,6 +156,105 @@ class SomaDocument:
     def _emit_spectrogram_error(self, kind: str, message: str) -> None:
         self._emit({"type": "spectrogram_preview_error", "kind": kind, "message": message})
 
+    def _on_viewport_result(self, result: dict[str, Any]) -> None:
+        """Callback for viewport worker results."""
+        request_id = result.get("request_id")
+        error = result.get("error")
+
+        with self._lock:
+            if request_id != self._viewport_request_id:
+                self._logger.debug(
+                    "Ignoring stale viewport result: %s (current: %s)",
+                    request_id[:8] if request_id else "unknown",
+                    self._viewport_request_id[:8] if self._viewport_request_id else "none",
+                )
+                return
+
+        if error:
+            self._logger.error("Viewport computation error: %s", error)
+            self._emit_spectrogram_error("viewport", error)
+            return
+
+        preview_dict = result.get("preview")
+        if preview_dict is None:
+            return
+
+        quality = result.get("quality", "low")
+        final = result.get("final", True)
+        amp_reference = result.get("amp_reference")
+
+        # Update amp references
+        with self._lock:
+            if quality == "low" and amp_reference is not None and self._stft_amp_reference is None:
+                self._stft_amp_reference = amp_reference
+            elif quality == "high" and amp_reference is not None and self._amp_reference is None:
+                self._amp_reference = amp_reference
+
+        preview = SpectrogramPreview(
+            width=preview_dict["width"],
+            height=preview_dict["height"],
+            data=preview_dict["data"],
+            freq_min=preview_dict["freq_min"],
+            freq_max=preview_dict["freq_max"],
+            duration_sec=preview_dict["duration_sec"],
+            time_start=preview_dict["time_start"],
+            time_end=preview_dict["time_end"],
+        )
+
+        with self._lock:
+            self._viewport_preview = preview
+
+        self._logger.debug(
+            "Viewport result received: request_id=%s quality=%s final=%s",
+            request_id[:8] if request_id else "unknown",
+            quality,
+            final,
+        )
+        self._emit_spectrogram_preview("viewport", quality, final, preview)
+
+    def _on_snap_result(self, result: dict[str, Any]) -> None:
+        """Callback for snap worker results."""
+        request_id = result.get("request_id")
+        error = result.get("error")
+
+        # Check if this result is for the current pending request
+        with self._lock:
+            if request_id != self._pending_snap_request_id:
+                self._logger.debug(
+                    "Ignoring stale snap result: %s (current: %s)",
+                    request_id[:8] if request_id else "unknown",
+                    self._pending_snap_request_id[:8] if self._pending_snap_request_id else "none",
+                )
+                return
+            self._pending_snap_request_id = None
+            self._pending_snap_trace = None
+
+        if error:
+            self._logger.error("Snap computation error: %s", error)
+            self._emit({"type": "snap_error", "request_id": request_id, "message": error})
+            return
+
+        points_list = result.get("points", [])
+        if len(points_list) < 2:
+            self._logger.warning("Snap returned less than 2 points")
+            self._emit({"type": "snap_error", "request_id": request_id, "message": "Failed to create partial"})
+            return
+
+        # Convert points from list format to PartialPoint objects
+        snapped = [PartialPoint(time=p[0], freq=p[1], amp=p[2]) for p in points_list]
+
+        # Create partial and add to store
+        partial_id = str(uuid.uuid4())
+        partial = Partial(id=partial_id, points=snapped, color=generate_bright_color())
+        before = self._snapshot_state(partial_ids=[partial_id])
+        self.store.add(partial)
+        self.synth.apply_partial(partial)
+        after = self._snapshot_state(partial_ids=[partial_id])
+        self.undo_manager.push(HistoryEntry(before=before, after=after))
+
+        self._logger.debug("Snap completed: partial_id=%s points=%d", partial_id[:8], len(snapped))
+        self._emit({"type": "snap_completed", "request_id": request_id, "partial": partial.to_dict()})
+
     def load_audio(self, path: Path, max_duration_sec: float | None = None) -> AudioInfo:
         from soma.analysis import load_audio
 
@@ -160,6 +270,7 @@ class SomaDocument:
         self.preview = None
         self._amp_reference = None
         self._stft_amp_reference = None
+        self._snap_amp_reference = None
         self.preview_state = "idle"
         self.preview_error = None
         self.synth.reset(sample_rate=info.sample_rate, duration_sec=info.duration_sec)
@@ -169,6 +280,7 @@ class SomaDocument:
     def set_settings(self, settings: AnalysisSettings) -> SpectrogramPreview | None:
         before = self._snapshot_state(include_settings=True)
         self.settings = settings
+        self._snap_amp_reference = None
         if self.audio_data is None or self.audio_info is None:
             after = self._snapshot_state(include_settings=True)
             self.undo_manager.push(HistoryEntry(before=before, after=after))
@@ -178,26 +290,56 @@ class SomaDocument:
         self.undo_manager.push(HistoryEntry(before=before, after=after))
         return None
 
-    def snap_partial(self, trace: list[tuple[float, float]]) -> Partial | None:
+    def snap_partial_async(self, trace: list[tuple[float, float]]) -> str | None:
+        """Start async snap computation. Returns request_id or None if no audio."""
         if self.audio_data is None or self.audio_info is None:
             return None
-        snapped = snap_trace(
-            self.audio_data,
-            self.audio_info.sample_rate,
-            self.settings,
-            trace,
-            amp_reference=self._amp_reference,
+
+        request_id = str(uuid.uuid4())
+        amp_reference = self._ensure_snap_amp_reference() or self._amp_reference
+
+        with self._lock:
+            self._pending_snap_request_id = request_id
+            self._pending_snap_trace = trace
+
+        params = SnapParams(
+            audio=self.audio_data.copy(),  # Copy to avoid issues with shared memory
+            sample_rate=self.audio_info.sample_rate,
+            settings=self.settings,
+            trace=trace,
+            amp_reference=amp_reference,
         )
-        if len(snapped) < 2:
+
+        self._logger.debug("Starting snap computation: %s", request_id[:8])
+        self._compute_manager.submit_snap(request_id, params)
+        return request_id
+
+    def _ensure_snap_amp_reference(self) -> float | None:
+        with self._lock:
+            if self._snap_amp_reference is not None:
+                return self._snap_amp_reference
+            if self.audio_data is None or self.audio_info is None:
+                return None
+            audio = self.audio_data
+            sample_rate = self.audio_info.sample_rate
+            settings = self.settings
+
+        try:
+            reference = estimate_cwt_amp_reference(
+                audio=audio,
+                sample_rate=sample_rate,
+                settings=settings,
+                freq_min=settings.freq_min,
+                freq_max=settings.freq_max,
+            )
+        except Exception:  # pragma: no cover - keep snapping usable
+            self._logger.exception("snap amp reference estimation failed")
             return None
-        partial_id = str(uuid.uuid4())
-        partial = Partial(id=partial_id, points=snapped, color=generate_bright_color())
-        before = self._snapshot_state(partial_ids=[partial_id])
-        self.store.add(partial)
-        self.synth.apply_partial(partial)
-        after = self._snapshot_state(partial_ids=[partial_id])
-        self.undo_manager.push(HistoryEntry(before=before, after=after))
-        return partial
+
+        with self._lock:
+            if self.audio_data is audio and self._snap_amp_reference is None:
+                self._snap_amp_reference = reference
+            return self._snap_amp_reference
 
     def erase_path(self, trace: list[tuple[float, float]], radius_hz: float = 40.0) -> list[Partial]:
         if not trace:
@@ -323,6 +465,11 @@ class SomaDocument:
         self.player.load(self._mix_buffer(0.5), self.audio_info.sample_rate)
 
     def start_preview_async(self) -> None:
+        """Generate overview preview using STFT only (fast, for base layer).
+
+        This runs in a background thread but uses STFT which is fast enough
+        that it won't significantly block. CWT is not used for overview.
+        """
         if self.audio_data is None or self.audio_info is None:
             return
         request_id = str(uuid.uuid4())
@@ -335,7 +482,6 @@ class SomaDocument:
             sample_rate = self.audio_info.sample_rate
             settings = self.settings
             stft_reference = self._stft_amp_reference
-            cwt_reference = self._amp_reference
 
         def _worker() -> None:
             with self._lock:
@@ -345,7 +491,7 @@ class SomaDocument:
             freq_max = min(settings.preview_freq_max, settings.freq_max)
 
             try:
-                low_preview, low_ref = make_spectrogram_stft(
+                preview, ref = make_spectrogram_stft(
                     audio=audio,
                     sample_rate=sample_rate,
                     settings=settings,
@@ -370,62 +516,14 @@ class SomaDocument:
             with self._lock:
                 if self._preview_request_id != request_id:
                     return
-                self.preview = low_preview
-                self._stft_amp_reference = low_ref
-
-            should_upgrade = duration <= _CWT_PREVIEW_WINDOW_THRESHOLD_SEC
-            self._emit_spectrogram_preview("overview", "low", final=not should_upgrade, preview=low_preview)
-
-            if not should_upgrade:
-                with self._lock:
-                    if self._preview_request_id != request_id:
-                        return
-                    self.preview_state = "ready"
-                return
-
-            with self._lock:
-                if self._preview_request_id != request_id:
-                    return
-            time.sleep(_CWT_HIGH_PREVIEW_DEBOUNCE_SEC)
-            with self._lock:
-                if self._preview_request_id != request_id:
-                    return
-
-            try:
-                high_preview, high_ref = make_spectrogram(
-                    audio=audio,
-                    sample_rate=sample_rate,
-                    settings=settings,
-                    time_start=0.0,
-                    time_end=duration,
-                    freq_min=settings.freq_min,
-                    freq_max=freq_max,
-                    width=768,
-                    height=320,
-                    amp_reference=cwt_reference,
-                )
-            except Exception as exc:  # pragma: no cover - surface errors to UI
-                self._logger.exception("CWT preview generation failed")
-                with self._lock:
-                    if self._preview_request_id != request_id:
-                        return
-                    self.preview_state = "error"
-                    self.preview_error = str(exc)
-                self._emit_spectrogram_error("overview", str(exc))
-                return
-
-            with self._lock:
-                if self._preview_request_id != request_id:
-                    return
-                self.preview = high_preview
-                self._amp_reference = high_ref
+                self.preview = preview
+                self._stft_amp_reference = ref
                 self.preview_state = "ready"
 
-            self._emit_spectrogram_preview("overview", "high", final=True, preview=high_preview)
+            # Overview uses STFT only (no CWT upgrade)
+            self._emit_spectrogram_preview("overview", "low", final=True, preview=preview)
 
         thread = threading.Thread(target=_worker, name="soma-preview", daemon=True)
-        with self._lock:
-            self._preview_thread = thread
         thread.start()
 
     def get_preview_status(self) -> tuple[str, SpectrogramPreview | None, str | None]:
@@ -441,98 +539,69 @@ class SomaDocument:
         width: int,
         height: int,
     ) -> str:
+        """Start async viewport preview computation using external process."""
         if self.audio_data is None or self.audio_info is None:
+            self._logger.debug("start_viewport_preview_async: no audio loaded")
             return ""
+
+        # Validate input parameters
+        duration = self.audio_data.shape[0] / float(self.audio_info.sample_rate)
+        if time_start < 0 or time_end > duration + 0.01 or time_start >= time_end:
+            self._logger.warning(
+                "start_viewport_preview_async: invalid time range [%.3f, %.3f] for duration %.3f",
+                time_start,
+                time_end,
+                duration,
+            )
+            return ""
+
+        if width <= 0 or height <= 0 or width > 4096 or height > 4096:
+            self._logger.warning(
+                "start_viewport_preview_async: invalid dimensions %dx%d",
+                width,
+                height,
+            )
+            return ""
+
         request_id = str(uuid.uuid4())
+        self._logger.debug(
+            "start_viewport_preview_async: request_id=%s time=[%.3f, %.3f] freq=[%.1f, %.1f] size=%dx%d",
+            request_id[:8],
+            time_start,
+            time_end,
+            freq_min,
+            freq_max,
+            width,
+            height,
+        )
 
         with self._lock:
             self._viewport_request_id = request_id
             self._viewport_preview = None
 
-            audio = self.audio_data
-            sample_rate = self.audio_info.sample_rate
-            settings = self.settings
-            cwt_reference = self._amp_reference
-            stft_reference = self._stft_amp_reference
+        # Determine if CWT upgrade should be performed
+        window_duration = max(0.0, float(time_end - time_start))
+        use_stft = window_duration > _CWT_PREVIEW_WINDOW_THRESHOLD_SEC
 
-        def _worker() -> None:
-            with self._lock:
-                if self._viewport_request_id != request_id:
-                    return
+        width_clamped = int(np.clip(width, 16, 1536))
+        height_clamped = int(np.clip(height, 16, 1024))
 
-            try:
-                width_clamped = int(np.clip(width, 16, 1536))
-                height_clamped = int(np.clip(height, 16, 1024))
-                low_preview, low_ref = make_spectrogram_stft(
-                    audio=audio,
-                    sample_rate=sample_rate,
-                    settings=settings,
-                    time_start=time_start,
-                    time_end=time_end,
-                    freq_min=freq_min,
-                    freq_max=freq_max,
-                    width=width_clamped,
-                    height=height_clamped,
-                    amp_reference=stft_reference,
-                )
-            except Exception as exc:
-                self._logger.exception("STFT viewport preview generation failed")
-                if self._viewport_request_id == request_id:
-                    self._emit_spectrogram_error("viewport", str(exc))
-                return
+        params = ViewportParams(
+            audio=self.audio_data.copy(),  # Copy to avoid shared memory issues
+            sample_rate=self.audio_info.sample_rate,
+            settings=self.settings,
+            time_start=time_start,
+            time_end=time_end,
+            freq_min=freq_min,
+            freq_max=freq_max,
+            width=width_clamped,
+            height=height_clamped,
+            use_stft=use_stft,
+            stft_amp_reference=self._stft_amp_reference,
+            cwt_amp_reference=self._amp_reference,
+        )
 
-            with self._lock:
-                if self._viewport_request_id != request_id:
-                    return
-                self._viewport_preview = low_preview
-                if self._stft_amp_reference is None:
-                    self._stft_amp_reference = low_ref
-
-            window_duration = max(0.0, float(time_end - time_start))
-            should_upgrade = window_duration <= _CWT_PREVIEW_WINDOW_THRESHOLD_SEC
-            self._emit_spectrogram_preview("viewport", "low", final=not should_upgrade, preview=low_preview)
-
-            if not should_upgrade:
-                return
-
-            with self._lock:
-                if self._viewport_request_id != request_id:
-                    return
-            time.sleep(_CWT_HIGH_PREVIEW_DEBOUNCE_SEC)
-            with self._lock:
-                if self._viewport_request_id != request_id:
-                    return
-
-            try:
-                high_preview, high_ref = make_spectrogram(
-                    audio=audio,
-                    sample_rate=sample_rate,
-                    settings=settings,
-                    time_start=time_start,
-                    time_end=time_end,
-                    freq_min=freq_min,
-                    freq_max=freq_max,
-                    width=width_clamped,
-                    height=height_clamped,
-                    amp_reference=cwt_reference,
-                )
-            except Exception as exc:
-                self._logger.exception("CWT viewport preview generation failed")
-                if self._viewport_request_id == request_id:
-                    self._emit_spectrogram_error("viewport", str(exc))
-                return
-
-            with self._lock:
-                if self._viewport_request_id != request_id:
-                    return
-                self._viewport_preview = high_preview
-                if self._amp_reference is None:
-                    self._amp_reference = high_ref
-
-            self._emit_spectrogram_preview("viewport", "high", final=True, preview=high_preview)
-
-        thread = threading.Thread(target=_worker, name="soma-viewport-preview", daemon=True)
-        thread.start()
+        self._compute_manager.submit_viewport(request_id, params)
         return request_id
 
     def play(self, mix_ratio: float, loop: bool) -> None:

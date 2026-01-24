@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
 import { isPywebviewApiAvailable, pywebviewApi } from '../app/pywebviewApi'
 import {
   ZOOM_X_MAX_PX_PER_SEC,
@@ -31,13 +31,16 @@ function areParamsSimilar(a: ViewportParams | null, b: ViewportParams): boolean 
   return timeDiff < threshold && freqDiff < threshold
 }
 
-export function useViewport(preview: SpectrogramPreview | null) {
+type ReportError = (context: string, message: string) => void
+
+export function useViewport(preview: SpectrogramPreview | null, reportError: ReportError) {
   const [zoomXState, setZoomXState] = useState<number | null>(null)
   const [zoomY, setZoomY] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
   const [stageSize, setStageSize] = useState({ width: 900, height: 420 })
   const [viewportCache, setViewportCache] = useState<ViewportCacheEntry[]>([])
-  const viewportDebounceRef = useRef<number | null>(null)
+  const interactionRef = useRef(false)
+  const interactionTimerRef = useRef<number | null>(null)
   const previewThrottleRef = useRef<{
     lastApplied: number
     timerId: number | null
@@ -45,6 +48,8 @@ export function useViewport(preview: SpectrogramPreview | null) {
     pendingQuality: 'low' | 'high'
   }>({ lastApplied: 0, timerId: null, pending: null, pendingQuality: 'low' })
   const lastRequestedParams = useRef<ViewportParams | null>(null)
+  const pendingParamsRef = useRef<ViewportParams | null>(null)
+  const lastPreviewId = useRef<string | null>(null)
 
   const baseZoomX = useMemo(() => {
     if (!preview) return 1
@@ -52,6 +57,29 @@ export function useViewport(preview: SpectrogramPreview | null) {
   }, [preview, stageSize])
 
   const zoomX = zoomXState ?? baseZoomX
+
+  // Generate a stable ID for the current preview source
+  const currentPreviewId = useMemo(() => {
+    if (!preview) return null
+    return `${preview.duration_sec}-${preview.freq_min}-${preview.freq_max}`
+  }, [preview])
+
+  // Clear throttle state when preview source changes
+  useLayoutEffect(() => {
+    if (currentPreviewId !== lastPreviewId.current) {
+      console.log('[useViewport] Preview source changed, clearing throttle state')
+      lastPreviewId.current = currentPreviewId
+      lastRequestedParams.current = null
+
+      const state = previewThrottleRef.current
+      if (state.timerId) {
+        window.clearTimeout(state.timerId)
+        state.timerId = null
+      }
+      state.pending = null
+      state.lastApplied = 0
+    }
+  }, [currentPreviewId])
 
   const clampZoomX = useCallback(
     (value: number) => Math.min(ZOOM_X_MAX_PX_PER_SEC, Math.max(ZOOM_X_MIN_PX_PER_SEC, value)),
@@ -74,13 +102,19 @@ export function useViewport(preview: SpectrogramPreview | null) {
     const currentDuration = preview.duration_sec
     const currentFreqMin = preview.freq_min
     const currentFreqMax = preview.freq_max
-    return viewportCache
-      .filter(
-        (entry) =>
-          entry.sourceDuration === currentDuration &&
-          entry.sourceFreqMin === currentFreqMin &&
-          entry.sourceFreqMax === currentFreqMax
-      )
+
+    // Filter cache entries that match current preview source
+    const validEntries = viewportCache.filter(
+      (entry) =>
+        entry.sourceDuration === currentDuration &&
+        entry.sourceFreqMin === currentFreqMin &&
+        entry.sourceFreqMax === currentFreqMax
+    )
+
+    // Only log once when stale entries are first detected
+    // (filtering happens on every render, so avoid spam)
+
+    return validEntries
       .slice()
       .sort((a, b) => {
         if (a.quality === b.quality) return a.receivedAt - b.receivedAt
@@ -89,43 +123,11 @@ export function useViewport(preview: SpectrogramPreview | null) {
       .map((entry) => entry.preview)
   }, [preview, zoomX, zoomY, viewportCache, baseZoomX])
 
-  // Request viewport preview on zoom/pan change
-  useEffect(() => {
-    if (!preview || (zoomX <= baseZoomX && zoomY <= 1)) {
-      lastRequestedParams.current = null
-      return
-    }
-
-    if (viewportDebounceRef.current) {
-      window.clearTimeout(viewportDebounceRef.current)
-    }
-
-    viewportDebounceRef.current = window.setTimeout(async () => {
+  const sendViewportRequest = useCallback(
+    async (params: ViewportParams) => {
       const api = isPywebviewApiAvailable() ? pywebviewApi : null
       if (!api) return
 
-      const duration = preview.duration_sec
-      const freqMin = preview.freq_min
-      const freqMax = preview.freq_max
-
-      // Calculate visible viewport
-      const visibleTimeStart = Math.max(0, -pan.x / zoomX)
-      const visibleTimeEnd = Math.min(duration, visibleTimeStart + stageSize.width / zoomX)
-      const logMin = Math.log(freqMin)
-      const logMax = Math.log(freqMax)
-      const visibleFreqMax = Math.exp(logMax - Math.max(0, -pan.y / (stageSize.height * zoomY)) * (logMax - logMin))
-      const visibleFreqMin = Math.exp(
-        logMax - Math.min(1, (stageSize.height - pan.y) / (stageSize.height * zoomY)) * (logMax - logMin)
-      )
-
-      const params: ViewportParams = {
-        timeStart: visibleTimeStart,
-        timeEnd: visibleTimeEnd,
-        freqMin: Math.max(freqMin, visibleFreqMin),
-        freqMax: Math.min(freqMax, visibleFreqMax),
-      }
-
-      // Skip if params are similar to last request
       if (areParamsSimilar(lastRequestedParams.current, params)) {
         return
       }
@@ -141,22 +143,96 @@ export function useViewport(preview: SpectrogramPreview | null) {
         height: Math.round(stageSize.height),
       })
 
-      // fire & forget: result status only indicates request acceptance
-      void result
-    }, 500)
+      if (result.status === 'error') {
+        reportError('Viewport', result.message ?? 'Failed to request viewport preview')
+      }
+    },
+    [reportError, stageSize.width, stageSize.height]
+  )
+
+  // Request viewport preview on zoom/pan change (after interaction stops)
+  useEffect(() => {
+    if (!preview || (zoomX <= baseZoomX && zoomY <= 1)) {
+      lastRequestedParams.current = null
+      return
+    }
+
+    const duration = preview.duration_sec
+    const freqMin = preview.freq_min
+    const freqMax = preview.freq_max
+
+    // Calculate visible viewport
+    const visibleTimeStart = Math.max(0, -pan.x / zoomX)
+    const visibleTimeEnd = Math.min(duration, visibleTimeStart + stageSize.width / zoomX)
+    const logMin = Math.log(freqMin)
+    const logMax = Math.log(freqMax)
+    const visibleFreqMax = Math.exp(logMax - Math.max(0, -pan.y / (stageSize.height * zoomY)) * (logMax - logMin))
+    const visibleFreqMin = Math.exp(
+      logMax - Math.min(1, (stageSize.height - pan.y) / (stageSize.height * zoomY)) * (logMax - logMin)
+    )
+
+    pendingParamsRef.current = {
+      timeStart: visibleTimeStart,
+      timeEnd: visibleTimeEnd,
+      freqMin: Math.max(freqMin, visibleFreqMin),
+      freqMax: Math.min(freqMax, visibleFreqMax),
+    }
+
+    interactionRef.current = true
+    if (interactionTimerRef.current) {
+      window.clearTimeout(interactionTimerRef.current)
+    }
+    interactionTimerRef.current = window.setTimeout(() => {
+      interactionRef.current = false
+      const params = pendingParamsRef.current
+      if (params) {
+        void sendViewportRequest(params)
+      }
+    }, 300)
 
     return () => {
-      if (viewportDebounceRef.current) {
-        window.clearTimeout(viewportDebounceRef.current)
+      if (interactionTimerRef.current) {
+        window.clearTimeout(interactionTimerRef.current)
       }
     }
-  }, [zoomX, zoomY, pan, stageSize, preview, baseZoomX])
+  }, [zoomX, zoomY, pan, stageSize, preview, baseZoomX, sendViewportRequest])
 
   // Subscribe viewport preview events (push)
   useEffect(() => {
     const cleanupState = previewThrottleRef.current
     const applyPreview = (next: SpectrogramPreview, quality: 'low' | 'high') => {
-      if (!preview) return
+      if (!preview) {
+        console.warn('[useViewport] applyPreview called but preview is null, skipping')
+        return
+      }
+
+      // Validate that the incoming preview is compatible with current source
+      // Check if time ranges are within valid bounds
+      if (next.time_start < 0 || next.time_end > preview.duration_sec + 0.01) {
+        console.warn(
+          '[useViewport] Invalid preview time range:',
+          next.time_start,
+          '-',
+          next.time_end,
+          'vs duration:',
+          preview.duration_sec
+        )
+        return
+      }
+
+      // Sanity check: preview dimensions should be reasonable
+      if (next.width <= 0 || next.height <= 0 || next.data.length !== next.width * next.height) {
+        console.error(
+          '[useViewport] Invalid preview dimensions:',
+          next.width,
+          'x',
+          next.height,
+          'data length:',
+          next.data.length
+        )
+        return
+      }
+
       const entry: ViewportCacheEntry = {
         preview: next,
         quality,
@@ -166,36 +242,61 @@ export function useViewport(preview: SpectrogramPreview | null) {
         sourceFreqMax: preview.freq_max,
       }
       setViewportCache((prev) => {
+        // Skip if we already have a high-quality version of the same region
         const hasHigh = prev.some(
           (item) =>
             item.quality === 'high' &&
-            item.preview.time_start === next.time_start &&
-            item.preview.time_end === next.time_end &&
-            item.preview.freq_min === next.freq_min &&
-            item.preview.freq_max === next.freq_max
+            Math.abs(item.preview.time_start - next.time_start) < 0.001 &&
+            Math.abs(item.preview.time_end - next.time_end) < 0.001 &&
+            Math.abs(item.preview.freq_min - next.freq_min) < 0.1 &&
+            Math.abs(item.preview.freq_max - next.freq_max) < 0.1
         )
         if (quality === 'low' && hasHigh) {
           return prev
         }
+        // Remove old entries for the same region when adding high-quality version
         const filtered = quality === 'high'
           ? prev.filter(
               (item) =>
                 !(
-                  item.preview.time_start === next.time_start &&
-                  item.preview.time_end === next.time_end &&
-                  item.preview.freq_min === next.freq_min &&
-                  item.preview.freq_max === next.freq_max
+                  Math.abs(item.preview.time_start - next.time_start) < 0.001 &&
+                  Math.abs(item.preview.time_end - next.time_end) < 0.001 &&
+                  Math.abs(item.preview.freq_min - next.freq_min) < 0.1 &&
+                  Math.abs(item.preview.freq_max - next.freq_max) < 0.1
                 )
             )
           : prev
         const nextItems = [...filtered, entry]
         const limit = 3
         if (nextItems.length <= limit) return nextItems
+        // Keep only the most recent entries
         return nextItems.slice(nextItems.length - limit)
       })
     }
 
     const schedulePreview = (next: SpectrogramPreview, quality: 'low' | 'high') => {
+      // Validate against current preview before scheduling
+      if (!preview) {
+        console.warn('[useViewport] schedulePreview called but preview is null')
+        return
+      }
+
+      // Check if incoming preview is for the current source
+      if (next.time_end > preview.duration_sec + 0.01) {
+        console.warn(
+          '[useViewport] Ignoring stale viewport preview (time_end:',
+          next.time_end,
+          '> duration:',
+          preview.duration_sec,
+          ')'
+        )
+        return
+      }
+
+      if (interactionRef.current) {
+        return
+      }
+
       const state = previewThrottleRef.current
       state.pending = next
       state.pendingQuality = quality
@@ -217,11 +318,16 @@ export function useViewport(preview: SpectrogramPreview | null) {
         return
       }
 
+      const currentPreviewIdAtSchedule = currentPreviewId
       state.timerId = window.setTimeout(() => {
         state.timerId = null
-        if (state.pending) {
+        // Double-check preview hasn't changed before applying
+        if (state.pending && currentPreviewIdAtSchedule === lastPreviewId.current) {
           state.lastApplied = Date.now()
           applyPreview(state.pending, state.pendingQuality)
+        } else if (state.pending) {
+          console.log('[useViewport] Discarding pending preview due to source change')
+          state.pending = null
         }
       }, throttleMs - elapsed)
     }
@@ -236,6 +342,10 @@ export function useViewport(preview: SpectrogramPreview | null) {
         if (!next) return
         schedulePreview(next, quality)
       }
+      if (payload.type === 'spectrogram_preview_error' && payload.kind === 'viewport') {
+        const message = typeof payload.message === 'string' ? payload.message : 'Viewport preview failed.'
+        reportError('Viewport', message)
+      }
     }
     window.addEventListener('soma:event', handler)
     return () => {
@@ -246,7 +356,7 @@ export function useViewport(preview: SpectrogramPreview | null) {
         state.timerId = null
       }
     }
-  }, [preview])
+  }, [preview, currentPreviewId, reportError])
 
   const zoomInX = useCallback(() => {
     setZoomXClamped((value) => value * ZOOM_X_STEP_RATIO)

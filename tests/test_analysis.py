@@ -7,7 +7,13 @@ from scipy.io import wavfile
 
 pytest.importorskip("pywt")
 
-from soma.analysis import load_audio, make_spectrogram, make_spectrogram_stft, snap_trace  # noqa: E402
+from soma.analysis import (  # noqa: E402
+    estimate_cwt_amp_reference,
+    load_audio,
+    make_spectrogram,
+    make_spectrogram_stft,
+    snap_trace,
+)
 from soma.models import AnalysisSettings  # noqa: E402
 
 
@@ -118,6 +124,55 @@ def test_make_spectrogram_preserves_freq_max_for_longer_window() -> None:
     )
 
     assert preview.freq_max > 5000.0
+
+
+def test_estimate_cwt_amp_reference_uses_stft_peak(monkeypatch: pytest.MonkeyPatch) -> None:
+    from soma import analysis
+
+    def fake_peak_location(
+        _audio: np.ndarray,
+        _sample_rate: int,
+        _freq_min: float,
+        _freq_max: float,
+        width: int,
+    ) -> tuple[int, float]:
+        assert width == 64
+        return 450, 440.0
+
+    def fake_build_frequencies(_: AnalysisSettings, max_freq: float | None = None) -> np.ndarray:
+        return np.array([100.0], dtype=np.float32)
+
+    captured: dict[str, np.ndarray] = {}
+
+    def fake_cwt_magnitude(
+        audio: np.ndarray,
+        _sample_rate: float,
+        _frequencies: np.ndarray,
+        wavelet_bandwidth: float = 8.0,
+        wavelet_center_freq: float = 1.0,
+    ) -> np.ndarray:
+        captured["window"] = audio
+        return np.array([[np.max(audio)]], dtype=np.float32)
+
+    monkeypatch.setattr(analysis, "_stft_peak_location", fake_peak_location)
+    monkeypatch.setattr(analysis, "_build_frequencies", fake_build_frequencies)
+    monkeypatch.setattr(analysis, "_cwt_magnitude", fake_cwt_magnitude)
+
+    audio = np.zeros(1000, dtype=np.float32)
+    audio[400:500] = 1.0
+    settings = AnalysisSettings()
+
+    amp_reference = estimate_cwt_amp_reference(
+        audio,
+        sample_rate=1000,
+        settings=settings,
+        stft_width=64,
+        window_ms=100.0,
+    )
+
+    assert amp_reference == pytest.approx(1.0)
+    assert captured["window"].shape[0] == 100
+    assert np.allclose(captured["window"], 1.0)
 
 
 def test_snap_trace_returns_points() -> None:

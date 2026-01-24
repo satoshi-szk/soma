@@ -348,15 +348,17 @@ class SomaApi:
         }
 
     def trace_partial(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Start async trace/snap computation. Result is sent via event."""
         try:
             parsed = _validated_payload(TracePartialPayload, payload, "trace_partial")
             if isinstance(parsed, dict):
                 return parsed
             points = [(point[0], point[1]) for point in parsed.trace]
-            partial = self._doc.snap_partial(points)
-            if partial is None:
-                return {"status": "error", "message": "Failed to create partial."}
-            return {"status": "ok", "partial": partial.to_dict()}
+            request_id = self._doc.snap_partial_async(points)
+            if request_id is None:
+                logger.warning("trace_partial rejected: no audio loaded")
+                return {"status": "error", "message": "No audio loaded."}
+            return {"status": "accepted", "request_id": request_id}
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("trace_partial failed")
             return {"status": "error", "message": str(exc)}
@@ -512,6 +514,7 @@ class SomaApi:
                 height=parsed.height,
             )
             if not request_id:
+                logger.warning("request_viewport_preview rejected: request not accepted")
                 return {"status": "error", "message": "No audio loaded."}
             return {"status": "accepted"}
         except Exception as exc:

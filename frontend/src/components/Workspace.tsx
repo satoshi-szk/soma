@@ -95,6 +95,12 @@ export function Workspace({
   const [draggedPartial, setDraggedPartial] = useState<Partial | null>(null)
   const [hudPosition, setHudPosition] = useState({ x: 16, y: 16 })
   const [isDragActive, setIsDragActive] = useState(false)
+  const [viewportImageCache, setViewportImageCache] = useState(
+    new Map<string, ImageBitmap>()
+  )
+  const viewportWorkerRef = useRef<Worker | null>(null)
+  const viewportPendingRef = useRef(new Set<string>())
+  const desiredViewportKeysRef = useRef<Set<string>>(new Set())
   const automationLaneHeight = 120
   const automationPadding = { top: 18, bottom: 16 }
 
@@ -111,6 +117,48 @@ export function Workspace({
     }
     return () => observer.disconnect()
   }, [onStageSizeChange])
+
+  useEffect(() => {
+    if (typeof OffscreenCanvas === 'undefined') {
+      console.warn('[ViewportWorker] OffscreenCanvas not available, viewport rendering disabled')
+      return
+    }
+    const worker = new Worker(new URL('../workers/viewportRenderer.ts', import.meta.url), { type: 'module' })
+    worker.onmessage = (event) => {
+      const payload = event.data as {
+        type: 'result' | 'error'
+        key: string
+        bitmap?: ImageBitmap
+        message?: string
+      }
+      if (payload.type === 'result') {
+        const bitmap = payload.bitmap
+        if (!bitmap) {
+          return
+        }
+        viewportPendingRef.current.delete(payload.key)
+        setViewportImageCache((prev) => {
+          const next = new Map(prev)
+          next.set(payload.key, bitmap)
+          for (const [key, image] of next) {
+            if (!desiredViewportKeysRef.current.has(key)) {
+              image.close()
+              next.delete(key)
+            }
+          }
+          return next
+        })
+      } else if (payload.type === 'error') {
+        viewportPendingRef.current.delete(payload.key)
+        console.warn(`[ViewportWorker] ${payload.message ?? 'render failed'}`)
+      }
+    }
+    viewportWorkerRef.current = worker
+    return () => {
+      worker.terminate()
+      viewportWorkerRef.current = null
+    }
+  }, [])
 
   const resolveDroppedPath = useCallback((dataTransfer: DataTransfer | null) => {
     const directFile = dataTransfer?.files?.[0]
@@ -278,35 +326,100 @@ export function Workspace({
     return canvas
   }, [preview, settings])
 
-  const viewportPreviewImages = useMemo(() => {
+  const buildViewportKey = useCallback(
+    (current: SpectrogramPreview) =>
+      [
+        current.time_start,
+        current.time_end,
+        current.freq_min,
+        current.freq_max,
+        current.width,
+        current.height,
+        settings.color_map,
+        settings.brightness,
+        settings.contrast,
+      ].join('|'),
+    [settings],
+  )
+
+  useEffect(() => {
+    const previews = viewportPreviews ?? []
+    const desiredKeys = new Set<string>()
+
+    for (const current of previews) {
+      if (current.width <= 0 || current.height <= 0) {
+        console.warn('[Workspace] Invalid viewport preview dimensions:', current.width, 'x', current.height)
+        continue
+      }
+      const expectedLength = current.width * current.height
+      if (current.data.length !== expectedLength) {
+        console.error(
+          '[Workspace] Viewport preview data length mismatch: expected',
+          expectedLength,
+          'got',
+          current.data.length
+        )
+        continue
+      }
+      const key = buildViewportKey(current)
+      desiredKeys.add(key)
+
+      if (viewportImageCache.has(key) || viewportPendingRef.current.has(key)) {
+        continue
+      }
+
+      const worker = viewportWorkerRef.current
+      if (worker) {
+        viewportPendingRef.current.add(key)
+        worker.postMessage({
+          type: 'render',
+          key,
+          width: current.width,
+          height: current.height,
+          data: current.data,
+          color_map: settings.color_map,
+          brightness: settings.brightness,
+          contrast: settings.contrast,
+        })
+      }
+    }
+
+    desiredViewportKeysRef.current = desiredKeys
+    for (const key of viewportPendingRef.current) {
+      if (!desiredKeys.has(key)) {
+        viewportPendingRef.current.delete(key)
+      }
+    }
+    window.setTimeout(() => {
+      setViewportImageCache((prev) => {
+        if (desiredViewportKeysRef.current.size === 0 && prev.size === 0) {
+          return prev
+        }
+        let updated = false
+        const next = new Map(prev)
+        for (const [key, image] of next) {
+          if (!desiredViewportKeysRef.current.has(key)) {
+            image.close()
+            next.delete(key)
+            updated = true
+          }
+        }
+        return updated ? next : prev
+      })
+    }, 0)
+  }, [viewportPreviews, settings, buildViewportKey, viewportImageCache])
+
+  const viewportImages = useMemo(() => {
     if (!viewportPreviews || viewportPreviews.length === 0) return []
     return viewportPreviews
       .map((current) => {
-        const canvas = document.createElement('canvas')
-        canvas.width = current.width
-        canvas.height = current.height
-        const ctx = canvas.getContext('2d')
-        if (!ctx) return null
-        const image = ctx.createImageData(current.width, current.height)
-        for (let i = 0; i < current.data.length; i += 1) {
-          const normalized = current.data[i] / 255
-          const adjusted = Math.min(
-            1,
-            Math.max(0, (normalized - 0.5) * settings.contrast + 0.5 + settings.brightness)
-          )
-          const value = Math.round(adjusted * 255)
-          const color = mapColor(settings.color_map, value)
-          const offset = i * 4
-          image.data[offset] = color[0]
-          image.data[offset + 1] = color[1]
-          image.data[offset + 2] = color[2]
-          image.data[offset + 3] = 255
-        }
-        ctx.putImageData(image, 0, 0)
-        return { preview: current, image: canvas }
+        const key = buildViewportKey(current)
+        const image = viewportImageCache.get(key)
+        if (!image) return null
+        return { preview: current, image }
       })
-      .filter((item): item is { preview: SpectrogramPreview; image: HTMLCanvasElement } => item !== null)
-  }, [viewportPreviews, settings])
+      .filter((item): item is { preview: SpectrogramPreview; image: ImageBitmap } => item !== null)
+  }, [viewportPreviews, viewportImageCache, buildViewportKey])
 
   const contentOffset = useMemo(() => ({ x: 0, y: 28 }), [])
   const spectrogramAreaHeight = Math.max(1, stageSize.height - automationLaneHeight)
@@ -334,19 +447,48 @@ export function Workspace({
     if (!viewportPreviews || !preview) return []
     const logMin = Math.log(freqMin)
     const logMax = Math.log(freqMax)
-    return viewportPreviews.map((current) => {
-      const vpLogMin = Math.log(current.freq_min)
-      const vpLogMax = Math.log(current.freq_max)
-      const yTop = ((logMax - vpLogMax) / (logMax - logMin)) * preview.height
-      const yBottom = ((logMax - vpLogMin) / (logMax - logMin)) * preview.height
-      return {
-        preview: current,
-        x: (current.time_start / duration) * preview.width,
-        y: yTop,
-        width: ((current.time_end - current.time_start) / duration) * preview.width,
-        height: yBottom - yTop,
-      }
-    })
+    return viewportPreviews
+      .filter((current) => {
+        // Validate viewport preview is within bounds of main preview
+        if (current.time_end > duration + 0.01) {
+          console.warn(
+            '[Workspace] Viewport preview time_end',
+            current.time_end,
+            'exceeds duration',
+            duration,
+            '- filtering out'
+          )
+          return false
+        }
+        if (current.freq_max > freqMax * 1.01 || current.freq_min < freqMin * 0.99) {
+          console.warn(
+            '[Workspace] Viewport preview freq range',
+            current.freq_min,
+            '-',
+            current.freq_max,
+            'outside main range',
+            freqMin,
+            '-',
+            freqMax,
+            '- filtering out'
+          )
+          return false
+        }
+        return true
+      })
+      .map((current) => {
+        const vpLogMin = Math.log(current.freq_min)
+        const vpLogMax = Math.log(current.freq_max)
+        const yTop = ((logMax - vpLogMax) / (logMax - logMin)) * preview.height
+        const yBottom = ((logMax - vpLogMin) / (logMax - logMin)) * preview.height
+        return {
+          preview: current,
+          x: (current.time_start / duration) * preview.width,
+          y: yTop,
+          width: ((current.time_end - current.time_start) / duration) * preview.width,
+          height: yBottom - yTop,
+        }
+      })
   }, [viewportPreviews, preview, duration, freqMin, freqMax])
 
   const timeToX = useCallback(
@@ -674,33 +816,12 @@ export function Workspace({
         onClick={handleStageClick}
       >
         <Layer>
-          <Rect x={0} y={0} width={stageSize.width} height={rulerHeight} fill="rgba(12, 18, 30, 0.7)" />
-          <Line points={[0, rulerHeight, stageSize.width, rulerHeight]} stroke="rgba(248, 209, 154, 0.35)" />
-          {timeMarks.map((time) => {
-            const x = pan.x + contentOffset.x + timeToX(time) * scale.x
-            if (x < 0 || x > stageSize.width) return null
-            return (
-              <Group key={time}>
-                <Line points={[x, rulerHeight - 6, x, rulerHeight]} stroke="rgba(248, 209, 154, 0.6)" />
-                <Text
-                  x={x + 4}
-                  y={2}
-                  text={`${time.toFixed(time < 1 ? 2 : 1)}s`}
-                  fontSize={9}
-                  fill="rgba(248, 209, 154, 0.75)"
-                  fontFamily="monospace"
-                />
-              </Group>
-            )
-          })}
-        </Layer>
-        <Layer>
           <Group x={pan.x + contentOffset.x} y={pan.y + contentOffset.y} scaleX={scale.x} scaleY={scale.y}>
             {previewImage ? (
               <KonvaImage image={previewImage} width={preview?.width} height={preview?.height} opacity={0.85} />
             ) : null}
-            {viewportPreviewImages.length > 0 && viewportPositions.length > 0
-              ? viewportPreviewImages.map((item) => {
+            {viewportImages.length > 0 && viewportPositions.length > 0
+              ? viewportImages.map((item) => {
                   const position = viewportPositions.find((entry) => entry.preview === item.preview)
                   if (!position) return null
                   return (
@@ -716,38 +837,6 @@ export function Workspace({
                   )
                 })
               : null}
-          </Group>
-        </Layer>
-        <Layer>
-          <Rect
-            x={0}
-            y={automationTop}
-            width={stageSize.width}
-            height={automationLaneHeight}
-            fill="rgba(10, 14, 20, 0.82)"
-          />
-          <Line
-            points={[0, automationTop, stageSize.width, automationTop]}
-            stroke="rgba(248, 209, 154, 0.25)"
-            strokeWidth={1}
-          />
-          <Text
-            x={12}
-            y={automationTop + 6}
-            text="Partial Amplitude"
-            fontSize={9}
-            fill="rgba(248, 209, 154, 0.7)"
-            fontFamily="monospace"
-          />
-          <Group x={pan.x + contentOffset.x} y={automationContentTop} scaleX={scale.x}>
-            {partials.map((partial) => (
-              <Line
-                key={`amp-${partial.id}`}
-                points={partial.points.flatMap((point) => [timeToX(point.time), ampToLaneY(point.amp)])}
-                stroke={hexToRgba(partial.color, partial.is_muted ? 0.25 : 0.85)}
-                strokeWidth={1.25}
-              />
-            ))}
           </Group>
         </Layer>
         <Layer>
@@ -789,8 +878,6 @@ export function Workspace({
               </>
             ) : null}
           </Group>
-        </Layer>
-        <Layer>
           {selectionBox ? (
             <Rect
               x={selectionBox.x}
@@ -801,8 +888,70 @@ export function Workspace({
               dash={[4, 4]}
             />
           ) : null}
+          {preview ? (
+            <Line
+              points={[
+                pan.x + contentOffset.x + timeToX(playbackPosition) * scale.x,
+                rulerHeight,
+                pan.x + contentOffset.x + timeToX(playbackPosition) * scale.x,
+                stageSize.height,
+              ]}
+              stroke="rgba(247, 245, 242, 0.8)"
+              strokeWidth={1}
+              dash={[6, 4]}
+            />
+          ) : null}
         </Layer>
         <Layer>
+          <Rect x={0} y={0} width={stageSize.width} height={rulerHeight} fill="rgba(12, 18, 30, 0.7)" />
+          <Line points={[0, rulerHeight, stageSize.width, rulerHeight]} stroke="rgba(248, 209, 154, 0.35)" />
+          {timeMarks.map((time) => {
+            const x = pan.x + contentOffset.x + timeToX(time) * scale.x
+            if (x < 0 || x > stageSize.width) return null
+            return (
+              <Group key={time}>
+                <Line points={[x, rulerHeight - 6, x, rulerHeight]} stroke="rgba(248, 209, 154, 0.6)" />
+                <Text
+                  x={x + 4}
+                  y={2}
+                  text={`${time.toFixed(time < 1 ? 2 : 1)}s`}
+                  fontSize={9}
+                  fill="rgba(248, 209, 154, 0.75)"
+                  fontFamily="monospace"
+                />
+              </Group>
+            )
+          })}
+          <Rect
+            x={0}
+            y={automationTop}
+            width={stageSize.width}
+            height={automationLaneHeight}
+            fill="rgba(10, 14, 20, 0.82)"
+          />
+          <Line
+            points={[0, automationTop, stageSize.width, automationTop]}
+            stroke="rgba(248, 209, 154, 0.25)"
+            strokeWidth={1}
+          />
+          <Text
+            x={12}
+            y={automationTop + 6}
+            text="Partial Amplitude"
+            fontSize={9}
+            fill="rgba(248, 209, 154, 0.7)"
+            fontFamily="monospace"
+          />
+          <Group x={pan.x + contentOffset.x} y={automationContentTop} scaleX={scale.x}>
+            {partials.map((partial) => (
+              <Line
+                key={`amp-${partial.id}`}
+                points={partial.points.flatMap((point) => [timeToX(point.time), ampToLaneY(point.amp)])}
+                stroke={hexToRgba(partial.color, partial.is_muted ? 0.25 : 0.85)}
+                strokeWidth={1.25}
+              />
+            ))}
+          </Group>
           <Group x={stageSize.width - rulerWidth} y={pan.y + contentOffset.y} scaleY={scale.y}>
             {freqRulerMarks.map((mark) => {
               const y = freqToY(mark.freq)
@@ -827,21 +976,6 @@ export function Workspace({
               )
             })}
           </Group>
-        </Layer>
-        <Layer>
-          {preview ? (
-            <Line
-              points={[
-                pan.x + contentOffset.x + timeToX(playbackPosition) * scale.x,
-                rulerHeight,
-                pan.x + contentOffset.x + timeToX(playbackPosition) * scale.x,
-                stageSize.height,
-              ]}
-              stroke="rgba(247, 245, 242, 0.8)"
-              strokeWidth={1}
-              dash={[6, 4]}
-            />
-          ) : null}
         </Layer>
       </Stage>
       {tracePathD || committedTracePath ? (

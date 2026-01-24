@@ -111,6 +111,27 @@ select {
   gap: 12px 16px;
 }
 
+.modal-section + .modal-section {
+  margin-top: 18px;
+}
+
+.modal-section-title {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink);
+  line-height: 1;
+}
+
+.modal-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
 .modal-grid label {
   display: flex;
   flex-direction: column;
@@ -124,8 +145,16 @@ select {
 .modal-label-row {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
+  justify-content: flex-start;
+  gap: 6px;
+  line-height: 1;
+}
+
+.modal-help-detail {
+  font-size: 11px;
+  letter-spacing: 0;
+  text-transform: none;
+  color: var(--muted);
 }
 
 .modal-help {
@@ -142,6 +171,7 @@ select {
   line-height: 1;
   letter-spacing: 0;
   padding: 0;
+  align-self: center;
 }
 
 .modal-help:hover {
