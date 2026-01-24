@@ -4,6 +4,10 @@ import {
   ZOOM_X_MAX_PX_PER_SEC,
   ZOOM_X_MIN_PX_PER_SEC,
   ZOOM_X_STEP_RATIO,
+  ZOOM_Y_MIN,
+  ZOOM_Y_MAX,
+  RULER_HEIGHT,
+  AUTOMATION_LANE_HEIGHT,
 } from '../app/constants'
 import type { SpectrogramPreview } from '../app/types'
 
@@ -58,6 +62,46 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
 
   const zoomX = zoomXState ?? baseZoomX
 
+  // Spectrogram area height (excluding ruler and automation lane)
+  const spectrogramAreaHeight = useMemo(
+    () => Math.max(1, stageSize.height - AUTOMATION_LANE_HEIGHT - RULER_HEIGHT),
+    [stageSize.height]
+  )
+
+  // Base scale for Y axis (maps preview height to spectrogram area)
+  const baseScaleY = useMemo(() => {
+    if (!preview) return 1
+    return spectrogramAreaHeight / preview.height
+  }, [preview, spectrogramAreaHeight])
+
+  // Clamp pan to keep content within viewport bounds
+  const clampPan = useCallback(
+    (
+      newPan: { x: number; y: number },
+      currentZoomX: number,
+      currentZoomY: number
+    ): { x: number; y: number } => {
+      if (!preview) return newPan
+
+      const contentWidth = preview.duration_sec * currentZoomX
+      const contentHeight = preview.height * baseScaleY * currentZoomY
+
+      // If content is smaller than viewport, pin to origin (no empty space)
+      const clampedX =
+        contentWidth <= stageSize.width
+          ? 0
+          : Math.min(0, Math.max(-(contentWidth - stageSize.width), newPan.x))
+
+      const clampedY =
+        contentHeight <= spectrogramAreaHeight
+          ? 0
+          : Math.min(0, Math.max(-(contentHeight - spectrogramAreaHeight), newPan.y))
+
+      return { x: clampedX, y: clampedY }
+    },
+    [preview, baseScaleY, stageSize.width, spectrogramAreaHeight]
+  )
+
   // Generate a stable ID for the current preview source
   const currentPreviewId = useMemo(() => {
     if (!preview) return null
@@ -86,15 +130,34 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
     []
   )
 
+  const clampZoomY = useCallback(
+    (value: number) => Math.min(ZOOM_Y_MAX, Math.max(ZOOM_Y_MIN, value)),
+    []
+  )
+
+  // Wrapped setPan that always applies clamping
+  const setPanClamped = useCallback(
+    (value: { x: number; y: number } | ((prev: { x: number; y: number }) => { x: number; y: number })) => {
+      setPan((prev) => {
+        const next = typeof value === 'function' ? value(prev) : value
+        return clampPan(next, zoomX, zoomY)
+      })
+    },
+    [clampPan, zoomX, zoomY]
+  )
+
   const setZoomXClamped = useCallback(
-    (value: number | ((prev: number) => number)) => {
+    (value: number | ((prev: number) => number), targetPan?: { x: number; y: number }) => {
       setZoomXState((prev) => {
         const current = prev ?? baseZoomX
         const next = typeof value === 'function' ? value(current) : value
-        return clampZoomX(next)
+        const clamped = clampZoomX(next)
+        // Use targetPan if provided, otherwise re-clamp current pan
+        setPan((prevPan) => clampPan(targetPan ?? prevPan, clamped, zoomY))
+        return clamped
       })
     },
-    [baseZoomX, clampZoomX]
+    [baseZoomX, clampZoomX, clampPan, zoomY]
   )
 
   const viewportPreviews = useMemo(() => {
@@ -116,10 +179,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
 
     return validEntries
       .slice()
-      .sort((a, b) => {
-        if (a.quality === b.quality) return a.receivedAt - b.receivedAt
-        return a.quality === 'low' ? -1 : 1
-      })
+      .sort((a, b) => a.receivedAt - b.receivedAt)
       .map((entry) => entry.preview)
   }, [preview, zoomX, zoomY, viewportCache, baseZoomX])
 
@@ -367,16 +427,38 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
   }, [setZoomXClamped])
 
   const zoomInY = useCallback(() => {
-    setZoomY((value) => Math.min(10, value + 1.0))
-  }, [])
+    if (!preview) return
+    const oldZoom = zoomY
+    const newZoom = clampZoomY(oldZoom + 1.0)
+    if (newZoom === oldZoom) return
+
+    // Keep viewport center at the same frequency
+    const centerY = spectrogramAreaHeight / 2
+    const oldContentY = (centerY - pan.y) / (baseScaleY * oldZoom)
+    const newPanY = centerY - oldContentY * baseScaleY * newZoom
+
+    setZoomY(newZoom)
+    setPan((prev) => clampPan({ x: prev.x, y: newPanY }, zoomX, newZoom))
+  }, [preview, zoomY, zoomX, pan.y, baseScaleY, spectrogramAreaHeight, clampZoomY, clampPan])
 
   const zoomOutY = useCallback(() => {
-    setZoomY((value) => Math.max(0.5, value - 1.0))
-  }, [])
+    if (!preview) return
+    const oldZoom = zoomY
+    const newZoom = clampZoomY(oldZoom - 1.0)
+    if (newZoom === oldZoom) return
+
+    // Keep viewport center at the same frequency
+    const centerY = spectrogramAreaHeight / 2
+    const oldContentY = (centerY - pan.y) / (baseScaleY * oldZoom)
+    const newPanY = centerY - oldContentY * baseScaleY * newZoom
+
+    setZoomY(newZoom)
+    setPan((prev) => clampPan({ x: prev.x, y: newPanY }, zoomX, newZoom))
+  }, [preview, zoomY, zoomX, pan.y, baseScaleY, spectrogramAreaHeight, clampZoomY, clampPan])
 
   const resetView = useCallback(() => {
     setZoomXState(null)
-    setZoomY(1)
+    setZoomY(ZOOM_Y_MIN)
     setPan({ x: 0, y: 0 })
     setViewportCache([])
   }, [])
@@ -388,7 +470,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
     stageSize,
     viewportPreviews,
     setZoomX: setZoomXClamped,
-    setPan,
+    setPan: setPanClamped,
     setStageSize,
     zoomInX,
     zoomOutX,

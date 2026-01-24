@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
 import { Circle, Group, Layer, Line, Rect, Shape, Stage, Image as KonvaImage, Text } from 'react-konva'
-import { ZOOM_X_MAX_PX_PER_SEC, ZOOM_X_MIN_PX_PER_SEC } from '../app/constants'
+import { ZOOM_X_MAX_PX_PER_SEC, ZOOM_X_MIN_PX_PER_SEC, RULER_HEIGHT, AUTOMATION_LANE_HEIGHT } from '../app/constants'
 import type { AnalysisSettings, Partial, PartialPoint, SpectrogramPreview, ToolId } from '../app/types'
 import { mapColor } from '../app/utils'
 import { SelectionHud } from './SelectionHud'
@@ -33,7 +33,7 @@ export type WorkspaceProps = {
   zoomY: number
   pan: { x: number; y: number }
   playbackPosition: number
-  onZoomXChange: (zoom: number) => void
+  onZoomXChange: (zoom: number, targetPan?: { x: number; y: number }) => void
   onPanChange: (pan: { x: number; y: number }) => void
   onStageSizeChange: (size: { width: number; height: number }) => void
   onTraceCommit: (trace: Array<[number, number]>) => Promise<boolean>
@@ -101,7 +101,6 @@ export function Workspace({
   const viewportWorkerRef = useRef<Worker | null>(null)
   const viewportPendingRef = useRef(new Set<string>())
   const desiredViewportKeysRef = useRef<Set<string>>(new Set())
-  const automationLaneHeight = 120
   const automationPadding = { top: 18, bottom: 16 }
 
   useEffect(() => {
@@ -421,9 +420,9 @@ export function Workspace({
       .filter((item): item is { preview: SpectrogramPreview; image: ImageBitmap } => item !== null)
   }, [viewportPreviews, viewportImageCache, buildViewportKey])
 
-  const contentOffset = useMemo(() => ({ x: 0, y: 28 }), [])
-  const spectrogramAreaHeight = Math.max(1, stageSize.height - automationLaneHeight)
-  const automationContentHeight = Math.max(1, automationLaneHeight - automationPadding.top - automationPadding.bottom)
+  const contentOffset = useMemo(() => ({ x: 0, y: RULER_HEIGHT }), [])
+  const spectrogramAreaHeight = Math.max(1, stageSize.height - AUTOMATION_LANE_HEIGHT)
+  const automationContentHeight = Math.max(1, AUTOMATION_LANE_HEIGHT - automationPadding.top - automationPadding.bottom)
   const automationTop = spectrogramAreaHeight
   const automationContentTop = automationTop + automationPadding.top
 
@@ -442,6 +441,15 @@ export function Workspace({
   const scale = useMemo(() => ({ x: timeScale, y: baseScale.y * zoomY }), [timeScale, baseScale, zoomY])
   const freqMin = preview?.freq_min ?? settings.freq_min
   const freqMax = preview?.freq_max ?? settings.freq_max
+
+  // Calculate px/octave for display
+  const pxPerOctave = useMemo(() => {
+    if (!preview) return 0
+    const effectiveHeight = spectrogramAreaHeight - contentOffset.y
+    const totalOctaves = Math.log2(freqMax / freqMin)
+    const basePxPerOctave = effectiveHeight / totalOctaves
+    return basePxPerOctave * zoomY
+  }, [preview, spectrogramAreaHeight, contentOffset.y, freqMax, freqMin, zoomY])
 
   const viewportPositions = useMemo(() => {
     if (!viewportPreviews || !preview) return []
@@ -570,8 +578,8 @@ export function Workspace({
       y: pan.y,
     }
 
-    onZoomXChange(clampedX)
-    onPanChange(newPan)
+    // Pass targetPan to ensure zoom and pan are updated atomically with correct clamp
+    onZoomXChange(clampedX, newPan)
   }
 
   const handleStageMouseDown = (event: KonvaEventObject<MouseEvent>) => {
@@ -926,7 +934,7 @@ export function Workspace({
             x={0}
             y={automationTop}
             width={stageSize.width}
-            height={automationLaneHeight}
+            height={AUTOMATION_LANE_HEIGHT}
             fill="rgba(10, 14, 20, 0.82)"
           />
           <Line
@@ -1038,8 +1046,8 @@ export function Workspace({
           >
             <span className="text-sm font-bold">+</span>
           </button>
-          <div className="flex h-5 items-center justify-center text-[9px] text-[var(--muted)] font-mono">
-            {Math.round(zoomY * 100)}%
+          <div className="flex h-5 items-center justify-center text-[9px] text-[var(--muted)] font-mono whitespace-nowrap">
+            {pxPerOctave.toFixed(0)} px/oct
           </div>
           <button
             className="flex h-7 w-7 items-center justify-center rounded-sm bg-[rgba(12,18,30,0.85)] text-[var(--muted)] hover:bg-[rgba(20,28,45,0.95)] hover:text-white transition-colors"
