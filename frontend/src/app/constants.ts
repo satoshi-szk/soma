@@ -31,6 +31,12 @@ export const DEFAULT_SETTINGS: AnalysisSettings = {
 export const ZOOM_X_MIN_PX_PER_SEC = 0.05;
 export const ZOOM_X_MAX_PX_PER_SEC = 10000;
 export const ZOOM_X_STEP_RATIO = 2.0;
+export const ZOOM_Y_MIN = 1;
+export const ZOOM_Y_MAX = 10;
+
+// UI layout constants
+export const RULER_HEIGHT = 28;
+export const AUTOMATION_LANE_HEIGHT = 120;
 
 export const MENU_SECTIONS = [
   {

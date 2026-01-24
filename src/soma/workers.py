@@ -43,7 +43,7 @@ class ViewportParams:
     freq_max: float
     width: int
     height: int
-    use_stft: bool  # True for STFT-only (window > 30s), else CWT-only
+    use_stft: bool  # True for STFT-only (window > 5s), else CWT-only
     stft_amp_reference: float | None = None
     cwt_amp_reference: float | None = None
 
