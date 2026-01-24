@@ -179,10 +179,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
 
     return validEntries
       .slice()
-      .sort((a, b) => {
-        if (a.quality === b.quality) return a.receivedAt - b.receivedAt
-        return a.quality === 'low' ? -1 : 1
-      })
+      .sort((a, b) => a.receivedAt - b.receivedAt)
       .map((entry) => entry.preview)
   }, [preview, zoomX, zoomY, viewportCache, baseZoomX])
 

@@ -32,7 +32,7 @@ from soma.persistence import (
 from soma.synth import AudioPlayer, Synthesizer
 from soma.workers import ComputeManager, SnapParams, ViewportParams
 
-_CWT_PREVIEW_WINDOW_THRESHOLD_SEC = 5.0
+_CWT_PREVIEW_WINDOW_THRESHOLD_SEC = 2.0
 
 
 @dataclass

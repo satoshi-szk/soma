@@ -442,6 +442,15 @@ export function Workspace({
   const freqMin = preview?.freq_min ?? settings.freq_min
   const freqMax = preview?.freq_max ?? settings.freq_max
 
+  // Calculate px/octave for display
+  const pxPerOctave = useMemo(() => {
+    if (!preview) return 0
+    const effectiveHeight = spectrogramAreaHeight - contentOffset.y
+    const totalOctaves = Math.log2(freqMax / freqMin)
+    const basePxPerOctave = effectiveHeight / totalOctaves
+    return basePxPerOctave * zoomY
+  }, [preview, spectrogramAreaHeight, contentOffset.y, freqMax, freqMin, zoomY])
+
   const viewportPositions = useMemo(() => {
     if (!viewportPreviews || !preview) return []
     const logMin = Math.log(freqMin)
@@ -1037,8 +1046,8 @@ export function Workspace({
           >
             <span className="text-sm font-bold">+</span>
           </button>
-          <div className="flex h-5 items-center justify-center text-[9px] text-[var(--muted)] font-mono">
-            {Math.round(zoomY * 100)}%
+          <div className="flex h-5 items-center justify-center text-[9px] text-[var(--muted)] font-mono whitespace-nowrap">
+            {pxPerOctave.toFixed(0)} px/oct
           </div>
           <button
             className="flex h-7 w-7 items-center justify-center rounded-sm bg-[rgba(12,18,30,0.85)] text-[var(--muted)] hover:bg-[rgba(20,28,45,0.95)] hover:text-white transition-colors"
