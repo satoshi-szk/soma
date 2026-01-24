@@ -4,7 +4,7 @@ import { ExportModal } from './components/modals/ExportModal'
 import { HeaderToolbar } from './components/HeaderToolbar'
 import { Workspace } from './components/Workspace'
 import { StatusBar } from './components/StatusBar'
-import type { ToolId } from './app/types'
+import type { AnalysisSettings, ToolId } from './app/types'
 import { formatDuration, formatNote } from './app/utils'
 import { isPywebviewApiAvailable, pywebviewApi } from './app/pywebviewApi'
 import { useApiStatus } from './hooks/useApiStatus'
@@ -166,8 +166,9 @@ function App() {
     }
   }
 
-  const handleApplySettings = async () => {
-    const success = await analysis.applySettings(analysis.settings)
+  const handleApplySettings = async (nextSettings?: AnalysisSettings) => {
+    const settingsToApply = nextSettings ?? analysis.settings
+    const success = await analysis.applySettings(settingsToApply)
     if (success) setStatusNote('Settings applied')
     setShowAnalysisModal(false)
   }
@@ -353,7 +354,6 @@ function App() {
       {showAnalysisModal ? (
         <AnalysisSettingsModal
           settings={analysis.settings}
-          onChange={analysis.setSettings}
           onCancel={() => setShowAnalysisModal(false)}
           onApply={handleApplySettings}
         />

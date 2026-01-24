@@ -12,12 +12,12 @@ class PayloadBase(BaseModel):
 class UpdateSettingsPayload(PayloadBase):
     freq_min: float = 20.0
     freq_max: float = 20000.0
-    bins_per_octave: int = 48
+    bins_per_octave: int = 96
     time_resolution_ms: float = 10.0
     preview_freq_max: float = 12000.0
-    preview_bins_per_octave: int = 12
+    preview_bins_per_octave: int = 48
     wavelet_bandwidth: float = 8.0
-    wavelet_center_freq: float = 2.0
+    wavelet_center_freq: float = 1.5
     color_map: str = "magma"
     brightness: float = 0.0
     contrast: float = 1.0

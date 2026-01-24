@@ -1,18 +1,18 @@
-import type { AnalysisSettings, ToolId } from './types'
+import type { AnalysisSettings, ToolId } from "./types";
 
 export const TOOL_KEYS: Record<ToolId, string> = {
-  select: 'V',
-  trace: 'P',
-  erase: 'E',
-  connect: 'C',
-}
+  select: "V",
+  trace: "P",
+  erase: "E",
+  connect: "C",
+};
 
 export const TOOL_LIST: { id: ToolId; label: string }[] = [
-  { id: 'select', label: 'Select' },
-  { id: 'trace', label: 'Trace' },
-  { id: 'erase', label: 'Erase' },
-  { id: 'connect', label: 'Connect' },
-]
+  { id: "select", label: "Select" },
+  { id: "trace", label: "Trace" },
+  { id: "erase", label: "Erase" },
+  { id: "connect", label: "Connect" },
+];
 
 export const DEFAULT_SETTINGS: AnalysisSettings = {
   freq_min: 20,
@@ -20,24 +20,30 @@ export const DEFAULT_SETTINGS: AnalysisSettings = {
   bins_per_octave: 48,
   time_resolution_ms: 10,
   preview_freq_max: 12000,
-  preview_bins_per_octave: 12,
+  preview_bins_per_octave: 48,
   wavelet_bandwidth: 8.0,
-  wavelet_center_freq: 2.0,
-  color_map: 'magma',
+  wavelet_center_freq: 1.5,
+  color_map: "magma",
   brightness: 0,
   contrast: 1,
-}
+};
 
-export const ZOOM_X_MIN_PX_PER_SEC = 0.05
-export const ZOOM_X_MAX_PX_PER_SEC = 10000
-export const ZOOM_X_STEP_RATIO = 2.0
+export const ZOOM_X_MIN_PX_PER_SEC = 0.05;
+export const ZOOM_X_MAX_PX_PER_SEC = 10000;
+export const ZOOM_X_STEP_RATIO = 2.0;
 
 export const MENU_SECTIONS = [
   {
-    label: 'Project',
-    items: ['New Project', 'Open Project...', 'Save Project', 'Save As...', 'Export...'],
+    label: "Project",
+    items: [
+      "New Project",
+      "Open Project...",
+      "Save Project",
+      "Save As...",
+      "Export...",
+    ],
   },
-  { label: 'Analysis', items: ['Analysis Settings...', 'Plugin Manager...'] },
-  { label: 'View', items: ['Zoom In', 'Zoom Out', 'Reset View'] },
-  { label: 'System', items: ['About SOMA', 'Quit'] },
-]
+  { label: "Analysis", items: ["Analysis Settings...", "Plugin Manager..."] },
+  { label: "View", items: ["Zoom In", "Zoom Out", "Reset View"] },
+  { label: "System", items: ["About SOMA", "Quit"] },
+];
