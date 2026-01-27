@@ -716,6 +716,9 @@ def main() -> None:
     force_dev = os.environ.get("SOMA_DEV", "").lower() in {"1", "true", "yes"}
     url = resolve_frontend_url()
     api = SomaApi()
+    if force_dev:
+        # Keep devtools available via context menu, but avoid auto-opening on start.
+        webview.settings["OPEN_DEVTOOLS_IN_DEBUG"] = False
     window = webview.create_window(
         "SOMA",
         url=url,
