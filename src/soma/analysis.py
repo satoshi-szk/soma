@@ -6,29 +6,19 @@ from pathlib import Path
 
 import numpy as np
 import pywt
-from scipy.io import wavfile
 from scipy.signal import find_peaks, resample, resample_poly
 
 from soma.models import AnalysisSettings, AudioInfo, PartialPoint, SpectrogramPreview
 
 
 def load_audio(path: Path, max_duration_sec: float | None = None) -> tuple[AudioInfo, np.ndarray]:
-    sample_rate, raw = wavfile.read(path)
-    if raw.ndim == 1:
-        channels = 1
-        audio = _to_float32(raw)
-    else:
-        channels = raw.shape[1]
-        audio = _to_float32(raw).mean(axis=1).astype(np.float32)
-    total_samples = audio.shape[0]
-    truncated = False
-    if max_duration_sec is not None:
-        max_samples = int(sample_rate * max_duration_sec)
-        truncated = total_samples > max_samples
-        if truncated:
-            audio = audio[:max_samples]
+    try:
+        sample_rate, channels, duration_sec, truncated, audio = _read_audio_soundfile(path, max_duration_sec)
+    except Exception:
+        if not _should_use_audioread(path):
+            raise
+        sample_rate, channels, duration_sec, truncated, audio = _read_audio_audioread(path, max_duration_sec)
 
-    duration_sec = total_samples / float(sample_rate)
     info = AudioInfo(
         path=str(path),
         name=path.name,
@@ -38,6 +28,137 @@ def load_audio(path: Path, max_duration_sec: float | None = None) -> tuple[Audio
         truncated=truncated,
     )
     return info, audio
+
+
+def get_audio_duration_sec(path: Path) -> float:
+    try:
+        import soundfile as sf
+
+        info = sf.info(path)
+        frames = int(info.frames)
+        samplerate = int(info.samplerate)
+        if frames > 0 and samplerate > 0:
+            return frames / float(samplerate)
+    except Exception:
+        pass
+
+    if not _should_use_audioread(path):
+        raise ValueError("Failed to read audio header")
+
+    try:
+        import audioread
+
+        with audioread.audio_open(str(path)) as handle:
+            if handle.duration and handle.duration > 0:
+                return float(handle.duration)
+    except Exception as exc:
+        raise ValueError("Failed to read audio header") from exc
+
+    raise ValueError("Failed to read audio header")
+
+
+def _read_audio_soundfile(
+    path: Path,
+    max_duration_sec: float | None,
+) -> tuple[int, int, float, bool, np.ndarray]:
+    import soundfile as sf
+
+    info = sf.info(path)
+    sample_rate = int(info.samplerate)
+    channels = int(info.channels)
+    total_samples = info.frames if info.frames > 0 else None
+    max_samples = int(sample_rate * max_duration_sec) if max_duration_sec is not None else None
+    truncated = False
+    frames_to_read = -1
+
+    if max_samples is not None and (total_samples is None or total_samples > max_samples):
+        frames_to_read = max_samples
+        truncated = True
+
+    with sf.SoundFile(path) as handle:
+        audio = handle.read(frames=frames_to_read, dtype="float32", always_2d=True)
+
+    mono = np.zeros(0, dtype=np.float32) if audio.size == 0 else audio.mean(axis=1).astype(np.float32)
+
+    if total_samples is None:
+        total_samples = mono.shape[0]
+        if max_samples is not None and mono.shape[0] >= max_samples:
+            truncated = True
+
+    duration_sec = total_samples / float(sample_rate) if sample_rate > 0 else 0.0
+    return sample_rate, channels, duration_sec, truncated, mono
+
+
+def _read_audio_audioread(
+    path: Path,
+    max_duration_sec: float | None,
+) -> tuple[int, int, float, bool, np.ndarray]:
+    import audioread
+
+    with audioread.audio_open(str(path)) as handle:
+        sample_rate = int(handle.samplerate)
+        channels = int(handle.channels)
+        duration_sec = float(handle.duration) if handle.duration else 0.0
+        max_samples = int(sample_rate * max_duration_sec) if max_duration_sec is not None else None
+        total_samples = int(duration_sec * sample_rate) if duration_sec > 0 else None
+        truncated = False
+
+        chunks: list[np.ndarray] = []
+        read_samples = 0
+        leftover = b""
+        bytes_per_sample = 2
+        frame_bytes = max(1, channels * bytes_per_sample)
+        for buffer in handle:
+            data = leftover + buffer
+            frames = len(data) // frame_bytes
+            if frames == 0:
+                leftover = data
+                continue
+            data_used = data[: frames * frame_bytes]
+            leftover = data[frames * frame_bytes :]
+
+            chunk = np.frombuffer(data_used, dtype="<i2")
+            if channels > 1:
+                chunk = chunk.reshape(frames, channels).mean(axis=1)
+            if max_samples is not None:
+                remaining = max_samples - read_samples
+                if remaining <= 0:
+                    truncated = True
+                    break
+                if chunk.shape[0] > remaining:
+                    chunk = chunk[:remaining]
+                    truncated = True
+            chunks.append(chunk.astype(np.float32))
+            read_samples += chunk.shape[0]
+
+        if chunks:
+            audio = np.concatenate(chunks)
+            audio = (audio / 32768.0).clip(-1.0, 1.0).astype(np.float32)
+        else:
+            audio = np.zeros(0, dtype=np.float32)
+
+        if total_samples is None:
+            total_samples = read_samples
+        if max_samples is not None and total_samples > max_samples:
+            truncated = True
+
+        duration_sec = total_samples / float(sample_rate) if sample_rate > 0 else 0.0
+        return sample_rate, channels, duration_sec, truncated, audio
+
+
+def _should_use_audioread(path: Path) -> bool:
+    suffix = path.suffix.lower()
+    return suffix in {
+        ".mp3",
+        ".m4a",
+        ".aac",
+        ".ogg",
+        ".opus",
+        ".wma",
+        ".mp4",
+        ".m4b",
+        ".m4p",
+    }
 
 
 def make_spectrogram(

@@ -3,11 +3,13 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+import soundfile as sf
 from scipy.io import wavfile
 
 pytest.importorskip("pywt")
 
 from soma.analysis import (  # noqa: E402
+    _read_audio_audioread,
     estimate_cwt_amp_reference,
     load_audio,
     make_spectrogram,
@@ -48,6 +50,63 @@ def test_load_audio_normalizes_stereo_int32(tmp_path: Path) -> None:
     assert audio.ndim == 1
     assert audio.max() <= 1.0
     assert audio.min() >= -1.0
+
+
+def test_load_audio_reads_aiff(tmp_path: Path) -> None:
+    path = tmp_path / "test.aiff"
+    sample_rate = 48000
+    data = np.random.uniform(-0.5, 0.5, size=(2000, 2)).astype(np.float32)
+    sf.write(path, data, sample_rate, format="AIFF")
+
+    info, audio = load_audio(path, max_duration_sec=None)
+
+    assert info.sample_rate == sample_rate
+    assert info.channels == 2
+    assert audio.ndim == 1
+    assert audio.shape[0] == data.shape[0]
+
+
+def test_audioread_frame_alignment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    import audioread
+
+    sample_rate = 48000
+    channels = 2
+    left = np.array([0, 1000, -1000, 2000, -2000, 3000], dtype=np.int16)
+    right = np.array([100, -100, 200, -200, 300, -300], dtype=np.int16)
+    interleaved = np.empty(left.size * 2, dtype=np.int16)
+    interleaved[0::2] = left
+    interleaved[1::2] = right
+    raw = interleaved.tobytes()
+
+    buffers = [raw[:3], raw[3:11], raw[11:19], raw[19:]]
+
+    class FakeHandle:
+        def __init__(self, chunks: list[bytes]) -> None:
+            self._chunks = chunks
+            self.samplerate = sample_rate
+            self.channels = channels
+            self.duration = 0.0
+
+        def __iter__(self):
+            return iter(self._chunks)
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb) -> None:
+            return None
+
+    def fake_open(_path: str):
+        return FakeHandle(buffers)
+
+    monkeypatch.setattr(audioread, "audio_open", fake_open)
+    fake_path = tmp_path / "fake.mp3"
+
+    _rate, _channels, _duration, _truncated, audio = _read_audio_audioread(fake_path, None)
+
+    expected = ((left.astype(np.float32) + right.astype(np.float32)) / 2.0) / 32768.0
+    assert audio.shape[0] == expected.shape[0]
+    assert np.allclose(audio, expected, atol=1e-6)
 
 
 def test_make_spectrogram() -> None:

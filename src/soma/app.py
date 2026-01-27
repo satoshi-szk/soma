@@ -8,7 +8,6 @@ import os
 import sys
 import tempfile
 import threading
-import wave
 from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
@@ -17,7 +16,7 @@ from typing import Any, cast
 import numpy as np
 import webview
 
-from soma.analysis import resample_audio
+from soma.analysis import get_audio_duration_sec, resample_audio
 from soma.api_schema import (
     DeletePartialsPayload,
     ErasePartialPayload,
@@ -98,18 +97,9 @@ def _log_api_call(method: Any) -> Any:
     return wrapper
 
 
-def _get_wav_duration_sec(path: Path) -> float:
-    with wave.open(str(path), "rb") as handle:
-        frames = handle.getnframes()
-        sample_rate = handle.getframerate()
-    if sample_rate <= 0:
-        raise ValueError("Invalid sample rate")
-    return frames / float(sample_rate)
-
-
 def _check_audio_duration(window: webview.Window, path: Path) -> dict[str, Any] | None:
     try:
-        _get_wav_duration_sec(path)
+        get_audio_duration_sec(path)
     except Exception:
         logger.exception("Failed to read audio header: %s", path)
         return {"status": "error", "message": "オーディオファイルを読み込めませんでした。"}
@@ -147,7 +137,7 @@ class SomaApi:
         result = window.create_file_dialog(
             webview.FileDialog.OPEN,
             allow_multiple=False,
-            file_types=("Audio Files (*.wav;*.WAV)",),
+            file_types=("Audio Files (*.wav;*.WAV;*.aif;*.aiff;*.mp3;*.flac;*.ogg;*.m4a)",),
         )
         if not result:
             return {"status": "cancelled"}
