@@ -30,6 +30,8 @@ declare global {
         stop: () => Promise<unknown>
         playback_state: () => Promise<unknown>
         export_mpe: (payload: unknown) => Promise<unknown>
+        export_multitrack_midi: (payload: unknown) => Promise<unknown>
+        export_monophonic_midi: (payload: unknown) => Promise<unknown>
         export_audio: (payload: unknown) => Promise<unknown>
         request_viewport_preview: (payload: unknown) => Promise<unknown>
       }

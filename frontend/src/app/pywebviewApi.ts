@@ -55,6 +55,8 @@ export const pywebviewApi = {
   pause: () => callApi('pause'),
   stop: () => callApi('stop'),
   export_mpe: (payload: PayloadFor<'export_mpe'>) => callApi('export_mpe', payload),
+  export_multitrack_midi: (payload: PayloadFor<'export_multitrack_midi'>) => callApi('export_multitrack_midi', payload),
+  export_monophonic_midi: (payload: PayloadFor<'export_monophonic_midi'>) => callApi('export_monophonic_midi', payload),
   export_audio: (payload: PayloadFor<'export_audio'>) => callApi('export_audio', payload),
   request_viewport_preview: (payload: PayloadFor<'request_viewport_preview'>) =>
     callApi('request_viewport_preview', payload),

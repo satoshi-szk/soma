@@ -21,7 +21,9 @@ from soma.api_schema import (
     DeletePartialsPayload,
     ErasePartialPayload,
     ExportAudioPayload,
+    ExportMonophonicMidiPayload,
     ExportMpePayload,
+    ExportMultiTrackMidiPayload,
     HitTestPayload,
     MergePartialsPayload,
     OpenAudioDataPayload,
@@ -37,7 +39,16 @@ from soma.api_schema import (
     parse_payload,
 )
 from soma.document import SomaDocument
-from soma.exporter import AudioExportSettings, MpeExportSettings, export_audio, export_mpe
+from soma.exporter import (
+    AudioExportSettings,
+    MonophonicExportSettings,
+    MpeExportSettings,
+    MultiTrackExportSettings,
+    export_audio,
+    export_monophonic_midi,
+    export_mpe,
+    export_multitrack_midi,
+)
 from soma.logging_utils import configure_logging, get_session_log_dir
 from soma.models import AnalysisSettings, PartialPoint
 
@@ -554,6 +565,60 @@ class SomaApi:
             bpm=parsed.bpm,
         )
         paths = export_mpe(self._doc.store.all(), Path(selection), settings)
+        return {"status": "ok", "paths": [str(p) for p in paths]}
+
+    def export_multitrack_midi(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self._doc.audio_info is None:
+            return {"status": "error", "message": "No audio loaded."}
+        window = webview.windows[0] if webview.windows else None
+        if window is None:
+            return {"status": "error", "message": "Window not ready"}
+        result = window.create_file_dialog(
+            webview.FileDialog.SAVE,
+            save_filename="project_multitrack.mid",
+            file_types=("MIDI (*.mid)",),
+        )
+        if not result:
+            return {"status": "cancelled"}
+        selection = _normalize_dialog_result(result)
+        if selection is None:
+            return {"status": "cancelled"}
+        parsed = _validated_payload(ExportMultiTrackMidiPayload, payload, "export_multitrack_midi")
+        if isinstance(parsed, dict):
+            return parsed
+        settings = MultiTrackExportSettings(
+            pitch_bend_range=parsed.pitch_bend_range,
+            amplitude_mapping=parsed.amplitude_mapping,
+            bpm=parsed.bpm,
+        )
+        paths = export_multitrack_midi(self._doc.store.all(), Path(selection), settings)
+        return {"status": "ok", "paths": [str(p) for p in paths]}
+
+    def export_monophonic_midi(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self._doc.audio_info is None:
+            return {"status": "error", "message": "No audio loaded."}
+        window = webview.windows[0] if webview.windows else None
+        if window is None:
+            return {"status": "error", "message": "Window not ready"}
+        result = window.create_file_dialog(
+            webview.FileDialog.SAVE,
+            save_filename="project_mono.mid",
+            file_types=("MIDI (*.mid)",),
+        )
+        if not result:
+            return {"status": "cancelled"}
+        selection = _normalize_dialog_result(result)
+        if selection is None:
+            return {"status": "cancelled"}
+        parsed = _validated_payload(ExportMonophonicMidiPayload, payload, "export_monophonic_midi")
+        if isinstance(parsed, dict):
+            return parsed
+        settings = MonophonicExportSettings(
+            pitch_bend_range=parsed.pitch_bend_range,
+            amplitude_mapping=parsed.amplitude_mapping,
+            bpm=parsed.bpm,
+        )
+        paths = export_monophonic_midi(self._doc.store.all(), Path(selection), settings)
         return {"status": "ok", "paths": [str(p) for p in paths]}
 
     def export_audio(self, payload: dict[str, Any]) -> dict[str, Any]:
