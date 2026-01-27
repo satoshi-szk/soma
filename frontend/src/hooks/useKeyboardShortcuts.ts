@@ -6,9 +6,10 @@ type Options = {
   onUndo: () => void
   onRedo: () => void
   onPlayToggle: () => void
+  onSave: () => void | Promise<void>
 }
 
-export function useKeyboardShortcuts({ onToolChange, onUndo, onRedo, onPlayToggle }: Options) {
+export function useKeyboardShortcuts({ onToolChange, onUndo, onRedo, onPlayToggle, onSave }: Options) {
   const handleKeyDown = useCallback(
     (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
@@ -31,8 +32,12 @@ export function useKeyboardShortcuts({ onToolChange, onUndo, onRedo, onPlayToggl
         event.preventDefault()
         onRedo()
       }
+      if (key === 's' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault()
+        void onSave()
+      }
     },
-    [onToolChange, onUndo, onRedo, onPlayToggle]
+    [onToolChange, onUndo, onRedo, onPlayToggle, onSave]
   )
 
   useEffect(() => {

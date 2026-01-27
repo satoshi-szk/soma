@@ -54,6 +54,10 @@ function App() {
     onPlayToggle: () => {
       if (analysis.analysisState !== 'analyzing') playback.togglePlay()
     },
+    onSave: async () => {
+      const success = await analysis.saveProject()
+      if (success) setStatusNote('Project saved')
+    },
   })
 
   useEffect(() => {
