@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { isPywebviewApiAvailable, pywebviewApi } from '../app/pywebviewApi'
 import { DEFAULT_SETTINGS } from '../app/constants'
+import { ensurePreviewData } from '../app/previewData'
 import { toPartial } from '../app/utils'
 import type { AnalysisSettings, AudioInfo, SpectrogramPreview, Partial } from '../app/types'
 
@@ -25,20 +26,28 @@ export function useAnalysis(reportError: ReportError) {
     lastApplied: number
     timerId: number | null
     pending: SpectrogramPreview | null
-  }>({ lastApplied: 0, timerId: null, pending: null })
+    pendingToken: number
+    nextToken: number
+  }>({ lastApplied: 0, timerId: null, pending: null, pendingToken: 0, nextToken: 0 })
 
   // Subscribe preview events (push)
   useEffect(() => {
     const cleanupState = previewThrottleRef.current
-    const applyPreview = (next: SpectrogramPreview) => {
-      setPreview(next)
+    const applyPreview = async (next: SpectrogramPreview, token: number) => {
+      const resolved = await ensurePreviewData(next)
+      const state = previewThrottleRef.current
+      if (state.pendingToken !== token) return
+      setPreview(resolved)
       setAnalysisState('idle')
       setAnalysisError(null)
     }
 
     const schedulePreview = (next: SpectrogramPreview) => {
       const state = previewThrottleRef.current
+      const token = state.nextToken + 1
+      state.nextToken = token
       state.pending = next
+      state.pendingToken = token
       const now = Date.now()
       const throttleMs = 1500
       const elapsed = now - state.lastApplied
@@ -49,7 +58,7 @@ export function useAnalysis(reportError: ReportError) {
           state.timerId = null
         }
         state.lastApplied = now
-        applyPreview(next)
+        void applyPreview(next, token)
         return
       }
 
@@ -61,7 +70,7 @@ export function useAnalysis(reportError: ReportError) {
         state.timerId = null
         if (state.pending) {
           state.lastApplied = Date.now()
-          applyPreview(state.pending)
+          void applyPreview(state.pending, state.pendingToken)
         }
       }, throttleMs - elapsed)
     }

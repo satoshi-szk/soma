@@ -27,6 +27,8 @@ export type SpectrogramPreview = {
   width: number
   height: number
   data: number[]
+  data_path?: string
+  data_length?: number
   time_start: number
   time_end: number
   freq_min: number
