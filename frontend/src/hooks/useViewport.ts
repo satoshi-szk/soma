@@ -200,14 +200,14 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
         freq_min: params.freqMin,
         freq_max: params.freqMax,
         width: Math.round(stageSize.width),
-        height: Math.round(stageSize.height),
+        height: Math.round(spectrogramAreaHeight),
       })
 
       if (result.status === 'error') {
         reportError('Viewport', result.message ?? 'Failed to request viewport preview')
       }
     },
-    [reportError, stageSize.width, stageSize.height]
+    [reportError, stageSize.width, spectrogramAreaHeight]
   )
 
   // Request viewport preview on zoom/pan change (after interaction stops)
@@ -226,9 +226,12 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
     const visibleTimeEnd = Math.min(duration, visibleTimeStart + stageSize.width / zoomX)
     const logMin = Math.log(freqMin)
     const logMax = Math.log(freqMax)
-    const visibleFreqMax = Math.exp(logMax - Math.max(0, -pan.y / (stageSize.height * zoomY)) * (logMax - logMin))
+    const visibleFreqMax = Math.exp(
+      logMax - Math.max(0, -pan.y / (spectrogramAreaHeight * zoomY)) * (logMax - logMin)
+    )
     const visibleFreqMin = Math.exp(
-      logMax - Math.min(1, (stageSize.height - pan.y) / (stageSize.height * zoomY)) * (logMax - logMin)
+      logMax -
+        Math.min(1, (spectrogramAreaHeight - pan.y) / (spectrogramAreaHeight * zoomY)) * (logMax - logMin)
     )
 
     pendingParamsRef.current = {
@@ -255,7 +258,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
         window.clearTimeout(interactionTimerRef.current)
       }
     }
-  }, [zoomX, zoomY, pan, stageSize, preview, baseZoomX, sendViewportRequest])
+  }, [zoomX, zoomY, pan, stageSize.width, spectrogramAreaHeight, preview, baseZoomX, sendViewportRequest])
 
   // Subscribe viewport preview events (push)
   useEffect(() => {

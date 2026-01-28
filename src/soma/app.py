@@ -8,7 +8,6 @@ import os
 import sys
 import tempfile
 import threading
-import wave
 from datetime import UTC, datetime
 from functools import wraps
 from pathlib import Path
@@ -17,12 +16,14 @@ from typing import Any, cast
 import numpy as np
 import webview
 
-from soma.analysis import resample_audio
+from soma.analysis import get_audio_duration_sec, resample_audio
 from soma.api_schema import (
     DeletePartialsPayload,
     ErasePartialPayload,
     ExportAudioPayload,
+    ExportMonophonicMidiPayload,
     ExportMpePayload,
+    ExportMultiTrackMidiPayload,
     HitTestPayload,
     MergePartialsPayload,
     OpenAudioDataPayload,
@@ -38,7 +39,16 @@ from soma.api_schema import (
     parse_payload,
 )
 from soma.document import SomaDocument
-from soma.exporter import AudioExportSettings, MpeExportSettings, export_audio, export_mpe
+from soma.exporter import (
+    AudioExportSettings,
+    MonophonicExportSettings,
+    MpeExportSettings,
+    MultiTrackExportSettings,
+    export_audio,
+    export_monophonic_midi,
+    export_mpe,
+    export_multitrack_midi,
+)
 from soma.logging_utils import configure_logging, get_session_log_dir
 from soma.models import AnalysisSettings, PartialPoint
 
@@ -98,18 +108,9 @@ def _log_api_call(method: Any) -> Any:
     return wrapper
 
 
-def _get_wav_duration_sec(path: Path) -> float:
-    with wave.open(str(path), "rb") as handle:
-        frames = handle.getnframes()
-        sample_rate = handle.getframerate()
-    if sample_rate <= 0:
-        raise ValueError("Invalid sample rate")
-    return frames / float(sample_rate)
-
-
 def _check_audio_duration(window: webview.Window, path: Path) -> dict[str, Any] | None:
     try:
-        _get_wav_duration_sec(path)
+        get_audio_duration_sec(path)
     except Exception:
         logger.exception("Failed to read audio header: %s", path)
         return {"status": "error", "message": "オーディオファイルを読み込めませんでした。"}
@@ -147,7 +148,7 @@ class SomaApi:
         result = window.create_file_dialog(
             webview.FileDialog.OPEN,
             allow_multiple=False,
-            file_types=("Audio Files (*.wav;*.WAV)",),
+            file_types=("Audio Files (*.wav;*.WAV;*.aif;*.aiff;*.mp3;*.flac;*.ogg;*.m4a)",),
         )
         if not result:
             return {"status": "cancelled"}
@@ -566,6 +567,60 @@ class SomaApi:
         paths = export_mpe(self._doc.store.all(), Path(selection), settings)
         return {"status": "ok", "paths": [str(p) for p in paths]}
 
+    def export_multitrack_midi(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self._doc.audio_info is None:
+            return {"status": "error", "message": "No audio loaded."}
+        window = webview.windows[0] if webview.windows else None
+        if window is None:
+            return {"status": "error", "message": "Window not ready"}
+        result = window.create_file_dialog(
+            webview.FileDialog.SAVE,
+            save_filename="project_multitrack.mid",
+            file_types=("MIDI (*.mid)",),
+        )
+        if not result:
+            return {"status": "cancelled"}
+        selection = _normalize_dialog_result(result)
+        if selection is None:
+            return {"status": "cancelled"}
+        parsed = _validated_payload(ExportMultiTrackMidiPayload, payload, "export_multitrack_midi")
+        if isinstance(parsed, dict):
+            return parsed
+        settings = MultiTrackExportSettings(
+            pitch_bend_range=parsed.pitch_bend_range,
+            amplitude_mapping=parsed.amplitude_mapping,
+            bpm=parsed.bpm,
+        )
+        paths = export_multitrack_midi(self._doc.store.all(), Path(selection), settings)
+        return {"status": "ok", "paths": [str(p) for p in paths]}
+
+    def export_monophonic_midi(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self._doc.audio_info is None:
+            return {"status": "error", "message": "No audio loaded."}
+        window = webview.windows[0] if webview.windows else None
+        if window is None:
+            return {"status": "error", "message": "Window not ready"}
+        result = window.create_file_dialog(
+            webview.FileDialog.SAVE,
+            save_filename="project_mono.mid",
+            file_types=("MIDI (*.mid)",),
+        )
+        if not result:
+            return {"status": "cancelled"}
+        selection = _normalize_dialog_result(result)
+        if selection is None:
+            return {"status": "cancelled"}
+        parsed = _validated_payload(ExportMonophonicMidiPayload, payload, "export_monophonic_midi")
+        if isinstance(parsed, dict):
+            return parsed
+        settings = MonophonicExportSettings(
+            pitch_bend_range=parsed.pitch_bend_range,
+            amplitude_mapping=parsed.amplitude_mapping,
+            bpm=parsed.bpm,
+        )
+        paths = export_monophonic_midi(self._doc.store.all(), Path(selection), settings)
+        return {"status": "ok", "paths": [str(p) for p in paths]}
+
     def export_audio(self, payload: dict[str, Any]) -> dict[str, Any]:
         if self._doc.audio_info is None:
             return {"status": "error", "message": "No audio loaded."}
@@ -716,6 +771,9 @@ def main() -> None:
     force_dev = os.environ.get("SOMA_DEV", "").lower() in {"1", "true", "yes"}
     url = resolve_frontend_url()
     api = SomaApi()
+    if force_dev:
+        # Keep devtools available via context menu, but avoid auto-opening on start.
+        webview.settings["OPEN_DEVTOOLS_IN_DEBUG"] = False
     window = webview.create_window(
         "SOMA",
         url=url,

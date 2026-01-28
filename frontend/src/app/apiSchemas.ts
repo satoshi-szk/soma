@@ -159,6 +159,22 @@ export const apiSchemas = {
     }),
     response: z.union([okStatusSchema.extend({ paths: z.array(z.string()) }), errorStatusSchema]),
   },
+  export_multitrack_midi: {
+    payload: z.object({
+      pitch_bend_range: z.number().optional(),
+      amplitude_mapping: z.string().optional(),
+      bpm: z.number().optional(),
+    }),
+    response: z.union([okStatusSchema.extend({ paths: z.array(z.string()) }), errorStatusSchema]),
+  },
+  export_monophonic_midi: {
+    payload: z.object({
+      pitch_bend_range: z.number().optional(),
+      amplitude_mapping: z.string().optional(),
+      bpm: z.number().optional(),
+    }),
+    response: z.union([okStatusSchema.extend({ paths: z.array(z.string()) }), errorStatusSchema]),
+  },
   export_audio: {
     payload: z.object({
       sample_rate: z.number().optional(),

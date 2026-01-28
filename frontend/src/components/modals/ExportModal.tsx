@@ -1,15 +1,15 @@
 export type ExportModalProps = {
-  tab: 'mpe' | 'audio'
-  pitchBendRange: number
+  tab: 'mpe' | 'multitrack' | 'mono' | 'audio'
+  pitchBendRange: string
   amplitudeMapping: string
-  exportSampleRate: number
-  exportBitDepth: number
+  exportSampleRate: string
+  exportBitDepth: string
   exportType: 'sine' | 'cv'
-  onTabChange: (tab: 'mpe' | 'audio') => void
-  onPitchBendChange: (value: number) => void
+  onTabChange: (tab: 'mpe' | 'multitrack' | 'mono' | 'audio') => void
+  onPitchBendChange: (value: string) => void
   onAmplitudeMappingChange: (value: string) => void
-  onSampleRateChange: (value: number) => void
-  onBitDepthChange: (value: number) => void
+  onSampleRateChange: (value: string) => void
+  onBitDepthChange: (value: string) => void
   onOutputTypeChange: (value: 'sine' | 'cv') => void
   onCancel: () => void
   onExport: () => void
@@ -39,19 +39,31 @@ export function ExportModal({
           <button className={tab === 'mpe' ? 'active' : ''} onClick={() => onTabChange('mpe')}>
             MPE (MIDI)
           </button>
+          <button className={tab === 'multitrack' ? 'active' : ''} onClick={() => onTabChange('multitrack')}>
+            Multi-Track MIDI
+          </button>
+          <button className={tab === 'mono' ? 'active' : ''} onClick={() => onTabChange('mono')}>
+            Monophonic MIDI
+          </button>
           <button className={tab === 'audio' ? 'active' : ''} onClick={() => onTabChange('audio')}>
             Audio / CV
           </button>
         </div>
-        {tab === 'mpe' ? (
+        {tab === 'mpe' || tab === 'multitrack' || tab === 'mono' ? (
           <div className="modal-grid">
             <label>
               Pitch Bend Range
-              <input type="number" value={pitchBendRange} onChange={(event) => onPitchBendChange(Number(event.target.value))} />
+              <input
+                type="text"
+                inputMode="numeric"
+                value={pitchBendRange}
+                onChange={(event) => onPitchBendChange(event.target.value)}
+              />
             </label>
             <label>
               Amplitude Mapping
               <select value={amplitudeMapping} onChange={(event) => onAmplitudeMappingChange(event.target.value)}>
+                <option value="velocity">Velocity</option>
                 <option value="pressure">Pressure</option>
                 <option value="cc74">CC74</option>
               </select>
@@ -68,11 +80,21 @@ export function ExportModal({
             </label>
             <label>
               Sample Rate
-              <input type="number" value={exportSampleRate} onChange={(event) => onSampleRateChange(Number(event.target.value))} />
+              <input
+                type="text"
+                inputMode="numeric"
+                value={exportSampleRate}
+                onChange={(event) => onSampleRateChange(event.target.value)}
+              />
             </label>
             <label>
               Bit Depth
-              <input type="number" value={exportBitDepth} onChange={(event) => onBitDepthChange(Number(event.target.value))} />
+              <input
+                type="text"
+                inputMode="numeric"
+                value={exportBitDepth}
+                onChange={(event) => onBitDepthChange(event.target.value)}
+              />
             </label>
           </div>
         )}

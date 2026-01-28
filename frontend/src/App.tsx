@@ -26,11 +26,15 @@ function App() {
   })
   const [showAnalysisModal, setShowAnalysisModal] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
-  const [exportTab, setExportTab] = useState<'mpe' | 'audio'>('mpe')
-  const [pitchBendRange, setPitchBendRange] = useState(48)
-  const [ampMapping, setAmpMapping] = useState('cc74')
-  const [exportSampleRate, setExportSampleRate] = useState(44100)
-  const [exportBitDepth, setExportBitDepth] = useState(16)
+  const [exportTab, setExportTab] = useState<'mpe' | 'multitrack' | 'mono' | 'audio'>('mpe')
+  const [mpePitchBendRange, setMpePitchBendRange] = useState('48')
+  const [multitrackPitchBendRange, setMultitrackPitchBendRange] = useState('48')
+  const [monoPitchBendRange, setMonoPitchBendRange] = useState('48')
+  const [mpeAmpMapping, setMpeAmpMapping] = useState('cc74')
+  const [multitrackAmpMapping, setMultitrackAmpMapping] = useState('cc74')
+  const [monoAmpMapping, setMonoAmpMapping] = useState('cc74')
+  const [exportSampleRate, setExportSampleRate] = useState('44100')
+  const [exportBitDepth, setExportBitDepth] = useState('16')
   const [exportType, setExportType] = useState<'sine' | 'cv'>('sine')
 
   const menuRef = useRef<HTMLDivElement | null>(null)
@@ -53,6 +57,10 @@ function App() {
     onRedo: partialsHook.redo,
     onPlayToggle: () => {
       if (analysis.analysisState !== 'analyzing') playback.togglePlay()
+    },
+    onSave: async () => {
+      const success = await analysis.saveProject()
+      if (success) setStatusNote('Project saved')
     },
   })
 
@@ -203,9 +211,57 @@ function App() {
       reportError('Export', 'API not available')
       return
     }
+    const parseOptionalNumber = (value: string): { value: number | undefined; valid: boolean } => {
+      const trimmed = value.trim()
+      if (trimmed === '') return { value: undefined, valid: true }
+      const parsed = Number(trimmed)
+      if (!Number.isFinite(parsed)) {
+        return { value: undefined, valid: false }
+      }
+      return { value: parsed, valid: true }
+    }
+    const currentPitchBendRange =
+      exportTab === 'mpe' ? mpePitchBendRange : exportTab === 'multitrack' ? multitrackPitchBendRange : monoPitchBendRange
+    const currentAmpMapping =
+      exportTab === 'mpe' ? mpeAmpMapping : exportTab === 'multitrack' ? multitrackAmpMapping : monoAmpMapping
+    const pitchBendRange = parseOptionalNumber(currentPitchBendRange)
+    const sampleRate = parseOptionalNumber(exportSampleRate)
+    const bitDepth = parseOptionalNumber(exportBitDepth)
+    if (exportTab !== 'audio' && !pitchBendRange.valid) {
+      reportError('Export', 'Pitch Bend Range is invalid')
+      return
+    }
+    if (exportTab === 'audio' && !sampleRate.valid) {
+      reportError('Export', 'Sample Rate is invalid')
+      return
+    }
+    if (exportTab === 'audio' && !bitDepth.valid) {
+      reportError('Export', 'Bit Depth is invalid')
+      return
+    }
     try {
       if (exportTab === 'mpe') {
-        const result = await api.export_mpe({ pitch_bend_range: pitchBendRange, amplitude_mapping: ampMapping })
+        const result = await api.export_mpe({ pitch_bend_range: pitchBendRange.value, amplitude_mapping: currentAmpMapping })
+        if (result.status === 'ok') {
+          setStatusNote(`Exported ${result.paths.length} MIDI file(s).`)
+        } else if (result.status === 'error') {
+          reportError('Export', result.message ?? 'Failed to export MIDI')
+        }
+      } else if (exportTab === 'multitrack') {
+        const result = await api.export_multitrack_midi({
+          pitch_bend_range: pitchBendRange.value,
+          amplitude_mapping: currentAmpMapping,
+        })
+        if (result.status === 'ok') {
+          setStatusNote(`Exported ${result.paths.length} MIDI file(s).`)
+        } else if (result.status === 'error') {
+          reportError('Export', result.message ?? 'Failed to export MIDI')
+        }
+      } else if (exportTab === 'mono') {
+        const result = await api.export_monophonic_midi({
+          pitch_bend_range: pitchBendRange.value,
+          amplitude_mapping: currentAmpMapping,
+        })
         if (result.status === 'ok') {
           setStatusNote(`Exported ${result.paths.length} MIDI file(s).`)
         } else if (result.status === 'error') {
@@ -213,8 +269,8 @@ function App() {
         }
       } else {
         const result = await api.export_audio({
-          sample_rate: exportSampleRate,
-          bit_depth: exportBitDepth,
+          sample_rate: sampleRate.value,
+          bit_depth: bitDepth.value,
           output_type: exportType,
         })
         if (result.status === 'ok') {
@@ -362,14 +418,32 @@ function App() {
       {showExportModal ? (
         <ExportModal
           tab={exportTab}
-          pitchBendRange={pitchBendRange}
-          amplitudeMapping={ampMapping}
+          pitchBendRange={
+            exportTab === 'mpe' ? mpePitchBendRange : exportTab === 'multitrack' ? multitrackPitchBendRange : monoPitchBendRange
+          }
+          amplitudeMapping={exportTab === 'mpe' ? mpeAmpMapping : exportTab === 'multitrack' ? multitrackAmpMapping : monoAmpMapping}
           exportSampleRate={exportSampleRate}
           exportBitDepth={exportBitDepth}
           exportType={exportType}
           onTabChange={setExportTab}
-          onPitchBendChange={setPitchBendRange}
-          onAmplitudeMappingChange={setAmpMapping}
+          onPitchBendChange={(value) => {
+            if (exportTab === 'mpe') {
+              setMpePitchBendRange(value)
+            } else if (exportTab === 'multitrack') {
+              setMultitrackPitchBendRange(value)
+            } else {
+              setMonoPitchBendRange(value)
+            }
+          }}
+          onAmplitudeMappingChange={(value) => {
+            if (exportTab === 'mpe') {
+              setMpeAmpMapping(value)
+            } else if (exportTab === 'multitrack') {
+              setMultitrackAmpMapping(value)
+            } else {
+              setMonoAmpMapping(value)
+            }
+          }}
           onSampleRateChange={setExportSampleRate}
           onBitDepthChange={setExportBitDepth}
           onOutputTypeChange={setExportType}

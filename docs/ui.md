@@ -113,6 +113,14 @@
     - Pitch Bend Range
     - Amplitude Mapping (Velocity / Pressure / CC74)
     - 同時発音が 16本以上の場合は自動的に複数のSMFを出力（連番付与）
+- **Tab: Multi-Track MIDI**
+    - Pitch Bend Range
+    - Amplitude Mapping (Velocity / Pressure / CC74)
+    - 1トラック = 1ボイス、全トラックは同一チャンネル
+- **Tab: Monophonic MIDI**
+    - Pitch Bend Range
+    - Amplitude Mapping (Velocity / Pressure / CC74)
+    - 1トラック1チャンネル、ノートは重なり可（モノシンセ側でレガート想定）
 - **Tab: Audio / CV**
     - Output Type (Sine Synthesis / CV Control)
     - Sample Rate / Bit Depth

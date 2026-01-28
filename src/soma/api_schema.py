@@ -74,6 +74,18 @@ class ExportMpePayload(PayloadBase):
     bpm: float = 120.0
 
 
+class ExportMultiTrackMidiPayload(PayloadBase):
+    pitch_bend_range: int = 48
+    amplitude_mapping: str = "velocity"
+    bpm: float = 120.0
+
+
+class ExportMonophonicMidiPayload(PayloadBase):
+    pitch_bend_range: int = 48
+    amplitude_mapping: str = "velocity"
+    bpm: float = 120.0
+
+
 class ExportAudioPayload(PayloadBase):
     sample_rate: int | None = None
     bit_depth: int = 16

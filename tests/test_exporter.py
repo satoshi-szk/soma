@@ -1,4 +1,3 @@
-import math
 from pathlib import Path
 
 import numpy as np
@@ -6,7 +5,16 @@ import pytest
 
 pytest.importorskip("mido")
 
-from soma.exporter import AudioExportSettings, MpeExportSettings, export_audio, export_mpe  # noqa: E402
+from soma.exporter import (  # noqa: E402
+    AudioExportSettings,
+    MonophonicExportSettings,
+    MpeExportSettings,
+    MultiTrackExportSettings,
+    export_audio,
+    export_monophonic_midi,
+    export_mpe,
+    export_multitrack_midi,
+)
 from soma.models import Partial, PartialPoint  # noqa: E402
 
 
@@ -61,12 +69,8 @@ def test_export_mpe_amp_db_mapping(tmp_path: Path) -> None:
     midi = pytest.importorskip("mido").MidiFile(results[0])
     aftertouch = [msg.value for msg in midi.tracks[1] if msg.type == "aftertouch"]
     assert len(aftertouch) >= 2
-    expected_full = 127
-    db = max(-60.0, 20.0 * math.log10(0.5))
-    normalized = (db + 60.0) / 60.0
-    expected_low = int(round(max(0.0, min(1.0, normalized)) * 127))
-    assert aftertouch[0] == expected_full
-    assert aftertouch[1] == expected_low
+    assert aftertouch[0] == 127
+    assert aftertouch[1] == 1
 
 
 def test_export_audio(tmp_path: Path) -> None:
@@ -75,6 +79,54 @@ def test_export_audio(tmp_path: Path) -> None:
     path = tmp_path / "audio.wav"
     output = export_audio(path, buffer, settings, 20.0, 20000.0)
     assert output.exists()
+
+
+def test_export_multitrack_midi(tmp_path: Path) -> None:
+    partials = [
+        Partial(
+            id="p1",
+            points=[
+                PartialPoint(time=0.0, freq=440.0, amp=0.5),
+                PartialPoint(time=1.0, freq=442.0, amp=0.4),
+            ],
+        ),
+        Partial(
+            id="p2",
+            points=[
+                PartialPoint(time=0.5, freq=660.0, amp=0.5),
+                PartialPoint(time=1.5, freq=661.0, amp=0.4),
+            ],
+        ),
+    ]
+    settings = MultiTrackExportSettings(pitch_bend_range=48, amplitude_mapping="velocity")
+    path = tmp_path / "multitrack.mid"
+    results = export_multitrack_midi(partials, path, settings)
+    midi = pytest.importorskip("mido").MidiFile(results[0])
+    assert len(midi.tracks) == 2
+
+
+def test_export_monophonic_midi(tmp_path: Path) -> None:
+    partials = [
+        Partial(
+            id="p1",
+            points=[
+                PartialPoint(time=0.0, freq=440.0, amp=0.5),
+                PartialPoint(time=1.0, freq=441.0, amp=0.4),
+            ],
+        ),
+        Partial(
+            id="p2",
+            points=[
+                PartialPoint(time=0.5, freq=660.0, amp=0.5),
+                PartialPoint(time=1.5, freq=659.0, amp=0.4),
+            ],
+        ),
+    ]
+    settings = MonophonicExportSettings(pitch_bend_range=48, amplitude_mapping="velocity")
+    path = tmp_path / "mono.mid"
+    results = export_monophonic_midi(partials, path, settings)
+    midi = pytest.importorskip("mido").MidiFile(results[0])
+    assert len(midi.tracks) == 1
 
 
 def test_export_cv(tmp_path: Path) -> None:

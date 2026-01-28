@@ -279,6 +279,18 @@ class Partial:
     - 設定により `Velocity` (Note Onのみ), `Channel Pressure`, `CC74` へマッピング。
     - 変換式: Linear Amplitude -> dB Scale -> MIDI Value (0-127)。
 
+### Multi-Track MIDI
+
+- 1トラック=1ボイスで書き出す（同時発音が重ならないようにボイス割当）。
+- 全トラックは同一チャンネルで出力する。
+- Pitch Bend / Amplitude Mapping の設定は MPE と同様。
+
+### Monophonic MIDI
+
+- 1トラック1チャンネルで書き出す。
+- ノートは重なりを許容し、モノシンセ側でレガート処理を想定。
+- ピッチベンド等のチャンネルメッセージは、同時刻に有効な最新開始のパーシャルを優先する。
+
 ### Audio / CV Output
 
 - **Format:** 1 channel WAV (32bit float) 複数ファイル.

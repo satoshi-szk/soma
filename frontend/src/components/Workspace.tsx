@@ -1,12 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { DragEvent } from 'react'
-import { Circle, Group, Layer, Line, Rect, Shape, Stage, Image as KonvaImage, Text } from 'react-konva'
+import { Circle, Group, Layer, Line, Rect, Stage, Image as KonvaImage, Text } from 'react-konva'
 import { ZOOM_X_MAX_PX_PER_SEC, ZOOM_X_MIN_PX_PER_SEC, RULER_HEIGHT, AUTOMATION_LANE_HEIGHT } from '../app/constants'
 import type { AnalysisSettings, Partial, PartialPoint, SpectrogramPreview, ToolId } from '../app/types'
 import { mapColor } from '../app/utils'
 import { SelectionHud } from './SelectionHud'
 import type { KonvaEventObject } from 'konva/lib/Node'
-import type { Context } from 'konva/lib/Context'
 
 const hexToRgba = (hex: string, alpha: number) => {
   const cleaned = hex.trim().replace('#', '')
@@ -693,26 +692,9 @@ export function Workspace({
     return selectedPartials.map((partial) => (partial.id === draggedPartial.id ? draggedPartial : partial))
   }, [selectedPartials, draggedPartial, selectedIds])
 
-  const drawPartials = useCallback(
-    (context: Context) => {
-      const ctx = context
-      ctx.save()
-      ctx.lineWidth = 1
-      for (const partial of partials) {
-        if (partial.points.length < 2) continue
-        ctx.strokeStyle = hexToRgba(partial.color, partial.is_muted ? 0.25 : 0.6)
-        ctx.beginPath()
-        partial.points.forEach((point, index) => {
-          const x = timeToX(point.time)
-          const y = freqToY(point.freq)
-          if (index === 0) ctx.moveTo(x, y)
-          else ctx.lineTo(x, y)
-        })
-        ctx.stroke()
-      }
-      ctx.restore()
-    },
-    [partials, timeToX, freqToY],
+  const unselectedPartials = useMemo(
+    () => partials.filter((partial) => !selectedIds.includes(partial.id)),
+    [partials, selectedIds],
   )
 
   const handleEndpointDrag = (partial: Partial, index: number, position: { x: number; y: number }) => {
@@ -849,13 +831,27 @@ export function Workspace({
         </Layer>
         <Layer>
           <Group x={pan.x + contentOffset.x} y={pan.y + contentOffset.y} scaleX={scale.x} scaleY={scale.y}>
-            <Shape sceneFunc={(ctx, shape) => { drawPartials(ctx); ctx.fillStrokeShape(shape) }} />
+            {unselectedPartials.map((partial) => (
+              <Line
+                key={partial.id}
+                points={partial.points.flatMap((point) => [timeToX(point.time), freqToY(point.freq)])}
+                stroke={hexToRgba(partial.color, partial.is_muted ? 0.25 : 0.6)}
+                strokeWidth={3}
+                strokeScaleEnabled={false}
+                lineCap="round"
+                lineJoin="round"
+                listening={false}
+              />
+            ))}
             {renderPartials.map((partial) => (
               <Line
                 key={partial.id}
                 points={partial.points.flatMap((point) => [timeToX(point.time), freqToY(point.freq)])}
                 stroke={hexToRgba(partial.color, partial.is_muted ? 0.35 : 0.95)}
-                strokeWidth={2}
+                strokeWidth={3}
+                strokeScaleEnabled={false}
+                lineCap="round"
+                lineJoin="round"
               />
             ))}
             {renderPartials.length === 1 && renderPartials[0].points.length >= 2 ? (
@@ -956,7 +952,8 @@ export function Workspace({
                 key={`amp-${partial.id}`}
                 points={partial.points.flatMap((point) => [timeToX(point.time), ampToLaneY(point.amp)])}
                 stroke={hexToRgba(partial.color, partial.is_muted ? 0.25 : 0.85)}
-                strokeWidth={1.25}
+                strokeWidth={3}
+                strokeScaleEnabled={false}
               />
             ))}
           </Group>
