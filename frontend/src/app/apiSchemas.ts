@@ -26,7 +26,9 @@ const audioInfoSchema = z.object({
 const spectrogramPreviewSchema = z.object({
   width: z.number(),
   height: z.number(),
-  data: z.array(z.number()),
+  data: z.array(z.number()).optional().default([]),
+  data_path: z.string().optional(),
+  data_length: z.number().optional(),
   time_start: z.number(),
   time_end: z.number(),
   freq_min: z.number(),

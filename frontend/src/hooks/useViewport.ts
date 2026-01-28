@@ -1,4 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
+import { ensurePreviewData } from '../app/previewData'
 import { isPywebviewApiAvailable, pywebviewApi } from '../app/pywebviewApi'
 import {
   ZOOM_X_MAX_PX_PER_SEC,
@@ -50,7 +51,9 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
     timerId: number | null
     pending: SpectrogramPreview | null
     pendingQuality: 'low' | 'high'
-  }>({ lastApplied: 0, timerId: null, pending: null, pendingQuality: 'low' })
+    pendingToken: number
+    nextToken: number
+  }>({ lastApplied: 0, timerId: null, pending: null, pendingQuality: 'low', pendingToken: 0, nextToken: 0 })
   const lastRequestedParams = useRef<ViewportParams | null>(null)
   const pendingParamsRef = useRef<ViewportParams | null>(null)
   const lastPreviewId = useRef<string | null>(null)
@@ -263,7 +266,10 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
   // Subscribe viewport preview events (push)
   useEffect(() => {
     const cleanupState = previewThrottleRef.current
-    const applyPreview = (next: SpectrogramPreview, quality: 'low' | 'high') => {
+    const applyPreview = async (next: SpectrogramPreview, quality: 'low' | 'high', token: number) => {
+      const resolved = await ensurePreviewData(next)
+      const state = previewThrottleRef.current
+      if (state.pendingToken !== token) return
       if (!preview) {
         console.warn('[useViewport] applyPreview called but preview is null, skipping')
         return
@@ -271,12 +277,12 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
 
       // Validate that the incoming preview is compatible with current source
       // Check if time ranges are within valid bounds
-      if (next.time_start < 0 || next.time_end > preview.duration_sec + 0.01) {
+      if (resolved.time_start < 0 || resolved.time_end > preview.duration_sec + 0.01) {
         console.warn(
           '[useViewport] Invalid preview time range:',
-          next.time_start,
+          resolved.time_start,
           '-',
-          next.time_end,
+          resolved.time_end,
           'vs duration:',
           preview.duration_sec
         )
@@ -284,20 +290,20 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
       }
 
       // Sanity check: preview dimensions should be reasonable
-      if (next.width <= 0 || next.height <= 0 || next.data.length !== next.width * next.height) {
+      if (resolved.width <= 0 || resolved.height <= 0 || resolved.data.length !== resolved.width * resolved.height) {
         console.error(
           '[useViewport] Invalid preview dimensions:',
-          next.width,
+          resolved.width,
           'x',
-          next.height,
+          resolved.height,
           'data length:',
-          next.data.length
+          resolved.data.length
         )
         return
       }
 
       const entry: ViewportCacheEntry = {
-        preview: next,
+        preview: resolved,
         quality,
         receivedAt: Date.now(),
         sourceDuration: preview.duration_sec,
@@ -309,10 +315,10 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
         const hasHigh = prev.some(
           (item) =>
             item.quality === 'high' &&
-            Math.abs(item.preview.time_start - next.time_start) < 0.001 &&
-            Math.abs(item.preview.time_end - next.time_end) < 0.001 &&
-            Math.abs(item.preview.freq_min - next.freq_min) < 0.1 &&
-            Math.abs(item.preview.freq_max - next.freq_max) < 0.1
+            Math.abs(item.preview.time_start - resolved.time_start) < 0.001 &&
+            Math.abs(item.preview.time_end - resolved.time_end) < 0.001 &&
+            Math.abs(item.preview.freq_min - resolved.freq_min) < 0.1 &&
+            Math.abs(item.preview.freq_max - resolved.freq_max) < 0.1
         )
         if (quality === 'low' && hasHigh) {
           return prev
@@ -322,10 +328,10 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
           ? prev.filter(
               (item) =>
                 !(
-                  Math.abs(item.preview.time_start - next.time_start) < 0.001 &&
-                  Math.abs(item.preview.time_end - next.time_end) < 0.001 &&
-                  Math.abs(item.preview.freq_min - next.freq_min) < 0.1 &&
-                  Math.abs(item.preview.freq_max - next.freq_max) < 0.1
+                  Math.abs(item.preview.time_start - resolved.time_start) < 0.001 &&
+                  Math.abs(item.preview.time_end - resolved.time_end) < 0.001 &&
+                  Math.abs(item.preview.freq_min - resolved.freq_min) < 0.1 &&
+                  Math.abs(item.preview.freq_max - resolved.freq_max) < 0.1
                 )
             )
           : prev
@@ -361,8 +367,11 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
       }
 
       const state = previewThrottleRef.current
+      const token = state.nextToken + 1
+      state.nextToken = token
       state.pending = next
       state.pendingQuality = quality
+      state.pendingToken = token
       const now = Date.now()
       const throttleMs = 1500
       const elapsed = now - state.lastApplied
@@ -373,7 +382,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
           state.timerId = null
         }
         state.lastApplied = now
-        applyPreview(next, quality)
+        void applyPreview(next, quality, token)
         return
       }
 
@@ -387,7 +396,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
         // Double-check preview hasn't changed before applying
         if (state.pending && currentPreviewIdAtSchedule === lastPreviewId.current) {
           state.lastApplied = Date.now()
-          applyPreview(state.pending, state.pendingQuality)
+          void applyPreview(state.pending, state.pendingQuality, state.pendingToken)
         } else if (state.pending) {
           console.log('[useViewport] Discarding pending preview due to source change')
           state.pending = null

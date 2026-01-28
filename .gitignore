@@ -9,3 +9,5 @@ frontend/.vite/
 
 build/
 dist/
+
+refs/

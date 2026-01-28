@@ -38,6 +38,7 @@ from soma.api_schema import (
     UpdateSettingsPayload,
     parse_payload,
 )
+from soma.cache_server import PreviewCacheServer
 from soma.document import SomaDocument
 from soma.exporter import (
     AudioExportSettings,
@@ -50,11 +51,14 @@ from soma.exporter import (
     export_multitrack_midi,
 )
 from soma.logging_utils import configure_logging, get_session_log_dir
-from soma.models import AnalysisSettings, PartialPoint
+from soma.models import AnalysisSettings, PartialPoint, SpectrogramPreview
+from soma.preview_cache import PreviewCacheConfig, build_preview_payload
 
 logger = logging.getLogger(__name__)
 _frontend_log_lock = threading.Lock()
 _frontend_event_lock = threading.Lock()
+_preview_cache: PreviewCacheConfig | None = None
+_preview_cache_server: PreviewCacheServer | None = None
 
 
 def _dispatch_frontend_event(payload: dict[str, Any]) -> None:
@@ -62,6 +66,7 @@ def _dispatch_frontend_event(payload: dict[str, Any]) -> None:
     if window is None:
         return
     try:
+        payload = _maybe_externalize_preview(payload)
         detail = json.dumps(payload, ensure_ascii=False)
         script = f"window.dispatchEvent(new CustomEvent('soma:event', {{ detail: {detail} }}));"
         with _frontend_event_lock:
@@ -700,18 +705,83 @@ def resolve_frontend_url() -> str:
     if bundle_root:
         index_path = Path(bundle_root) / "frontend" / "dist" / "index.html"
         if index_path.exists():
-            return index_path.as_uri()
+            return str(index_path)
 
     repo_root = Path(__file__).resolve().parents[2]
     repo_index = repo_root / "frontend" / "dist" / "index.html"
     if repo_index.exists():
-        return repo_index.as_uri()
+        return str(repo_index)
 
     package_index = Path(__file__).resolve().parent / "ui" / "index.html"
     if package_index.exists():
-        return package_index.as_uri()
+        return str(package_index)
 
     return "http://localhost:5173"
+
+
+def resolve_frontend_root() -> Path | None:
+    dev_url = os.environ.get("SOMA_DEV_SERVER_URL")
+    if dev_url:
+        return None
+    force_dev = os.environ.get("SOMA_DEV", "").lower() in {"1", "true", "yes"}
+    if force_dev:
+        return None
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        index_path = Path(bundle_root) / "frontend" / "dist" / "index.html"
+        if index_path.exists():
+            return index_path.parent
+    repo_root = Path(__file__).resolve().parents[2]
+    repo_root_dist = repo_root / "frontend" / "dist"
+    if repo_root_dist.exists():
+        return repo_root_dist
+    package_root = Path(__file__).resolve().parent / "ui"
+    if package_root.exists():
+        return package_root
+    return None
+
+
+def _configure_preview_cache() -> None:
+    global _preview_cache
+    global _preview_cache_server
+    cache_dir = get_session_log_dir("soma") / "preview-cache"
+    try:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        test_path = cache_dir / ".write-test"
+        test_path.write_text("ok", encoding="utf-8")
+        test_path.unlink(missing_ok=True)
+    except Exception:
+        logger.warning("preview cache disabled: cannot write to %s", cache_dir, exc_info=True)
+        _preview_cache = None
+        return
+    if _preview_cache_server is None:
+        _preview_cache_server = PreviewCacheServer(cache_dir)
+    base_url = _preview_cache_server.start()
+    _preview_cache = PreviewCacheConfig(dir_path=cache_dir, url_prefix=f"{base_url}/.soma-cache")
+
+
+def _maybe_externalize_preview(payload: dict[str, Any]) -> dict[str, Any]:
+    if _preview_cache is None:
+        return payload
+    if payload.get("type") != "spectrogram_preview_updated":
+        return payload
+    preview_dict = payload.get("preview")
+    if not isinstance(preview_dict, dict):
+        return payload
+    if "data_path" in preview_dict:
+        return payload
+    data = preview_dict.get("data")
+    if not isinstance(data, list):
+        return payload
+    try:
+        preview = SpectrogramPreview(**preview_dict)
+    except Exception:
+        logger.debug("failed to parse preview for externalization", exc_info=True)
+        return payload
+    hint = payload.get("kind")
+    payload = dict(payload)
+    payload["preview"] = build_preview_payload(preview, _preview_cache, hint=str(hint) if hint else None)
+    return payload
 
 
 CONSOLE_HOOK_JS = r"""
@@ -768,6 +838,7 @@ def main() -> None:
     multiprocessing.freeze_support()
 
     configure_logging()
+    _configure_preview_cache()
     force_dev = os.environ.get("SOMA_DEV", "").lower() in {"1", "true", "yes"}
     url = resolve_frontend_url()
     api = SomaApi()
@@ -790,7 +861,7 @@ def main() -> None:
         window.evaluate_js(CONSOLE_HOOK_JS)
 
     window.events.loaded += inject_console_hook
-    webview.start(debug=force_dev)
+    webview.start(debug=force_dev, http_server=True)
 
 
 if __name__ == "__main__":

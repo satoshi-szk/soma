@@ -303,6 +303,7 @@ export function Workspace({
 
   const previewImage = useMemo(() => {
     if (!preview) return null
+    if (preview.data.length !== preview.width * preview.height) return null
     const canvas = document.createElement('canvas')
     canvas.width = preview.width
     canvas.height = preview.height
