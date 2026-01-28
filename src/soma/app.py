@@ -650,12 +650,14 @@ class SomaApi:
             sample_rate=sample_rate,
             bit_depth=parsed.bit_depth,
             output_type=parsed.output_type,
+            cv_base_freq=parsed.cv_base_freq if parsed.cv_base_freq is not None else 440.0,
+            cv_full_scale_volts=parsed.cv_full_scale_volts if parsed.cv_full_scale_volts is not None else 10.0,
         )
         buffer = self._doc.synth.get_mix_buffer().astype(np.float32)
         if settings.sample_rate != self._doc.audio_info.sample_rate:
             buffer, _ = resample_audio(buffer, self._doc.audio_info.sample_rate, settings.sample_rate)
         if settings.output_type == "cv":
-            pitch, amp = self._doc.render_cv_buffers(settings.sample_rate)
+            pitch, amp, amp_min, amp_max = self._doc.render_cv_buffers(settings.sample_rate)
             export_audio(
                 Path(selection),
                 buffer,
@@ -664,6 +666,8 @@ class SomaApi:
                 self._doc.settings.freq_max,
                 pitch_buffer=pitch,
                 amp_buffer=amp,
+                amp_min=amp_min,
+                amp_max=amp_max,
             )
         else:
             export_audio(Path(selection), buffer, settings, self._doc.settings.freq_min, self._doc.settings.freq_max)

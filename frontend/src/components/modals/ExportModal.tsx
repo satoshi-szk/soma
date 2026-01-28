@@ -5,12 +5,16 @@ export type ExportModalProps = {
   exportSampleRate: string
   exportBitDepth: string
   exportType: 'sine' | 'cv'
+  exportCvBaseFreq: string
+  exportCvFullScaleVolts: string
   onTabChange: (tab: 'mpe' | 'multitrack' | 'mono' | 'audio') => void
   onPitchBendChange: (value: string) => void
   onAmplitudeMappingChange: (value: string) => void
   onSampleRateChange: (value: string) => void
   onBitDepthChange: (value: string) => void
   onOutputTypeChange: (value: 'sine' | 'cv') => void
+  onCvBaseFreqChange: (value: string) => void
+  onCvFullScaleVoltsChange: (value: string) => void
   onCancel: () => void
   onExport: () => void
 }
@@ -22,12 +26,16 @@ export function ExportModal({
   exportSampleRate,
   exportBitDepth,
   exportType,
+  exportCvBaseFreq,
+  exportCvFullScaleVolts,
   onTabChange,
   onPitchBendChange,
   onAmplitudeMappingChange,
   onSampleRateChange,
   onBitDepthChange,
   onOutputTypeChange,
+  onCvBaseFreqChange,
+  onCvFullScaleVoltsChange,
   onCancel,
   onExport,
 }: ExportModalProps) {
@@ -78,6 +86,28 @@ export function ExportModal({
                 <option value="cv">CV Control</option>
               </select>
             </label>
+            {exportType === 'cv' ? (
+              <label>
+                CV Base Frequency (0V, Hz)
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={exportCvBaseFreq}
+                  onChange={(event) => onCvBaseFreqChange(event.target.value)}
+                />
+              </label>
+            ) : null}
+            {exportType === 'cv' ? (
+              <label>
+                CV Full Scale (±V)
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  value={exportCvFullScaleVolts}
+                  onChange={(event) => onCvFullScaleVoltsChange(event.target.value)}
+                />
+              </label>
+            ) : null}
             <label>
               Sample Rate
               <input

@@ -39,6 +39,8 @@ class AudioExportSettings:
     sample_rate: int = 44100
     bit_depth: int = 16
     output_type: str = "sine"  # sine | cv
+    cv_base_freq: float = 440.0
+    cv_full_scale_volts: float = 10.0
 
 
 def export_mpe(
@@ -106,12 +108,14 @@ def export_audio(
     freq_max: float,
     pitch_buffer: np.ndarray | None = None,
     amp_buffer: np.ndarray | None = None,
+    amp_min: float | None = None,
+    amp_max: float | None = None,
 ) -> Path:
     if settings.output_type == "cv":
         if pitch_buffer is None or amp_buffer is None:
             raise ValueError("CV export requires pitch and amplitude buffers.")
-        pitch_cv = _normalize_cv(pitch_buffer, freq_min, freq_max)
-        amp_cv = np.clip(amp_buffer, 0.0, 1.0)
+        pitch_cv = _normalize_cv(pitch_buffer, settings.cv_base_freq, settings.cv_full_scale_volts)
+        amp_cv = _normalize_amp_cv(amp_buffer, amp_min, amp_max)
         stacked = np.vstack([pitch_cv, amp_cv]).T
         data = _convert_bit_depth(stacked, settings.bit_depth)
         wavfile.write(output_path, settings.sample_rate, data)
@@ -536,10 +540,20 @@ def _convert_bit_depth(data: np.ndarray, bit_depth: int) -> np.ndarray:
     return np.asarray(np.clip(data, -1.0, 1.0) * max_val, dtype=np.int16)
 
 
-def _normalize_cv(buffer: np.ndarray, freq_min: float, freq_max: float) -> np.ndarray:
+def _normalize_cv(buffer: np.ndarray, base_freq: float, full_scale_volts: float) -> np.ndarray:
     if buffer.size == 0:
         return buffer.astype(np.float32)
-    log_min = np.log2(max(freq_min, 1.0))
-    log_max = np.log2(max(freq_max, freq_min + 1.0))
-    normalized = (np.log2(np.clip(buffer, freq_min, freq_max)) - log_min) / max(1e-6, log_max - log_min)
+    safe_base = max(float(base_freq), 1e-6)
+    safe_buffer = np.where(buffer > 0.0, buffer, safe_base)
+    volts = np.log2(safe_buffer / safe_base)
+    scale = max(float(full_scale_volts), 1e-6)
+    return np.asarray(np.clip(volts / scale, -1.0, 1.0), dtype=np.float32)
+
+
+def _normalize_amp_cv(buffer: np.ndarray, amp_min: float | None, amp_max: float | None) -> np.ndarray:
+    if buffer.size == 0:
+        return buffer.astype(np.float32)
+    if amp_min is None or amp_max is None or amp_max <= amp_min:
+        return np.asarray(np.clip(buffer, 0.0, 1.0) * 2.0 - 1.0, dtype=np.float32)
+    normalized = (buffer - amp_min) / (amp_max - amp_min)
     return np.asarray(np.clip(normalized * 2.0 - 1.0, -1.0, 1.0), dtype=np.float32)

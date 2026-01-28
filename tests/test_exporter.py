@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from scipy.io import wavfile
 
 pytest.importorskip("mido")
 
@@ -130,10 +131,32 @@ def test_export_monophonic_midi(tmp_path: Path) -> None:
 
 
 def test_export_cv(tmp_path: Path) -> None:
-    buffer = np.zeros(100, dtype=np.float32)
-    pitch = np.linspace(100.0, 1000.0, 100, dtype=np.float32)
-    amp = np.linspace(0.0, 1.0, 100, dtype=np.float32)
-    settings = AudioExportSettings(sample_rate=100, bit_depth=16, output_type="cv")
+    buffer = np.zeros(2, dtype=np.float32)
+    base_freq = 100.0
+    pitch = np.array([base_freq, base_freq * 2.0], dtype=np.float32)
+    amp = np.array([0.2, 0.6], dtype=np.float32)
+    settings = AudioExportSettings(
+        sample_rate=2,
+        bit_depth=32,
+        output_type="cv",
+        cv_base_freq=base_freq,
+        cv_full_scale_volts=10.0,
+    )
     path = tmp_path / "cv.wav"
-    output = export_audio(path, buffer, settings, 20.0, 20000.0, pitch_buffer=pitch, amp_buffer=amp)
+    output = export_audio(
+        path,
+        buffer,
+        settings,
+        20.0,
+        20000.0,
+        pitch_buffer=pitch,
+        amp_buffer=amp,
+        amp_min=0.2,
+        amp_max=0.6,
+    )
     assert output.exists()
+    rate, data = wavfile.read(output)
+    assert rate == 2
+    assert data.shape == (2, 2)
+    assert np.allclose(data[:, 0], [0.0, 0.1], atol=1e-6)
+    assert np.allclose(data[:, 1], [-1.0, 1.0], atol=1e-6)

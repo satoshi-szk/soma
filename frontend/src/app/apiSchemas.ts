@@ -182,6 +182,8 @@ export const apiSchemas = {
       sample_rate: z.number().optional(),
       bit_depth: z.number().optional(),
       output_type: z.string().optional(),
+      cv_base_freq: z.number().optional(),
+      cv_full_scale_volts: z.number().optional(),
     }),
     response: z.union([okStatusSchema.extend({ path: z.string() }), errorStatusSchema]),
   },
