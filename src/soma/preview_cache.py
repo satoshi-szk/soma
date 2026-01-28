@@ -82,6 +82,10 @@ def _cleanup_cache(cache: PreviewCacheConfig) -> None:
 
 
 def _join_url(prefix: str, filename: str) -> str:
+    if not prefix:
+        return filename
+    if prefix.startswith("http://") or prefix.startswith("https://"):
+        return f"{prefix.rstrip('/')}/{filename}"
     trimmed = prefix.strip("/")
     if not trimmed:
         return filename

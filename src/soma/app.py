@@ -38,6 +38,7 @@ from soma.api_schema import (
     UpdateSettingsPayload,
     parse_payload,
 )
+from soma.cache_server import PreviewCacheServer
 from soma.document import SomaDocument
 from soma.exporter import (
     AudioExportSettings,
@@ -57,6 +58,7 @@ logger = logging.getLogger(__name__)
 _frontend_log_lock = threading.Lock()
 _frontend_event_lock = threading.Lock()
 _preview_cache: PreviewCacheConfig | None = None
+_preview_cache_server: PreviewCacheServer | None = None
 
 
 def _dispatch_frontend_event(payload: dict[str, Any]) -> None:
@@ -741,11 +743,8 @@ def resolve_frontend_root() -> Path | None:
 
 def _configure_preview_cache() -> None:
     global _preview_cache
-    root = resolve_frontend_root()
-    if root is None:
-        _preview_cache = None
-        return
-    cache_dir = root / ".soma-cache"
+    global _preview_cache_server
+    cache_dir = get_session_log_dir("soma") / "preview-cache"
     try:
         cache_dir.mkdir(parents=True, exist_ok=True)
         test_path = cache_dir / ".write-test"
@@ -755,7 +754,10 @@ def _configure_preview_cache() -> None:
         logger.warning("preview cache disabled: cannot write to %s", cache_dir, exc_info=True)
         _preview_cache = None
         return
-    _preview_cache = PreviewCacheConfig(dir_path=cache_dir, url_prefix=".soma-cache")
+    if _preview_cache_server is None:
+        _preview_cache_server = PreviewCacheServer(cache_dir)
+    base_url = _preview_cache_server.start()
+    _preview_cache = PreviewCacheConfig(dir_path=cache_dir, url_prefix=f"{base_url}/.soma-cache")
 
 
 def _maybe_externalize_preview(payload: dict[str, Any]) -> dict[str, Any]:
