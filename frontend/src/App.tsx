@@ -36,6 +36,8 @@ function App() {
   const [exportSampleRate, setExportSampleRate] = useState('44100')
   const [exportBitDepth, setExportBitDepth] = useState('16')
   const [exportType, setExportType] = useState<'sine' | 'cv'>('sine')
+  const [exportCvBaseFreq, setExportCvBaseFreq] = useState('440')
+  const [exportCvFullScaleVolts, setExportCvFullScaleVolts] = useState('10')
 
   const menuRef = useRef<HTMLDivElement | null>(null)
 
@@ -227,6 +229,8 @@ function App() {
     const pitchBendRange = parseOptionalNumber(currentPitchBendRange)
     const sampleRate = parseOptionalNumber(exportSampleRate)
     const bitDepth = parseOptionalNumber(exportBitDepth)
+    const cvBaseFreq = parseOptionalNumber(exportCvBaseFreq)
+    const cvFullScaleVolts = parseOptionalNumber(exportCvFullScaleVolts)
     if (exportTab !== 'audio' && !pitchBendRange.valid) {
       reportError('Export', 'Pitch Bend Range is invalid')
       return
@@ -238,6 +242,16 @@ function App() {
     if (exportTab === 'audio' && !bitDepth.valid) {
       reportError('Export', 'Bit Depth is invalid')
       return
+    }
+    if (exportTab === 'audio' && exportType === 'cv') {
+      if (!cvBaseFreq.valid || (cvBaseFreq.value !== undefined && cvBaseFreq.value <= 0)) {
+        reportError('Export', 'CV Base Frequency is invalid')
+        return
+      }
+      if (!cvFullScaleVolts.valid || (cvFullScaleVolts.value !== undefined && cvFullScaleVolts.value <= 0)) {
+        reportError('Export', 'CV Full Scale is invalid')
+        return
+      }
     }
     try {
       if (exportTab === 'mpe') {
@@ -272,6 +286,8 @@ function App() {
           sample_rate: sampleRate.value,
           bit_depth: bitDepth.value,
           output_type: exportType,
+          cv_base_freq: exportType === 'cv' ? cvBaseFreq.value : undefined,
+          cv_full_scale_volts: exportType === 'cv' ? cvFullScaleVolts.value : undefined,
         })
         if (result.status === 'ok') {
           setStatusNote(`Exported ${result.path}`)
@@ -425,6 +441,8 @@ function App() {
           exportSampleRate={exportSampleRate}
           exportBitDepth={exportBitDepth}
           exportType={exportType}
+          exportCvBaseFreq={exportCvBaseFreq}
+          exportCvFullScaleVolts={exportCvFullScaleVolts}
           onTabChange={setExportTab}
           onPitchBendChange={(value) => {
             if (exportTab === 'mpe') {
@@ -447,6 +465,8 @@ function App() {
           onSampleRateChange={setExportSampleRate}
           onBitDepthChange={setExportBitDepth}
           onOutputTypeChange={setExportType}
+          onCvBaseFreqChange={setExportCvBaseFreq}
+          onCvFullScaleVoltsChange={setExportCvFullScaleVolts}
           onCancel={() => setShowExportModal(false)}
           onExport={handleExport}
         />

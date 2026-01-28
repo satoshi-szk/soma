@@ -90,6 +90,8 @@ class ExportAudioPayload(PayloadBase):
     sample_rate: int | None = None
     bit_depth: int = 16
     output_type: str = "sine"
+    cv_base_freq: float | None = None
+    cv_full_scale_volts: float | None = None
 
 
 class OpenAudioPathPayload(PayloadBase):

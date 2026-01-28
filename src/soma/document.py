@@ -624,19 +624,26 @@ class SomaDocument:
     def is_playing(self) -> bool:
         return self.player.is_playing()
 
-    def render_cv_buffers(self, sample_rate: int) -> tuple[np.ndarray, np.ndarray]:
+    def render_cv_buffers(self, sample_rate: int) -> tuple[np.ndarray, np.ndarray, float, float]:
         if self.audio_info is None:
-            return np.array([], dtype=np.float32), np.array([], dtype=np.float32)
+            return np.array([], dtype=np.float32), np.array([], dtype=np.float32), 0.0, 1.0
         duration = self.audio_info.duration_sec
         total_samples = max(1, int(duration * sample_rate))
         freq_buffer = np.zeros(total_samples, dtype=np.float32)
         amp_buffer = np.zeros(total_samples, dtype=np.float32)
+        amp_min = float("inf")
+        amp_max = float("-inf")
         for partial in self.store.all():
             if partial.is_muted:
                 continue
             points = partial.sorted_points()
             if len(points) < 2:
                 continue
+            for point in points:
+                if point.amp < amp_min:
+                    amp_min = point.amp
+                if point.amp > amp_max:
+                    amp_max = point.amp
             times = np.array([p.time for p in points], dtype=np.float64)
             freqs = np.array([p.freq for p in points], dtype=np.float64)
             amps = np.array([p.amp for p in points], dtype=np.float64)
@@ -653,7 +660,11 @@ class SomaDocument:
             mask = amp_interp > current
             current[mask] = amp_interp[mask].astype(np.float32)
             freq_buffer[start_idx:end_idx][mask] = freq_interp[mask].astype(np.float32)
-        return freq_buffer, amp_buffer
+        if amp_min == float("inf") or amp_max == float("-inf"):
+            amp_min, amp_max = 0.0, 1.0
+        elif amp_max <= amp_min:
+            amp_max = amp_min + 1.0
+        return freq_buffer, amp_buffer, float(amp_min), float(amp_max)
 
     def save_project(self, path: Path) -> None:
         if self.source_info is None or self.audio_info is None:
