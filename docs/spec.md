@@ -1,72 +1,72 @@
-# SOMA 仕様
+# SOMA Spec
 
 Sonic Observation, Musical Abstraction
 
-## 概要
+## Overview
 
-スペクトログラム上で人間が指定したパーシャルを取り出して、それを MPE の MIDI などいくつかのフォーマットで書き出すGUI アプリケーション
+A GUI application that extracts partials specified by humans on a spectrogram and exports them in several formats such as MPE MIDI.
 
-## 入力音の例:
+## Example input audio
 
-- 雨樋に雨が落ちる音など、ノイズとピッチの混在する素材・環境音
-- 楽器や歌などのピッチやハーモニーのある素材
-- モードと
+- Environmental sounds with mixed noise and pitch (e.g. rain hitting a gutter)
+- Sources with pitch or harmony such as instruments or vocals
+- Modes and
 
-## ワークフローの例:
+## Example workflow
 
-- Wavelet 変換 -> スペクトログラム表示
-- ユーザーがスペクトログラム上から必要なパーシャルの上をペンシルツールでなぞる（マウスドラッグ）
-- なぞったパスに一番近いリッジの周波数・振幅の集合が「パーシャル」としてグルーピング、記録される（リッジへのスナップ処理）
-- ユーザーがエクスポートを選ぶと MPE の SMF などでパーシャルが書き出される。1パーシャルが1ノートに対応する。
+- Wavelet transform -> spectrogram display
+- The user traces desired partials on the spectrogram with a pencil tool (mouse drag)
+- The set of ridge frequencies/amplitudes closest to the traced path is grouped and recorded as a partial (ridge snapping)
+- When the user chooses export, partials are written as MPE SMF, etc. One partial corresponds to one note.
 
-## エクスポートフォーマットの例
+## Example export formats
 
-- SMF（MPE / Multi-Track MIDI / Monophonic MIDI）
-- オーディオファイル（モジュラーシンセサイザーのCV用）
+- SMF (MPE / Multi-Track MIDI / Monophonic MIDI)
+- Audio files (for modular synthesizer CV)
 
-## MVP機能一覧
+## MVP feature list
 
-- スペクトログラム表示
-- ペンシルツールによるパーシャルの指定
-- パーシャルの削除、結合、延長、クロップなど編集機能
-- 編集の Undo / Redo
-- 入力オーディオファイルの再生
-- パーシャルの再生（サイン波によるResynthesis）
-- 入力音（原音）と再合成音のミックス再生（原音/再合成 1ノブ）
-- パーシャルごとのミュート・アンミュート
+- Spectrogram display
+- Specify partials with a pencil tool
+- Edit partials: delete, merge, extend, crop
+- Undo / Redo for edits
+- Playback of input audio files
+- Playback of partials (resynthesis with sine waves)
+- Mix playback of original + resynthesis (one knob)
+- Per-partial mute / unmute
 
-## 将来追加したい機能
+## Features to add later
 
-- Vamp プラグインを使った解析
-- Vamp プラグインやビルトインのアナライザーの出力の時系列データを CV として書き出し
+- Analysis using Vamp plugins
+- Export time-series data from Vamp plugins or built-in analyzers as CV
 
-# 技術仕様
+# Technical Spec
 
-- macOS, Windows 必須
-- できれば Linux
+- macOS and Windows required
+- Linux if possible
 
-## メモ
+## Notes
 
-- 商用アプリではない。研究・創作用ツール。
-- スナップ処理
-    - 描画中（ドラッグ中）はスナップせず、マウスの軌跡をそのまま表示する。
-    - `MouseUp` のタイミングで Backend に軌跡を送り、JIT解析でリッジ（局所最大）を検出してスナップさせる。
-    - **重要:** スナップ処理は CWT による JIT 解析のみで行い、STFT は絶対に使用しない（STFT は GUI プレビュー専用）。
-- スペクトログラム（プレビュー）生成
-    - **方針:** まず STFT による低品質プレビューを表示し、表示窓長 `time_end - time_start` が閾値以下の場合のみ、バックグラウンドで CWT による高品質プレビューへ差し替える。
-    - **通信:** フロントエンドは初期化時/ズーム時に fire & forget でリクエストし、プレビューの更新結果は Backend から push 通知する（フロント側でポーリングしない）。
+- Not a commercial app. A research/creative tool.
+- Snapping
+    - While drawing (dragging), do not snap; show the raw mouse path.
+    - On `MouseUp`, send the path to the backend, detect ridges (local maxima) via JIT analysis, then snap.
+    - **Important:** Snapping must be done only with CWT-based JIT analysis, and must never use STFT (STFT is GUI preview only).
+- Spectrogram (preview) generation
+    - **Policy:** First show a low-quality STFT preview, and only when the display window length `time_end - time_start` is below a threshold, replace it in the background with a high-quality CWT preview.
+    - **Comms:** The frontend sends fire-and-forget requests on init/zoom, and the backend pushes preview updates (no frontend polling).
 - Undo / Redo
-    - Undo/Redo の対象は「ドキュメント（Partial群・解析設定）」の変更のみとする。
-    - 選択状態、ズーム/パン、表示モード等の **純UI状態** は Undo/Redo に含めない。
-    - 履歴（Undo/Redoスタック）は Backend が管理し、Frontend はコマンド実行/Undo/Redo要求を送る。
-- 合成（プレビュー）
-    - 破壊的加算合成を行うため、Undo/Redo を繰り返すと微細な計算誤差が残る場合があるが、プレビュー用途のため許容する。
-- MPE は最大 15 voice だが、パーシャルが同時に 16個以上鳴る場合は複数の SMF に分割する。
-    - エクスポートは自動分割とし、同一ベース名で連番（例: `project_01.mid`, `project_02.mid`）を出力する。
-- Multi-Track MIDI は 1トラック=1ボイスで、全トラック同一チャンネルに出力する。
-- Monophonic MIDI は 1トラック1チャンネルで、ノートは重なりを許容する（モノシンセ側でレガート処理を想定）。
-- パーシャルの Amplitude を MPE のどの CC にアサインするかは、エクスポート時に指定できるようにする。
-- 低い振幅のところを勝手にミュートしたり、自動でパーシャルを分割するなどの余計なことはしない。ユーザーが書いたパーシャルを最大限尊重し、1パーシャル1ノート対応を厳守する。
-- リアルタイムの再生機能はつけない。ユーザーが編集のたびに、バックグラウンドでサイン波の再合成を行う。ユーザーが再合成中に再生ボタンを押しても、バックグラウンド処理が終わるまで待たせる。再生中の編集は一度止めて再度再生しないと反映されない仕様で良い。
-- パーシャル数は10個から1万個程度までを想定。
-- 再合成時は位相は無視して良い。partial の freq と amplitude をなめらかに繋ぎ、端点で 5ms 程度フェードインフェードアウトする
+    - Only changes to the document (partials + analysis settings) are subject to Undo/Redo.
+    - **Pure UI state** such as selection, zoom/pan, and view modes is not included in Undo/Redo.
+    - History (Undo/Redo stack) is managed by the backend; the frontend sends command/Undo/Redo requests.
+- Synthesis (preview)
+    - Because destructive additive synthesis is used, small numerical errors may remain after repeated Undo/Redo, but this is acceptable for preview.
+- MPE supports up to 15 voices. If 16 or more partials sound at the same time, split into multiple SMF files.
+    - Export should be auto-split with numbered filenames using the same base name (e.g. `project_01.mid`, `project_02.mid`).
+- Multi-Track MIDI uses 1 track = 1 voice, and all tracks output on the same channel.
+- Monophonic MIDI uses 1 track = 1 channel, and allows overlapping notes (expecting legato handling on the mono synth side).
+- Allow choosing which MPE CC to assign partial amplitude to at export time.
+- Do not do extra things like auto-muting low amplitudes or auto-splitting partials. Respect user-drawn partials and enforce 1 partial = 1 note.
+- No real-time playback. After each edit, resynthesize sine waves in the background. If the user hits play during resynthesis, wait until background processing completes. Edits during playback take effect only after stopping and playing again.
+- Assume 10 to about 10,000 partials.
+- Resynthesis can ignore phase. Smoothly connect partial freq/amplitude, and apply about a 5ms fade-in/out at endpoints.
