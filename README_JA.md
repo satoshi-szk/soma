@@ -2,14 +2,14 @@
 
 Sonic Observation, Musical Abstraction
 
-See [docs/spec.md](docs/spec.md) for details.
+詳細は [docs/spec.md](docs/spec.md) を参照してください。
 
-## Development stack
+## 開発構成
 
 - Backend: Python + pywebview (uv)
 - Frontend: React + TypeScript + Tailwind + Konva
 
-## Setup
+## セットアップ
 
 ```sh
 uv sync
@@ -17,41 +17,41 @@ cd frontend
 npm install
 ```
 
-## Development run
+## 開発起動
 
-Start the frontend dev server, then launch pywebview.
+フロントの開発サーバーを起動してから、pywebview を起動します。
 
 ```sh
 cd frontend
 npm run dev
 ```
 
-In another terminal:
+別ターミナルで:
 
 ```sh
 SOMA_DEV=1 uv run soma
 ```
 
-If you want to specify the dev server URL explicitly:
+開発サーバー URL を明示する場合:
 
 ```sh
 SOMA_DEV_SERVER_URL=http://localhost:5173 uv run soma
 ```
 
-## Frontend build
+## フロントビルド
 
 ```sh
 cd frontend
 npm run build
 ```
 
-To run with the built assets:
+ビルド済みファイルを表示する場合:
 
 ```sh
 uv run soma
 ```
 
-## Tests / quality checks
+## テスト / 品質チェック
 
 ```sh
 uv run pytest
@@ -65,7 +65,7 @@ uv run mypy src
 uv run ruff check .
 ```
 
-## Distribution builds
+## 配布用ビルド
 
 ### macOS App (.app)
 
@@ -73,7 +73,7 @@ uv run ruff check .
 ./scripts/build-app.sh
 ```
 
-Artifact: `dist/SOMA.app`
+成果物: `dist/SOMA.app`
 
 ### macOS DMG
 
@@ -81,4 +81,4 @@ Artifact: `dist/SOMA.app`
 ./scripts/build-dmg.sh
 ```
 
-Artifact: `dist/SOMA-YYYYMMDD.dmg`
+成果物: `dist/SOMA-YYYYMMDD.dmg`
