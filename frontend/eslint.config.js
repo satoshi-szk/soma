@@ -19,5 +19,25 @@ export default defineConfig([
       ecmaVersion: 2020,
       globals: globals.browser,
     },
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/components/Workspace/internal/**'],
+              message:
+                'Workspace internal is private. Import from `components/Workspace` public API instead.',
+            },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    files: ['src/components/Workspace/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': 'off',
+    },
   },
 ])
