@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import logging
+import shutil
+import tempfile
 import threading
 import uuid
 from collections.abc import Callable, Iterable
@@ -255,10 +257,15 @@ class SomaDocument:
         self._logger.debug("Snap completed: partial_id=%s points=%d", partial_id[:8], len(snapped))
         self._emit({"type": "snap_completed", "request_id": request_id, "partial": partial.to_dict()})
 
-    def load_audio(self, path: Path, max_duration_sec: float | None = None) -> AudioInfo:
+    def load_audio(
+        self,
+        path: Path,
+        max_duration_sec: float | None = None,
+        display_name: str | None = None,
+    ) -> AudioInfo:
         from soma.analysis import load_audio
 
-        info, audio = load_audio(path, max_duration_sec)
+        info, audio = load_audio(path, max_duration_sec=max_duration_sec, display_name=display_name)
         self.audio_info = info
         self.audio_data = audio
         self.source_info = SourceInfo(
@@ -303,7 +310,7 @@ class SomaDocument:
             self._pending_snap_trace = trace
 
         params = SnapParams(
-            audio=self.audio_data.copy(),  # Copy to avoid issues with shared memory
+            audio=self.audio_data,
             sample_rate=self.audio_info.sample_rate,
             settings=self.settings,
             trace=trace,
@@ -587,7 +594,7 @@ class SomaDocument:
         height_clamped = int(np.clip(height, 16, 1024))
 
         params = ViewportParams(
-            audio=self.audio_data.copy(),  # Copy to avoid shared memory issues
+            audio=self.audio_data,
             sample_rate=self.audio_info.sample_rate,
             settings=self.settings,
             time_start=time_start,
@@ -670,11 +677,49 @@ class SomaDocument:
         if self.source_info is None or self.audio_info is None:
             raise ValueError("No audio loaded")
         path = _ensure_soma_extension(path)
-        payload = build_project_payload(self.source_info, self.settings, self.store.all())
+        source_info = self._prepare_source_info_for_save(path)
+        payload = build_project_payload(source_info, self.settings, self.store.all())
         from soma.persistence import save_project
 
         save_project(path, payload)
         self.project_path = path
+
+    def _prepare_source_info_for_save(self, project_path: Path) -> SourceInfo:
+        if self.source_info is None:
+            raise ValueError("No source audio loaded")
+        source_info = self.source_info
+        source_path = Path(source_info.file_path).expanduser()
+        if not source_path.is_absolute() and self.project_path is not None:
+            source_path = (self.project_path.parent / source_path).resolve()
+
+        requires_bundle = (
+            not source_path.exists()
+            or source_path.name.startswith("soma-drop-")
+            or source_path.parent == Path(tempfile.gettempdir())
+        )
+        if not requires_bundle:
+            return source_info
+        if not source_path.exists():
+            raise ValueError("Source audio file is missing and cannot be saved.")
+
+        source_info = self._bundle_source_audio(project_path, source_path, source_info)
+        self.source_info = source_info
+        return source_info
+
+    def _bundle_source_audio(self, project_path: Path, source_path: Path, source_info: SourceInfo) -> SourceInfo:
+        bundle_dir = project_path.parent / f"{project_path.stem}_assets"
+        bundle_dir.mkdir(parents=True, exist_ok=True)
+        preferred_name = self.audio_info.name if self.audio_info is not None else source_path.name
+        sanitized = _sanitize_audio_filename(preferred_name, fallback=source_path.name)
+        destination = _unique_destination(bundle_dir / sanitized)
+        shutil.copy2(source_path, destination)
+        relative_path = destination.relative_to(project_path.parent).as_posix()
+        return SourceInfo(
+            file_path=relative_path,
+            sample_rate=source_info.sample_rate,
+            duration_sec=source_info.duration_sec,
+            md5_hash=source_info.md5_hash,
+        )
 
     def load_project(self, path: Path) -> dict[str, Any]:
         data = load_project(path)
@@ -757,11 +802,34 @@ def _ensure_soma_extension(path: Path) -> Path:
     return path.with_name(f"{path.name}.soma")
 
 
+def _sanitize_audio_filename(name: str, fallback: str) -> str:
+    candidate = Path(name).name.strip()
+    if not candidate or candidate in {".", ".."}:
+        candidate = Path(fallback).name
+    return candidate.replace("/", "_").replace("\\", "_")
+
+
+def _unique_destination(path: Path) -> Path:
+    if not path.exists():
+        return path
+    stem = path.stem
+    suffix = path.suffix
+    index = 1
+    while True:
+        candidate = path.with_name(f"{stem}_{index}{suffix}")
+        if not candidate.exists():
+            return candidate
+        index += 1
+
+
 def _intersects_trace(partial: Partial, trace: list[tuple[float, float]], radius_hz: float) -> bool:
-    for point in partial.points:
-        for time_sec, freq_hz in trace:
-            if abs(point.time - time_sec) <= 0.02 and abs(point.freq - freq_hz) <= radius_hz:
-                return True
+    return any(_point_in_erase_path(point, trace, radius_hz) for point in partial.points)
+
+
+def _point_in_erase_path(point: PartialPoint, trace: list[tuple[float, float]], radius_hz: float) -> bool:
+    for time_sec, freq_hz in trace:
+        if abs(point.time - time_sec) <= 0.02 and abs(point.freq - freq_hz) <= radius_hz:
+            return True
     return False
 
 
@@ -770,10 +838,7 @@ def _split_partial(
     trace: list[tuple[float, float]],
     radius_hz: float,
 ) -> list[Partial]:
-    trace_times = [t for t, _ in trace]
-    t_min = min(trace_times)
-    t_max = max(trace_times)
-    remaining = [p for p in partial.points if not (t_min <= p.time <= t_max)]
+    remaining = [p for p in partial.points if not _point_in_erase_path(p, trace, radius_hz)]
     if not remaining:
         return []
     remaining.sort(key=lambda p: p.time)

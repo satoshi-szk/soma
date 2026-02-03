@@ -11,7 +11,11 @@ from scipy.signal import find_peaks, resample, resample_poly
 from soma.models import AnalysisSettings, AudioInfo, PartialPoint, SpectrogramPreview
 
 
-def load_audio(path: Path, max_duration_sec: float | None = None) -> tuple[AudioInfo, np.ndarray]:
+def load_audio(
+    path: Path,
+    max_duration_sec: float | None = None,
+    display_name: str | None = None,
+) -> tuple[AudioInfo, np.ndarray]:
     try:
         sample_rate, channels, duration_sec, truncated, audio = _read_audio_soundfile(path, max_duration_sec)
     except Exception:
@@ -21,7 +25,7 @@ def load_audio(path: Path, max_duration_sec: float | None = None) -> tuple[Audio
 
     info = AudioInfo(
         path=str(path),
-        name=path.name,
+        name=display_name or path.name,
         sample_rate=int(sample_rate),
         duration_sec=duration_sec,
         channels=channels,
