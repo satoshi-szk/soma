@@ -5,7 +5,7 @@ import { HeaderToolbar } from './components/HeaderToolbar'
 import { Workspace } from './components/Workspace'
 import { StatusBar } from './components/StatusBar'
 import type { AnalysisSettings, ToolId } from './app/types'
-import { formatDuration, formatNote } from './app/utils'
+import { formatDuration, formatNoteWithCents } from './app/utils'
 import { isPywebviewApiAvailable, pywebviewApi } from './app/pywebviewApi'
 import { useApiStatus } from './hooks/useApiStatus'
 import { useAnalysis } from './hooks/useAnalysis'
@@ -330,7 +330,7 @@ function App() {
 
   const cursorLabel = useMemo(() => {
     if (!analysis.preview) return 'T: -- | F: -- | A: --dB'
-    const note = formatNote(cursorInfo.freq)
+    const note = formatNoteWithCents(cursorInfo.freq)
     const ampLabel = cursorInfo.amp === null ? '--dB' : `${cursorInfo.amp.toFixed(1)}dB`
     return `T: ${cursorInfo.time.toFixed(2)}s | F: ${cursorInfo.freq.toFixed(1)}Hz (${note}) | A: ${ampLabel}`
   }, [cursorInfo, analysis.preview])

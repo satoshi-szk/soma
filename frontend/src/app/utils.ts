@@ -13,11 +13,26 @@ export const formatDuration = (seconds: number) => {
 
 export const formatNote = (freq: number) => {
   if (!Number.isFinite(freq) || freq <= 0) return '--'
-  const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
   const midi = Math.round(69 + 12 * Math.log2(freq / 440))
-  const name = noteNames[((midi % 12) + 12) % 12]
-  const octave = Math.floor(midi / 12) - 1
+  const { name, octave } = midiToNoteParts(midi)
   return `${name}${octave}`
+}
+
+export const formatNoteWithCents = (freq: number) => {
+  if (!Number.isFinite(freq) || freq <= 0) return '--'
+  const midiFloat = 69 + 12 * Math.log2(freq / 440)
+  let nearestMidi = Math.round(midiFloat)
+  let cents = Math.round((midiFloat - nearestMidi) * 100)
+  if (cents >= 100) {
+    nearestMidi += 1
+    cents = 0
+  } else if (cents <= -100) {
+    nearestMidi -= 1
+    cents = 0
+  }
+  const { name, octave } = midiToNoteParts(nearestMidi)
+  const centsLabel = `${cents >= 0 ? '+' : ''}${cents}c`
+  return `${name}${octave} ${centsLabel}`
 }
 
 export const toPartial = (raw: { id: string; is_muted: boolean; color?: string; points: number[][] }): Partial => ({
@@ -67,6 +82,13 @@ const interpolateColor = (value: number, stops: number[][]): [number, number, nu
   const g = Math.round(start[1] + (end[1] - start[1]) * frac)
   const b = Math.round(start[2] + (end[2] - start[2]) * frac)
   return [r, g, b]
+}
+
+const midiToNoteParts = (midi: number) => {
+  const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
+  const name = noteNames[((midi % 12) + 12) % 12]
+  const octave = Math.floor(midi / 12) - 1
+  return { name, octave }
 }
 
 const normalizeHexColor = (value?: string): string => {
