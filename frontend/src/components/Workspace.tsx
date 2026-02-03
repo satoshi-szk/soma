@@ -32,6 +32,7 @@ export type WorkspaceProps = {
   zoomY: number
   pan: { x: number; y: number }
   playbackPosition: number
+  canEditPlayhead: boolean
   onZoomXChange: (zoom: number, targetPan?: { x: number; y: number }) => void
   onPanChange: (pan: { x: number; y: number }) => void
   onStageSizeChange: (size: { width: number; height: number }) => void
@@ -44,6 +45,7 @@ export type WorkspaceProps = {
   onOpenAudio: () => void
   onOpenAudioPath: (path: string) => void
   onOpenAudioFile: (file: File) => void
+  onPlayheadChange: (time: number) => void
   allowDrop: boolean
   onCursorMove: (cursor: { time: number; freq: number; amp: number | null }) => void
   onPartialMute: () => void
@@ -66,6 +68,7 @@ export function Workspace({
   zoomY,
   pan,
   playbackPosition,
+  canEditPlayhead,
   onZoomXChange,
   onPanChange,
   onStageSizeChange,
@@ -78,6 +81,7 @@ export function Workspace({
   onOpenAudio,
   onOpenAudioPath,
   onOpenAudioFile,
+  onPlayheadChange,
   allowDrop,
   onCursorMove,
   onPartialMute,
@@ -546,6 +550,16 @@ export function Workspace({
     [preview, duration, pan, scale, freqMin, freqMax, contentOffset],
   )
 
+  const positionToTime = useCallback(
+    (x: number) => {
+      if (!preview) return 0
+      const contentX = (x - pan.x - contentOffset.x) / scale.x
+      const time = (contentX / preview.width) * duration
+      return Math.max(0, Math.min(duration, time))
+    },
+    [preview, pan.x, contentOffset.x, scale.x, duration],
+  )
+
   const onStageWheel = (event: KonvaEventObject<WheelEvent>) => {
     event.evt.preventDefault()
     const stage = event.target.getStage()
@@ -673,6 +687,11 @@ export function Workspace({
     if (!stage) return
     const pointer = stage.getPointerPosition()
     if (!pointer) return
+    if (pointer.y < rulerHeight) {
+      if (!canEditPlayhead) return
+      onPlayheadChange(positionToTime(pointer.x))
+      return
+    }
     if (pointer.y < rulerHeight || pointer.y > spectrogramAreaHeight) return
     const { time, freq } = positionToTimeFreq(pointer.x, pointer.y)
     if (activeTool === 'connect') {

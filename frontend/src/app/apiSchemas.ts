@@ -148,11 +148,18 @@ export const apiSchemas = {
   undo: { response: z.union([partialsResponseSchema, errorStatusSchema]) },
   redo: { response: z.union([partialsResponseSchema, errorStatusSchema]) },
   play: {
-    payload: z.object({ mix_ratio: z.number().optional(), loop: z.boolean().optional() }),
+    payload: z.object({
+      mix_ratio: z.number().optional(),
+      loop: z.boolean().optional(),
+      start_position_sec: z.number().optional(),
+    }),
     response: z.union([okStatusSchema, errorStatusSchema]),
   },
   pause: { response: z.union([okStatusSchema, errorStatusSchema]) },
-  stop: { response: z.union([okStatusSchema, errorStatusSchema]) },
+  stop: {
+    payload: z.object({ return_position_sec: z.number().optional() }),
+    response: z.union([okStatusSchema, errorStatusSchema]),
+  },
   export_mpe: {
     payload: z.object({
       pitch_bend_range: z.number().optional(),

@@ -32,6 +32,7 @@ from soma.api_schema import (
     PlayPayload,
     RequestViewportPreviewPayload,
     SelectInBoxPayload,
+    StopPayload,
     ToggleMutePayload,
     TracePartialPayload,
     UpdatePartialPayload,
@@ -482,7 +483,7 @@ class SomaApi:
             parsed = _validated_payload(PlayPayload, payload, "play")
             if isinstance(parsed, dict):
                 return parsed
-            self._doc.play(parsed.mix_ratio, parsed.loop)
+            self._doc.play(parsed.mix_ratio, parsed.loop, parsed.start_position_sec)
             return {"status": "ok"}
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("play failed")
@@ -496,9 +497,13 @@ class SomaApi:
             logger.exception("pause failed")
             return {"status": "error", "message": str(exc)}
 
-    def stop(self) -> dict[str, Any]:
+    def stop(self, payload: dict[str, Any] | None = None) -> dict[str, Any]:
         try:
-            self._doc.stop()
+            stop_payload = payload or {}
+            parsed = _validated_payload(StopPayload, stop_payload, "stop")
+            if isinstance(parsed, dict):
+                return parsed
+            self._doc.stop(parsed.return_position_sec)
             return {"status": "ok"}
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("stop failed")

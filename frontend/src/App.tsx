@@ -5,7 +5,7 @@ import { HeaderToolbar } from './components/HeaderToolbar'
 import { Workspace } from './components/Workspace'
 import { StatusBar } from './components/StatusBar'
 import type { AnalysisSettings, ToolId } from './app/types'
-import { formatDuration, formatNote } from './app/utils'
+import { formatDuration, formatNoteWithCents } from './app/utils'
 import { isPywebviewApiAvailable, pywebviewApi } from './app/pywebviewApi'
 import { useApiStatus } from './hooks/useApiStatus'
 import { useAnalysis } from './hooks/useAnalysis'
@@ -58,7 +58,7 @@ function App() {
     onUndo: partialsHook.undo,
     onRedo: partialsHook.redo,
     onPlayToggle: () => {
-      if (analysis.analysisState !== 'analyzing') playback.togglePlay()
+      if (analysis.analysisState !== 'analyzing') playback.togglePlayStop()
     },
     onSave: async () => {
       const success = await analysis.saveProject()
@@ -302,8 +302,14 @@ function App() {
     setShowExportModal(false)
   }
 
-  const handlePlayToggle = () => {
-    if (analysis.analysisState !== 'analyzing') playback.togglePlay()
+  const handleRewind = () => {
+    if (playback.isPlaying) return
+    playback.setPlayheadPosition(0)
+  }
+
+  const handlePlayStop = () => {
+    if (!playback.isPlaying && analysis.analysisState === 'analyzing') return
+    void playback.togglePlayStop()
   }
 
   const statusLabel =
@@ -325,7 +331,7 @@ function App() {
 
   const cursorLabel = useMemo(() => {
     if (!analysis.preview) return 'T: -- | F: -- | A: --dB'
-    const note = formatNote(cursorInfo.freq)
+    const note = formatNoteWithCents(cursorInfo.freq)
     const ampLabel = cursorInfo.amp === null ? '--dB' : `${cursorInfo.amp.toFixed(1)}dB`
     return `T: ${cursorInfo.time.toFixed(2)}s | F: ${cursorInfo.freq.toFixed(1)}Hz (${note}) | A: ${ampLabel}`
   }, [cursorInfo, analysis.preview])
@@ -357,15 +363,13 @@ function App() {
           menuOpen={menuOpen}
           activeTool={activeTool}
           isPlaying={playback.isPlaying}
-          isLooping={playback.isLooping}
           mixValue={playback.mixValue}
           playbackTimeLabel={formatDuration(playback.playbackPosition)}
           onMenuToggle={() => setMenuOpen((prev) => !prev)}
           onMenuAction={handleMenuAction}
           onToolChange={setActiveTool}
-          onStop={playback.stop}
-          onPlayToggle={handlePlayToggle}
-          onLoopToggle={playback.toggleLoop}
+          onPlayStop={handlePlayStop}
+          onRewind={handleRewind}
           onMixChange={playback.setMixValue}
           menuRef={menuRef}
           playDisabled={analysis.analysisState === 'analyzing'}
@@ -397,6 +401,7 @@ function App() {
                 zoomY={viewport.zoomY}
                 pan={viewport.pan}
                 playbackPosition={playback.playbackPosition}
+                canEditPlayhead={!playback.isPlaying}
                 onZoomXChange={viewport.setZoomX}
                 onPanChange={viewport.setPan}
                 onStageSizeChange={viewport.setStageSize}
@@ -409,6 +414,7 @@ function App() {
                 onOpenAudio={handleOpenAudio}
                 onOpenAudioPath={handleOpenAudioPath}
                 onOpenAudioFile={handleOpenAudioFile}
+                onPlayheadChange={playback.setPlayheadPosition}
                 allowDrop={!analysis.audioInfo}
                 onCursorMove={setCursorInfo}
                 onPartialMute={handlePartialMute}

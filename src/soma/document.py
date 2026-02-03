@@ -604,19 +604,19 @@ class SomaDocument:
         self._compute_manager.submit_viewport(request_id, params)
         return request_id
 
-    def play(self, mix_ratio: float, loop: bool) -> None:
+    def play(self, mix_ratio: float, loop: bool, start_position_sec: float | None = None) -> None:
         if self.audio_info is None:
             return
         if self.is_resynthesizing():
             return
         self.player.load(self._mix_buffer(mix_ratio), self.audio_info.sample_rate)
-        self.player.play(loop=loop)
+        self.player.play(loop=loop, start_position_sec=start_position_sec or 0.0)
 
     def pause(self) -> None:
         self.player.pause()
 
-    def stop(self) -> None:
-        self.player.stop()
+    def stop(self, return_position_sec: float | None = 0.0) -> None:
+        self.player.stop(reset_position_sec=return_position_sec)
 
     def playback_position(self) -> float:
         return self.player.position_sec()
