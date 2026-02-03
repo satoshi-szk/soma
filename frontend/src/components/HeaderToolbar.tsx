@@ -13,7 +13,8 @@ export type HeaderToolbarProps = {
   onMenuAction: (label: string) => void
   onToolChange: (tool: ToolId) => void
   onStop: () => void
-  onPlayToggle: () => void
+  onPlay: () => void
+  onRewind: () => void
   onLoopToggle: () => void
   onMixChange: (value: number) => void
   menuRef: React.RefObject<HTMLDivElement | null>
@@ -31,7 +32,8 @@ export function HeaderToolbar({
   onMenuAction,
   onToolChange,
   onStop,
-  onPlayToggle,
+  onPlay,
+  onRewind,
   onLoopToggle,
   onMixChange,
   menuRef,
@@ -85,15 +87,26 @@ export function HeaderToolbar({
             Stop
           </button>
           <button
-            onClick={onPlayToggle}
+            onClick={onRewind}
+            className={`rounded-md px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
+              isPlaying
+                ? 'bg-[var(--panel-strong)] text-[var(--muted)]'
+                : 'border border-[var(--panel-border)] text-[var(--muted)]'
+            }`}
+            disabled={isPlaying}
+          >
+            Rewind
+          </button>
+          <button
+            onClick={onPlay}
             className={`rounded-md px-4 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
-              playDisabled
+              playDisabled || isPlaying
                 ? 'bg-[var(--panel-strong)] text-[var(--muted)]'
                 : 'bg-[var(--accent)] text-white'
             }`}
-            disabled={playDisabled}
+            disabled={playDisabled || isPlaying}
           >
-            {isPlaying ? 'Pause' : 'Play'}
+            Play
           </button>
           <button
             onClick={onLoopToggle}

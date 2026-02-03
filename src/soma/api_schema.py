@@ -66,6 +66,11 @@ class SelectInBoxPayload(PayloadBase):
 class PlayPayload(PayloadBase):
     mix_ratio: float = 0.5
     loop: bool = False
+    start_position_sec: float | None = None
+
+
+class StopPayload(PayloadBase):
+    return_position_sec: float | None = None
 
 
 class ExportMpePayload(PayloadBase):

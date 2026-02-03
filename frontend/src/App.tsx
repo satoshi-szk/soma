@@ -57,8 +57,8 @@ function App() {
     onToolChange: setActiveTool,
     onUndo: partialsHook.undo,
     onRedo: partialsHook.redo,
-    onPlayToggle: () => {
-      if (analysis.analysisState !== 'analyzing') playback.togglePlay()
+    onPlay: () => {
+      if (analysis.analysisState !== 'analyzing') playback.play()
     },
     onSave: async () => {
       const success = await analysis.saveProject()
@@ -302,8 +302,13 @@ function App() {
     setShowExportModal(false)
   }
 
-  const handlePlayToggle = () => {
-    if (analysis.analysisState !== 'analyzing') playback.togglePlay()
+  const handlePlay = () => {
+    if (analysis.analysisState !== 'analyzing') playback.play()
+  }
+
+  const handleRewind = () => {
+    if (playback.isPlaying) return
+    playback.setPlayheadPosition(0)
   }
 
   const statusLabel =
@@ -364,7 +369,8 @@ function App() {
           onMenuAction={handleMenuAction}
           onToolChange={setActiveTool}
           onStop={playback.stop}
-          onPlayToggle={handlePlayToggle}
+          onPlay={handlePlay}
+          onRewind={handleRewind}
           onLoopToggle={playback.toggleLoop}
           onMixChange={playback.setMixValue}
           menuRef={menuRef}
@@ -397,6 +403,7 @@ function App() {
                 zoomY={viewport.zoomY}
                 pan={viewport.pan}
                 playbackPosition={playback.playbackPosition}
+                canEditPlayhead={!playback.isPlaying}
                 onZoomXChange={viewport.setZoomX}
                 onPanChange={viewport.setPan}
                 onStageSizeChange={viewport.setStageSize}
@@ -409,6 +416,7 @@ function App() {
                 onOpenAudio={handleOpenAudio}
                 onOpenAudioPath={handleOpenAudioPath}
                 onOpenAudioFile={handleOpenAudioFile}
+                onPlayheadChange={playback.setPlayheadPosition}
                 allowDrop={!analysis.audioInfo}
                 onCursorMove={setCursorInfo}
                 onPartialMute={handlePartialMute}

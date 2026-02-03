@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { isPywebviewApiAvailable, pywebviewApi } from '../app/pywebviewApi'
 
 type ReportError = (context: string, message: string) => void
@@ -8,6 +8,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
   const [isLooping, setIsLooping] = useState(false)
   const [mixValue, setMixValue] = useState(55)
   const [playbackPosition, setPlaybackPosition] = useState(0)
+  const playbackStartRef = useRef(0)
 
   // Polling playback position
   useEffect(() => {
@@ -30,14 +31,21 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
 
   const play = useCallback(async () => {
     if (analysisState === 'analyzing') return
+    if (isPlaying) return
     const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.play) {
       reportError('Playback', 'API not available')
       return
     }
     try {
-      const result = await api.play({ mix_ratio: mixValue / 100, loop: isLooping })
+      const startPosition = playbackPosition
+      const result = await api.play({
+        mix_ratio: mixValue / 100,
+        loop: isLooping,
+        start_position_sec: startPosition,
+      })
       if (result.status === 'ok') {
+        playbackStartRef.current = startPosition
         setIsPlaying(true)
       } else if (result.status === 'error') {
         reportError('Playback', result.message ?? 'Failed to play')
@@ -46,34 +54,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       const message = error instanceof Error ? error.message : 'Unexpected error'
       reportError('Playback', message)
     }
-  }, [analysisState, mixValue, isLooping, reportError])
-
-  const pause = useCallback(async () => {
-    const api = isPywebviewApiAvailable() ? pywebviewApi : null
-    if (!api?.pause) {
-      reportError('Playback', 'API not available')
-      return
-    }
-    try {
-      const result = await api.pause()
-      if (result.status === 'ok') {
-        setIsPlaying(false)
-      } else if (result.status === 'error') {
-        reportError('Playback', result.message ?? 'Failed to pause')
-      }
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Unexpected error'
-      reportError('Playback', message)
-    }
-  }, [reportError])
-
-  const togglePlay = useCallback(async () => {
-    if (isPlaying) {
-      await pause()
-    } else {
-      await play()
-    }
-  }, [isPlaying, play, pause])
+  }, [analysisState, isPlaying, mixValue, isLooping, playbackPosition, reportError])
 
   const stop = useCallback(async () => {
     const api = isPywebviewApiAvailable() ? pywebviewApi : null
@@ -82,10 +63,11 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       return
     }
     try {
-      const result = await api.stop()
+      const returnPosition = playbackStartRef.current
+      const result = await api.stop({ return_position_sec: returnPosition })
       if (result.status === 'ok') {
         setIsPlaying(false)
-        setPlaybackPosition(0)
+        setPlaybackPosition(returnPosition)
       } else if (result.status === 'error') {
         reportError('Stop', result.message ?? 'Failed to stop')
       }
@@ -99,14 +81,23 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
     setIsLooping((prev) => !prev)
   }, [])
 
+  const setPlayheadPosition = useCallback(
+    (positionSec: number) => {
+      if (isPlaying) return
+      setPlaybackPosition(Math.max(0, positionSec))
+    },
+    [isPlaying],
+  )
+
   return {
     isPlaying,
     isLooping,
     mixValue,
     playbackPosition,
     setMixValue,
-    togglePlay,
+    play,
     stop,
     toggleLoop,
+    setPlayheadPosition,
   }
 }

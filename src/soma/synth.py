@@ -117,11 +117,12 @@ class AudioPlayer:
             self._sample_rate = sample_rate
             self._position = 0
 
-    def play(self, loop: bool = False) -> None:
+    def play(self, loop: bool = False, start_position_sec: float = 0.0) -> None:
         with self._lock:
             if self._buffer is None or self._playing:
                 return
             self._loop = loop
+            self._position = self._seconds_to_sample(start_position_sec)
             self._playing = True
             self._stream = sd.OutputStream(
                 samplerate=self._sample_rate,
@@ -131,9 +132,10 @@ class AudioPlayer:
             )
             self._stream.start()
 
-    def stop(self) -> None:
+    def stop(self, reset_position_sec: float | None = 0.0) -> None:
         with self._lock:
-            self._position = 0
+            if reset_position_sec is not None:
+                self._position = self._seconds_to_sample(reset_position_sec)
         self._stop_stream()
 
     def pause(self) -> None:
@@ -158,6 +160,12 @@ class AudioPlayer:
     def position_sec(self) -> float:
         with self._lock:
             return self._position / float(self._sample_rate)
+
+    def _seconds_to_sample(self, seconds: float) -> int:
+        if self._buffer is None:
+            return 0
+        clamped = float(np.clip(seconds, 0.0, self._buffer.size / float(self._sample_rate)))
+        return int(clamped * self._sample_rate)
 
     def _callback(self, outdata: np.ndarray, frames: int, time: object, status: object) -> None:
         del time, status
