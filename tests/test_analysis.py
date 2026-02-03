@@ -66,6 +66,18 @@ def test_load_audio_reads_aiff(tmp_path: Path) -> None:
     assert audio.shape[0] == data.shape[0]
 
 
+def test_load_audio_accepts_display_name(tmp_path: Path) -> None:
+    path = tmp_path / "temp-name.wav"
+    sample_rate = 44100
+    data = np.zeros(sample_rate // 10, dtype=np.float32)
+    _write_wav(path, sample_rate, data)
+
+    info, _audio = load_audio(path, max_duration_sec=None, display_name="original.wav")
+
+    assert info.path == str(path)
+    assert info.name == "original.wav"
+
+
 def test_audioread_frame_alignment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     import audioread
 

@@ -245,7 +245,7 @@ class SomaApi:
                 logger.warning("Failed to remove temp audio file: %s", temp_path)
             return duration_check
         try:
-            info = self._doc.load_audio(temp_path)
+            info = self._doc.load_audio(temp_path, display_name=parsed.name)
             self._doc.start_preview_async()
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("open_audio_data failed")
