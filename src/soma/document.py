@@ -759,9 +759,15 @@ def _ensure_soma_extension(path: Path) -> Path:
 
 def _intersects_trace(partial: Partial, trace: list[tuple[float, float]], radius_hz: float) -> bool:
     for point in partial.points:
-        for time_sec, freq_hz in trace:
-            if abs(point.time - time_sec) <= 0.02 and abs(point.freq - freq_hz) <= radius_hz:
-                return True
+        if _point_in_erase_path(point, trace, radius_hz):
+            return True
+    return False
+
+
+def _point_in_erase_path(point: PartialPoint, trace: list[tuple[float, float]], radius_hz: float) -> bool:
+    for time_sec, freq_hz in trace:
+        if abs(point.time - time_sec) <= 0.02 and abs(point.freq - freq_hz) <= radius_hz:
+            return True
     return False
 
 
@@ -770,10 +776,7 @@ def _split_partial(
     trace: list[tuple[float, float]],
     radius_hz: float,
 ) -> list[Partial]:
-    trace_times = [t for t, _ in trace]
-    t_min = min(trace_times)
-    t_max = max(trace_times)
-    remaining = [p for p in partial.points if not (t_min <= p.time <= t_max)]
+    remaining = [p for p in partial.points if not _point_in_erase_path(p, trace, radius_hz)]
     if not remaining:
         return []
     remaining.sort(key=lambda p: p.time)
