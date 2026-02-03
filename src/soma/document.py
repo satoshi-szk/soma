@@ -739,9 +739,10 @@ class SomaDocument:
         mix_ratio = float(np.clip(mix_ratio, 0.0, 1.0))
         resynth = self.synth.get_mix_buffer().astype(np.float32)
         if self.audio_data is None:
-            return resynth
+            return _peak_normalize_buffer(resynth)
         original = self._match_length(self.audio_data, resynth.shape[0])
-        return (1.0 - mix_ratio) * original + mix_ratio * resynth
+        mixed = (1.0 - mix_ratio) * original + mix_ratio * resynth
+        return _peak_normalize_buffer(mixed)
 
     def _match_length(self, audio: np.ndarray, length: int) -> np.ndarray:
         if audio.shape[0] == length:
@@ -820,6 +821,18 @@ def _unique_destination(path: Path) -> Path:
         if not candidate.exists():
             return candidate
         index += 1
+
+
+def _peak_normalize_buffer(buffer: np.ndarray, target_peak: float = 0.99) -> np.ndarray:
+    if buffer.size == 0:
+        return buffer.astype(np.float32)
+
+    peak = float(np.max(np.abs(buffer)))
+    if not np.isfinite(peak) or peak <= 0.0:
+        return buffer.astype(np.float32)
+
+    normalized = buffer.astype(np.float32) * (target_peak / peak)
+    return np.asarray(np.clip(normalized, -1.0, 1.0), dtype=np.float32)
 
 
 def _intersects_trace(partial: Partial, trace: list[tuple[float, float]], radius_hz: float) -> bool:

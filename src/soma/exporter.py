@@ -124,7 +124,7 @@ def export_audio(
         wavfile.write(output_path, settings.sample_rate, data)
         return output_path
 
-    normalized = np.clip(audio_buffer, -1.0, 1.0)
+    normalized = _peak_normalize_audio(audio_buffer)
     data = _convert_bit_depth(normalized, settings.bit_depth)
     wavfile.write(output_path, settings.sample_rate, data)
     return output_path
@@ -674,6 +674,18 @@ def _convert_bit_depth(data: np.ndarray, bit_depth: int) -> np.ndarray:
         return np.asarray(np.clip(data, -1.0, 1.0), dtype=np.float32)
     max_val = 2**15 - 1
     return np.asarray(np.clip(data, -1.0, 1.0) * max_val, dtype=np.int16)
+
+
+def _peak_normalize_audio(buffer: np.ndarray, target_peak: float = 0.99) -> np.ndarray:
+    if buffer.size == 0:
+        return buffer.astype(np.float32)
+
+    peak = float(np.max(np.abs(buffer)))
+    if not np.isfinite(peak) or peak <= 0.0:
+        return buffer.astype(np.float32)
+
+    normalized = buffer.astype(np.float32) * (target_peak / peak)
+    return np.asarray(np.clip(normalized, -1.0, 1.0), dtype=np.float32)
 
 
 def _normalize_cv(buffer: np.ndarray, base_freq: float, full_scale_volts: float) -> np.ndarray:
