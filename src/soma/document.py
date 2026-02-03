@@ -109,14 +109,14 @@ class SomaDocument:
         self._pending_snap_request_id: str | None = None
         self._pending_snap_trace: list[tuple[float, float]] | None = None
 
-        # Initialize compute manager for background processing
+        # バックグラウンド処理用の compute manager を初期化する。
         self._compute_manager = ComputeManager(
             viewport_callback=self._on_viewport_result,
             snap_callback=self._on_snap_result,
         )
 
     def new_project(self) -> None:
-        # Cancel any pending computations
+        # 保留中の計算をすべてキャンセルする。
         self._compute_manager.cancel_all()
 
         self.audio_info = None
@@ -185,7 +185,7 @@ class SomaDocument:
         final = result.get("final", True)
         amp_reference = result.get("amp_reference")
 
-        # Update amp references
+        # 振幅参照値を更新する。
         with self._lock:
             if quality == "low" and amp_reference is not None and self._stft_amp_reference is None:
                 self._stft_amp_reference = amp_reference
@@ -219,7 +219,7 @@ class SomaDocument:
         request_id = result.get("request_id")
         error = result.get("error")
 
-        # Check if this result is for the current pending request
+        # この結果が現在待機中のリクエストかどうかを確認する。
         with self._lock:
             if request_id != self._pending_snap_request_id:
                 self._logger.debug(
@@ -242,10 +242,10 @@ class SomaDocument:
             self._emit({"type": "snap_error", "request_id": request_id, "message": "Failed to create partial"})
             return
 
-        # Convert points from list format to PartialPoint objects
+        # list 形式の点を PartialPoint オブジェクトへ変換する。
         snapped = [PartialPoint(time=p[0], freq=p[1], amp=p[2]) for p in points_list]
 
-        # Create partial and add to store
+        # Partial を作成してストアへ追加する。
         partial_id = str(uuid.uuid4())
         partial = Partial(id=partial_id, points=snapped, color=generate_bright_color())
         before = self._snapshot_state(partial_ids=[partial_id])
@@ -527,7 +527,7 @@ class SomaDocument:
                 self._stft_amp_reference = ref
                 self.preview_state = "ready"
 
-            # Overview uses STFT only (no CWT upgrade)
+            # Overview は STFT のみを使う（CWT へのアップグレードなし）。
             self._emit_spectrogram_preview("overview", "low", final=True, preview=preview)
 
         thread = threading.Thread(target=_worker, name="soma-preview", daemon=True)
@@ -551,7 +551,7 @@ class SomaDocument:
             self._logger.debug("start_viewport_preview_async: no audio loaded")
             return ""
 
-        # Validate input parameters
+        # 入力パラメータを検証する。
         duration = self.audio_data.shape[0] / float(self.audio_info.sample_rate)
         if time_start < 0 or time_end > duration + 0.01 or time_start >= time_end:
             self._logger.warning(
@@ -586,7 +586,7 @@ class SomaDocument:
             self._viewport_request_id = request_id
             self._viewport_preview = None
 
-        # Determine if CWT upgrade should be performed
+        # CWT へのアップグレードを行うか判定する。
         window_duration = max(0.0, float(time_end - time_start))
         use_stft = window_duration > _CWT_PREVIEW_WINDOW_THRESHOLD_SEC
 

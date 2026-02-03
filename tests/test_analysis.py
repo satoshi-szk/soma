@@ -346,7 +346,7 @@ def test_cwt_ridge_is_not_too_broad_for_sine() -> None:
     peak = float(np.max(spectrum))
     assert peak > 0
 
-    # Compare level at ~2kHz vs peak.
+    # 約 2kHz のレベルをピークと比較する。
     idx_2k = int(np.argmin(np.abs(frequencies - 2000.0)))
     rel_db = 20.0 * math.log10(float(spectrum[idx_2k]) / peak + 1e-12)
     assert rel_db < -45.0

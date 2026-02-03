@@ -121,7 +121,7 @@ def _check_audio_duration(window: webview.Window, path: Path) -> dict[str, Any] 
         get_audio_duration_sec(path)
     except Exception:
         logger.exception("Failed to read audio header: %s", path)
-        return {"status": "error", "message": "オーディオファイルを読み込めませんでした。"}
+        return {"status": "error", "message": "Could not read the audio file."}
     return None
 
 
@@ -845,8 +845,8 @@ CONSOLE_HOOK_JS = r"""
 
 
 def main() -> None:
-    # Required for multiprocessing to work correctly in frozen (PyInstaller) apps on macOS.
-    # Without this, child processes re-execute main() causing infinite window spawning.
+    # macOS の PyInstaller 実行環境で multiprocessing を正しく動かすために必要。
+    # これがないと子プロセスが main() を再実行し、無限にウィンドウが増殖する。
     multiprocessing.freeze_support()
 
     configure_logging()
@@ -855,7 +855,7 @@ def main() -> None:
     url = resolve_frontend_url()
     api = SomaApi()
     if force_dev:
-        # Keep devtools available via context menu, but avoid auto-opening on start.
+        # コンテキストメニューからは devtools を開けるようにしつつ、起動時の自動表示は抑止する。
         webview.settings["OPEN_DEVTOOLS_IN_DEBUG"] = False
     window = webview.create_window(
         "SOMA",

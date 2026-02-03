@@ -64,7 +64,7 @@ export function usePartials(reportError: ReportError) {
     resolve: (value: boolean) => void
   } | null>(null)
 
-  // Subscribe to snap events
+  // snap イベントを購読する
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent).detail as unknown
@@ -77,7 +77,7 @@ export function usePartials(reportError: ReportError) {
           | { id: string; is_muted: boolean; color?: string; points: number[][] }
           | undefined
 
-        // Check if this is the pending request
+        // 現在待機中のリクエストかどうかを確認する
         if (pendingSnapRef.current && pendingSnapRef.current.requestId === requestId) {
           if (partial) {
             dispatch({ type: 'ADD', partial: toPartial(partial) })
@@ -126,13 +126,13 @@ export function usePartials(reportError: ReportError) {
       try {
         const result = await api.trace_partial({ trace })
         if (result.status === 'accepted') {
-          // Wait for snap_completed event
+          // snap_completed イベントを待つ
           return new Promise<boolean>((resolve) => {
             pendingSnapRef.current = {
               requestId: result.request_id,
               resolve,
             }
-            // Timeout after 5 minutes (same as worker timeout)
+            // 5 分でタイムアウト（ワーカー側タイムアウトと同じ）
             setTimeout(() => {
               if (pendingSnapRef.current?.requestId === result.request_id) {
                 reportError('Trace', 'Snap computation timed out')

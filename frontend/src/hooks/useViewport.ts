@@ -65,19 +65,19 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
 
   const zoomX = zoomXState ?? baseZoomX
 
-  // Spectrogram area height (excluding ruler and automation lane)
+  // スペクトログラム領域の高さ（ルーラーとオートメーションレーンを除く）
   const spectrogramAreaHeight = useMemo(
     () => Math.max(1, stageSize.height - AUTOMATION_LANE_HEIGHT - RULER_HEIGHT),
     [stageSize.height]
   )
 
-  // Base scale for Y axis (maps preview height to spectrogram area)
+  // Y 軸の基準スケール（preview 高さをスペクトログラム領域へ対応付ける）
   const baseScaleY = useMemo(() => {
     if (!preview) return 1
     return spectrogramAreaHeight / preview.height
   }, [preview, spectrogramAreaHeight])
 
-  // Clamp pan to keep content within viewport bounds
+  // コンテンツがビューポート範囲内に収まるよう pan を制限する
   const clampPan = useCallback(
     (
       newPan: { x: number; y: number },
@@ -89,7 +89,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
       const contentWidth = preview.duration_sec * currentZoomX
       const contentHeight = preview.height * baseScaleY * currentZoomY
 
-      // If content is smaller than viewport, pin to origin (no empty space)
+      // コンテンツがビューポートより小さい場合は原点に固定する（余白を作らない）
       const clampedX =
         contentWidth <= stageSize.width
           ? 0
@@ -105,13 +105,13 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
     [preview, baseScaleY, stageSize.width, spectrogramAreaHeight]
   )
 
-  // Generate a stable ID for the current preview source
+  // 現在の preview ソースを表す安定した ID を生成する
   const currentPreviewId = useMemo(() => {
     if (!preview) return null
     return `${preview.duration_sec}-${preview.freq_min}-${preview.freq_max}`
   }, [preview])
 
-  // Clear throttle state when preview source changes
+  // preview ソースが変わったらスロットル状態をクリアする
   useLayoutEffect(() => {
     if (currentPreviewId !== lastPreviewId.current) {
       console.log('[useViewport] Preview source changed, clearing throttle state')
@@ -138,7 +138,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
     []
   )
 
-  // Wrapped setPan that always applies clamping
+  // 常にクランプを適用する setPan ラッパー
   const setPanClamped = useCallback(
     (value: { x: number; y: number } | ((prev: { x: number; y: number }) => { x: number; y: number })) => {
       setPan((prev) => {
@@ -155,7 +155,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
         const current = prev ?? baseZoomX
         const next = typeof value === 'function' ? value(current) : value
         const clamped = clampZoomX(next)
-        // Use targetPan if provided, otherwise re-clamp current pan
+        // targetPan があればそれを使い、なければ現在の pan を再クランプする
         setPan((prevPan) => clampPan(targetPan ?? prevPan, clamped, zoomY))
         return clamped
       })
@@ -169,7 +169,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
     const currentFreqMin = preview.freq_min
     const currentFreqMax = preview.freq_max
 
-    // Filter cache entries that match current preview source
+    // 現在の preview ソースに一致するキャッシュだけを残す
     const validEntries = viewportCache.filter(
       (entry) =>
         entry.sourceDuration === currentDuration &&
@@ -177,8 +177,8 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
         entry.sourceFreqMax === currentFreqMax
     )
 
-    // Only log once when stale entries are first detected
-    // (filtering happens on every render, so avoid spam)
+    // 古いエントリが最初に見つかった時だけログを出す
+    // （毎レンダーでフィルタされるため、ログスパムを避ける）
 
     return validEntries
       .slice()
@@ -213,7 +213,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
     [reportError, stageSize.width, spectrogramAreaHeight]
   )
 
-  // Request viewport preview on zoom/pan change (after interaction stops)
+  // zoom/pan 変更時に viewport preview を要求する（操作停止後）
   useEffect(() => {
     if (!preview || (zoomX <= baseZoomX && zoomY <= 1)) {
       lastRequestedParams.current = null
@@ -224,7 +224,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
     const freqMin = preview.freq_min
     const freqMax = preview.freq_max
 
-    // Calculate visible viewport
+    // 可視ビューポートを計算する
     const visibleTimeStart = Math.max(0, -pan.x / zoomX)
     const visibleTimeEnd = Math.min(duration, visibleTimeStart + stageSize.width / zoomX)
     const logMin = Math.log(freqMin)
@@ -263,7 +263,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
     }
   }, [zoomX, zoomY, pan, stageSize.width, spectrogramAreaHeight, preview, baseZoomX, sendViewportRequest])
 
-  // Subscribe viewport preview events (push)
+  // viewport preview イベント（push）を購読する
   useEffect(() => {
     const cleanupState = previewThrottleRef.current
     const applyPreview = async (next: SpectrogramPreview, quality: 'low' | 'high', token: number) => {
@@ -275,8 +275,8 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
         return
       }
 
-      // Validate that the incoming preview is compatible with current source
-      // Check if time ranges are within valid bounds
+      // 受信した preview が現在ソースと整合するか検証する
+      // 時間範囲が有効な境界内か確認する
       if (resolved.time_start < 0 || resolved.time_end > preview.duration_sec + 0.01) {
         console.warn(
           '[useViewport] Invalid preview time range:',
@@ -289,7 +289,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
         return
       }
 
-      // Sanity check: preview dimensions should be reasonable
+      // 安全確認: preview の寸法が妥当か確認する
       if (resolved.width <= 0 || resolved.height <= 0 || resolved.data.length !== resolved.width * resolved.height) {
         console.error(
           '[useViewport] Invalid preview dimensions:',
@@ -311,7 +311,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
         sourceFreqMax: preview.freq_max,
       }
       setViewportCache((prev) => {
-        // Skip if we already have a high-quality version of the same region
+        // 同じ領域の高品質版がすでにある場合は追加しない
         const hasHigh = prev.some(
           (item) =>
             item.quality === 'high' &&
@@ -323,7 +323,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
         if (quality === 'low' && hasHigh) {
           return prev
         }
-        // Remove old entries for the same region when adding high-quality version
+        // 高品質版を追加する際、同一領域の古いエントリを取り除く
         const filtered = quality === 'high'
           ? prev.filter(
               (item) =>
@@ -338,19 +338,19 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
         const nextItems = [...filtered, entry]
         const limit = 3
         if (nextItems.length <= limit) return nextItems
-        // Keep only the most recent entries
+        // 最新のエントリだけを保持する
         return nextItems.slice(nextItems.length - limit)
       })
     }
 
     const schedulePreview = (next: SpectrogramPreview, quality: 'low' | 'high') => {
-      // Validate against current preview before scheduling
+      // スケジュール前に現在の preview と整合するか検証する
       if (!preview) {
         console.warn('[useViewport] schedulePreview called but preview is null')
         return
       }
 
-      // Check if incoming preview is for the current source
+      // 受信 preview が現在ソース向けか確認する
       if (next.time_end > preview.duration_sec + 0.01) {
         console.warn(
           '[useViewport] Ignoring stale viewport preview (time_end:',
@@ -393,7 +393,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
       const currentPreviewIdAtSchedule = currentPreviewId
       state.timerId = window.setTimeout(() => {
         state.timerId = null
-        // Double-check preview hasn't changed before applying
+        // 適用前に preview ソースが変わっていないか再確認する
         if (state.pending && currentPreviewIdAtSchedule === lastPreviewId.current) {
           state.lastApplied = Date.now()
           void applyPreview(state.pending, state.pendingQuality, state.pendingToken)
@@ -444,7 +444,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
     const newZoom = clampZoomY(oldZoom + 1.0)
     if (newZoom === oldZoom) return
 
-    // Keep viewport center at the same frequency
+    // ビューポート中央の周波数を維持する
     const centerY = spectrogramAreaHeight / 2
     const oldContentY = (centerY - pan.y) / (baseScaleY * oldZoom)
     const newPanY = centerY - oldContentY * baseScaleY * newZoom
@@ -459,7 +459,7 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
     const newZoom = clampZoomY(oldZoom - 1.0)
     if (newZoom === oldZoom) return
 
-    // Keep viewport center at the same frequency
+    // ビューポート中央の周波数を維持する
     const centerY = spectrogramAreaHeight / 2
     const oldContentY = (centerY - pan.y) / (baseScaleY * oldZoom)
     const newPanY = centerY - oldContentY * baseScaleY * newZoom

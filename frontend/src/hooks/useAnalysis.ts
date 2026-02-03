@@ -30,7 +30,7 @@ export function useAnalysis(reportError: ReportError) {
     nextToken: number
   }>({ lastApplied: 0, timerId: null, pending: null, pendingToken: 0, nextToken: 0 })
 
-  // Subscribe preview events (push)
+  // preview イベント（push）を購読する
   useEffect(() => {
     const cleanupState = previewThrottleRef.current
     const applyPreview = async (next: SpectrogramPreview, token: number) => {

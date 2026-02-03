@@ -197,11 +197,11 @@ def make_spectrogram(
             time_end=time_end,
         ), 1.0
 
-    # Clamp time range to valid bounds
+    # 時間範囲を有効な境界内に収める。
     time_start = max(0.0, min(time_start, total_duration))
     time_end = max(time_start + 1e-6, min(time_end, total_duration))
 
-    # Extract audio segment for the requested time range
+    # 要求された時間範囲の音声セグメントを切り出す。
     start_sample = int(time_start * sample_rate)
     end_sample = int(time_end * sample_rate)
     audio_segment = audio[start_sample:end_sample]
@@ -218,13 +218,13 @@ def make_spectrogram(
             time_end=time_end,
         ), 1.0
 
-    # Clamp frequency range
+    # 周波数範囲を有効な境界内に収める。
     effective_freq_min = max(freq_min, settings.freq_min, 1.0)
     effective_freq_max = min(freq_max, settings.freq_max, sample_rate * 0.5)
     effective_freq_max = max(effective_freq_max, effective_freq_min * 1.001)
 
-    # Downsample audio so we keep enough temporal samples per output pixel, while
-    # preserving a minimum sample rate for the requested freq_max (Nyquist).
+    # 出力 1px あたりの時間サンプル数を確保しつつ、要求 freq_max の
+    # ナイキスト条件を満たす最小サンプルレートを維持するためにダウンサンプルする。
     samples_per_pixel = 32
     segment_duration = time_end - time_start
     min_sample_rate = min(sample_rate, max(2000.0, effective_freq_max * 2.2))
@@ -232,13 +232,13 @@ def make_spectrogram(
     target_samples = max(width * samples_per_pixel, min_samples)
 
     if audio_segment.size > target_samples:
-        # Downsample in time domain to reduce CWT computation
+        # CWT 計算量を減らすため、時間領域でダウンサンプルする。
         audio_segment = resample(audio_segment, target_samples).astype(np.float32)
         working_sample_rate = int(target_samples / segment_duration)
     else:
         working_sample_rate = sample_rate
 
-    # Further downsample based on frequency range (Nyquist)
+    # 周波数範囲（ナイキスト条件）に基づいてさらにダウンサンプルする。
     target_rate = _preview_sample_rate(working_sample_rate, effective_freq_max)
     if target_rate < working_sample_rate:
         audio_segment, _ = resample_audio(audio_segment, working_sample_rate, target_rate)
@@ -246,8 +246,8 @@ def make_spectrogram(
 
     effective_freq_max = min(effective_freq_max, working_sample_rate * 0.5)
 
-    # Determine bins_per_octave based on output height
-    # More pixels = more frequency resolution needed
+    # 出力高さに応じて bins_per_octave を決める。
+    # ピクセル数が多いほど、より高い周波数解像度が必要になる。
     octaves = np.log2(effective_freq_max / effective_freq_min)
     bins_per_octave = max(4, min(settings.preview_bins_per_octave, int(height / max(1, octaves))))
 
@@ -318,7 +318,7 @@ def make_spectrogram_stft(
             time_end=time_end,
         ), 1.0
 
-    # Clamp time range to valid bounds
+    # 時間範囲を有効な境界内に収める。
     time_start = max(0.0, min(time_start, total_duration))
     time_end = max(time_start + 1e-6, min(time_end, total_duration))
 
@@ -338,13 +338,13 @@ def make_spectrogram_stft(
             time_end=time_end,
         ), 1.0
 
-    # Clamp frequency range
+    # 周波数範囲を有効な境界内に収める。
     effective_freq_min = max(freq_min, settings.freq_min, 1.0)
     effective_freq_max = min(freq_max, settings.preview_freq_max, settings.freq_max, sample_rate * 0.5)
     effective_freq_max = max(effective_freq_max, effective_freq_min * 1.001)
 
-    # Sparse STFT: sample `width` windows across the segment (no sliding),
-    # to avoid O(N) work for long audio.
+    # 疎な STFT: セグメント全体から `width` 個の窓を抽出する（スライドしない）。
+    # 長い音声で O(N) の処理量になることを避けるため。
     nperseg = 4096 if sample_rate >= 48000 else 2048
     nperseg = int(min(nperseg, max(256, audio_segment.size)))
     if nperseg & (nperseg - 1) != 0:
@@ -386,7 +386,7 @@ def make_spectrogram_stft(
         spectrum = np.fft.rfft(segment * window, n=nperseg)
         mags[:, col] = np.abs(spectrum).astype(np.float32)
 
-    # Interpolate linear-frequency magnitudes to log-frequency axis.
+    # 線形周波数軸の振幅を対数周波数軸へ補間する。
     log_freqs = np.geomspace(effective_freq_min, effective_freq_max, height).astype(np.float64)
     resized = np.empty((height, width), dtype=np.float32)
     for col in range(width):
@@ -589,15 +589,15 @@ def snap_trace(
         if spectrum.size == 0:
             continue
 
-        # Find local maxima (peaks where both neighbors are smaller)
+        # 局所最大を探す（左右の近傍より大きいピーク）。
         peak_indices, _ = find_peaks(spectrum)
         if len(peak_indices) > 0:
-            # Select the peak closest to freq_in (in log-frequency space)
+            # 対数周波数空間で freq_in に最も近いピークを選ぶ。
             peak_freqs = frequencies[peak_indices]
             log_distances = np.abs(np.log2(peak_freqs / freq_in))
             closest_idx = peak_indices[int(np.argmin(log_distances))]
         else:
-            # Fallback: no local maxima found, use global max
+            # フォールバック: 局所最大がなければ全体最大を使う。
             closest_idx = int(np.argmax(spectrum))
         peak_freq = float(frequencies[closest_idx])
         peak_amp = float(spectrum[closest_idx])
@@ -651,11 +651,11 @@ def _cwt_magnitude(
     wavelet_bandwidth: float = 8.0,
     wavelet_center_freq: float = 1.0,
 ) -> np.ndarray:
-    # Bandwidth parameter controls time/frequency trade-off.
-    # A larger value yields sharper frequency ridges (at the cost of time smearing),
-    # which better matches typical "thin ridge" spectrogram expectations.
+    # 帯域幅パラメータは時間/周波数のトレードオフを制御する。
+    # 値を大きくすると周波数方向のリッジが鋭くなる一方、時間方向はにじみやすくなる。
+    # 典型的な「細いリッジ」のスペクトログラム表現に合わせるための調整。
     bw = float(wavelet_bandwidth)
-    # Keep it in a sensible range; this is a UI-controlled parameter and should never explode.
+    # UI から変更可能な値なので、暴走しないよう妥当な範囲に制限する。
     bw = 0.1 if not np.isfinite(bw) or bw <= 0 else min(bw, 64.0)
     cf = float(wavelet_center_freq)
     cf = 0.1 if not np.isfinite(cf) or cf <= 0 else min(cf, 16.0)
@@ -689,7 +689,7 @@ def _normalize_cwt(magnitude: np.ndarray, reference_max: float | None = None) ->
     if magnitude.size == 0:
         return np.zeros_like(magnitude, dtype=np.float32)
 
-    # Visual dynamic range in dB (0dB = peak, <= min_db -> black).
+    # 表示用ダイナミックレンジ（dB）。0dB はピーク、min_db 以下は黒。
     min_db = -60.0
     eps = 1e-12
     max_mag = reference_max if reference_max is not None and reference_max > 0 else float(np.max(magnitude))

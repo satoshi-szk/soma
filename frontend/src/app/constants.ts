@@ -34,7 +34,7 @@ export const ZOOM_X_STEP_RATIO = 2.0;
 export const ZOOM_Y_MIN = 1;
 export const ZOOM_Y_MAX = 10;
 
-// UI layout constants
+// UI レイアウト定数
 export const RULER_HEIGHT = 28;
 export const AUTOMATION_LANE_HEIGHT = 120;
 
