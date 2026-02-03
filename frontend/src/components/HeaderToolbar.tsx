@@ -76,7 +76,7 @@ export function HeaderToolbar({
         <div className="flex items-center gap-2 rounded-md border border-[var(--panel-border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--ink)]">
           <button
             onClick={onRewind}
-            className={`rounded-md px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
+            className={`flex h-8 w-8 items-center justify-center rounded-md ${
               isPlaying
                 ? 'bg-[var(--panel-strong)] text-[var(--muted)]'
                 : 'border border-[var(--panel-border)] text-[var(--muted)]'
@@ -85,11 +85,11 @@ export function HeaderToolbar({
             aria-label="Rewind"
             title="Rewind"
           >
-            ⏮
+            <RewindIcon />
           </button>
           <button
             onClick={onPlayStop}
-            className={`rounded-md px-4 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
+            className={`flex h-8 w-8 items-center justify-center rounded-md ${
               playDisabled && !isPlaying
                 ? 'bg-[var(--panel-strong)] text-[var(--muted)]'
                 : 'bg-[var(--accent)] text-white'
@@ -98,7 +98,7 @@ export function HeaderToolbar({
             aria-label={isPlaying ? 'Stop' : 'Play'}
             title={isPlaying ? 'Stop' : 'Play'}
           >
-            {isPlaying ? '⏹' : '▶'}
+            {isPlaying ? <StopIcon /> : <PlayIcon />}
           </button>
         </div>
         <div className="flex flex-col">
@@ -141,5 +141,31 @@ export function HeaderToolbar({
         </div>
       </div>
     </header>
+  )
+}
+
+function RewindIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <rect x="1.1" y="2.1" width="1.1" height="9.8" rx="0.35" fill="currentColor" />
+      <path d="M7.1 7 12.1 2.1v9.8L7.1 7Z" fill="currentColor" />
+      <path d="M2.8 7 7.8 2.1v9.8L2.8 7Z" fill="currentColor" />
+    </svg>
+  )
+}
+
+function PlayIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <path d="M4 2.7 11 7 4 11.3V2.7Z" fill="currentColor" />
+    </svg>
+  )
+}
+
+function StopIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 14 14" fill="none" aria-hidden="true">
+      <rect x="3.1" y="3.1" width="7.8" height="7.8" rx="0.9" fill="currentColor" />
+    </svg>
   )
 }
