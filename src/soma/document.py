@@ -310,7 +310,7 @@ class SomaDocument:
             self._pending_snap_trace = trace
 
         params = SnapParams(
-            audio=self.audio_data.copy(),  # Copy to avoid issues with shared memory
+            audio=self.audio_data,
             sample_rate=self.audio_info.sample_rate,
             settings=self.settings,
             trace=trace,
@@ -594,7 +594,7 @@ class SomaDocument:
         height_clamped = int(np.clip(height, 16, 1024))
 
         params = ViewportParams(
-            audio=self.audio_data.copy(),  # Copy to avoid shared memory issues
+            audio=self.audio_data,
             sample_rate=self.audio_info.sample_rate,
             settings=self.settings,
             time_start=time_start,
