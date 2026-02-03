@@ -9,7 +9,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
   const [playbackPosition, setPlaybackPosition] = useState(0)
   const playbackStartRef = useRef(0)
 
-  // Polling playback position
+  // 再生位置をポーリングで取得する
   useEffect(() => {
     if (!isPlaying) return
     const interval = window.setInterval(async () => {

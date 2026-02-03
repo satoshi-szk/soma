@@ -26,7 +26,7 @@ from soma.models import AnalysisSettings, PartialPoint, SpectrogramPreview
 
 _logger = logging.getLogger(__name__)
 
-# Timeout for worker processes (5 minutes)
+# ワーカープロセスのタイムアウト（5分）
 _WORKER_TIMEOUT_SEC = 300.0
 
 
@@ -43,7 +43,7 @@ class ViewportParams:
     freq_max: float
     width: int
     height: int
-    use_stft: bool  # True for STFT-only (window > 5s), else CWT-only
+    use_stft: bool  # True は STFT のみ（窓幅 > 5 秒）、False は CWT のみ
     stft_amp_reference: float | None = None
     cwt_amp_reference: float | None = None
 
@@ -64,7 +64,7 @@ class ViewportResult:
     """Result from viewport worker."""
 
     request_id: str
-    quality: str  # 'low' or 'high'
+    quality: str  # 'low' または 'high'
     preview: SpectrogramPreview
     amp_reference: float
     final: bool
@@ -91,14 +91,14 @@ def _viewport_worker_fn(
     _configure_worker_logging(log_dir, log_name)
     logger = logging.getLogger(__name__)
 
-    # Import here to avoid issues with multiprocessing
+    # マルチプロセス時の問題を避けるため、ここで import する。
     from soma.analysis import make_spectrogram, make_spectrogram_stft
 
     try:
         logger.debug("Viewport worker started: %s", request_id[:8])
 
         if params.use_stft:
-            # STFT computation (fast, wide window)
+            # STFT 計算（高速・広い時間窓）
             stft_preview, stft_ref = make_spectrogram_stft(
                 audio=params.audio,
                 sample_rate=params.sample_rate,
@@ -126,7 +126,7 @@ def _viewport_worker_fn(
             logger.debug("Viewport worker done (STFT only): %s", request_id[:8])
             return
 
-        # CWT computation (high quality, heavy)
+        # CWT 計算（高品質だが重い）
         logger.debug("Viewport worker starting CWT: %s", request_id[:8])
         cwt_preview, cwt_ref = make_spectrogram(
             audio=params.audio,

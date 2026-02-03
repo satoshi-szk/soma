@@ -48,20 +48,20 @@ const parseValue = (key: NumericKey, value: string): number | null => {
 }
 
 const helpText: Record<string, string> = {
-  common: 'Snap と Preview の両方に影響する基本レンジです。',
-  preview: '表示用の軽量スペクトログラムに関する設定です。',
-  snap: '自動スナップ解析（CWT）に関する設定です。',
-  freq_min: '表示/解析の最低周波数。低すぎるとノイズが増えます。',
-  freq_max: '表示/解析の最高周波数。高すぎると密度が下がります。',
-  preview_freq_max: 'プレビュー専用の上限周波数。高いほど描画コストが上がります。',
-  preview_bins_per_octave: 'プレビューの周波数解像度。高いほど細かくなります。',
-  color_map: 'プレビュー表示の色テーブル。',
-  brightness: 'プレビュー全体の明るさを調整します。',
-  contrast: 'プレビューの明暗メリハリを調整します。',
-  bins_per_octave: 'スナップ解析の周波数解像度。高いほど細かくなります。',
-  time_resolution_ms: 'スナップ点の間引き間隔。小さいほど点が増えます。',
-  wavelet_bandwidth: 'B を上げると周波数方向が細く、時間方向はにじみます。目安 2-12。',
-  wavelet_center_freq: 'C を上げると高域寄り、下げると低域寄り。目安 0.5-3.0。',
+  common: 'Base range shared by both Snap and Preview.',
+  preview: 'Settings for the lightweight spectrogram used for display.',
+  snap: 'Settings for automatic snap analysis (CWT).',
+  freq_min: 'Minimum frequency for display/analysis. Lower values may increase noise.',
+  freq_max: 'Maximum frequency for display/analysis. Higher values may reduce density.',
+  preview_freq_max: 'Upper frequency limit for preview only. Higher values increase render cost.',
+  preview_bins_per_octave: 'Frequency resolution for preview. Higher values provide finer detail.',
+  color_map: 'Color table used for preview rendering.',
+  brightness: 'Adjusts overall preview brightness.',
+  contrast: 'Adjusts preview contrast.',
+  bins_per_octave: 'Frequency resolution for snap analysis. Higher values provide finer detail.',
+  time_resolution_ms: 'Resampling interval for snap points. Smaller values increase point count.',
+  wavelet_bandwidth: 'Higher B sharpens frequency detail but smears time. Typical range: 2-12.',
+  wavelet_center_freq: 'Higher C emphasizes higher bands; lower C emphasizes lower bands. Typical range: 0.5-3.0.',
 }
 
 export type AnalysisSettingsModalProps = {

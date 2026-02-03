@@ -14,8 +14,8 @@ from soma.models import Partial
 @dataclass(frozen=True)
 class MidiExportSettings:
     pitch_bend_range: int = 48
-    amplitude_mapping: str = "velocity"  # velocity | pressure | cc74 | cc1
-    amplitude_curve: str = "linear"  # linear | db
+    amplitude_mapping: str = "velocity"  # velocity | pressure | cc74 | cc1 のいずれか
+    amplitude_curve: str = "linear"  # linear | db のいずれか
     bpm: float = 120.0
     ticks_per_beat: int = 960
 
@@ -39,11 +39,11 @@ class MonophonicExportSettings(MidiExportSettings):
 class AudioExportSettings:
     sample_rate: int = 44100
     bit_depth: int = 16
-    output_type: str = "sine"  # sine | cv
+    output_type: str = "sine"  # sine | cv のいずれか
     cv_base_freq: float = 440.0
     cv_full_scale_volts: float = 10.0
-    cv_mode: str = "mono"  # mono | poly
-    amplitude_curve: str = "linear"  # linear | db
+    cv_mode: str = "mono"  # mono | poly のいずれか
+    amplitude_curve: str = "linear"  # linear | db のいずれか
 
 
 def export_mpe(
@@ -488,7 +488,7 @@ def _pitch_bend_rpn_messages(channel: int, semitone_range: int) -> list[Message]
             Message("control_change", control=6, value=msb, channel=channel),
             Message("control_change", control=38, value=0, channel=channel),
         ])
-    # RPN NULL to terminate the RPN sequence
+    # RPN シーケンスを終端するための RPN NULL。
     messages.extend([
         Message("control_change", control=101, value=127, channel=channel),
         Message("control_change", control=100, value=127, channel=channel),
