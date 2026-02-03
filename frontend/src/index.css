@@ -236,6 +236,17 @@ select {
   border-color: transparent;
 }
 
+.modal-note {
+  margin: 0 0 16px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--panel-border);
+  background: rgba(255, 255, 255, 0.75);
+  color: var(--muted);
+  font-size: 12px;
+  letter-spacing: 0.01em;
+  line-height: 1.45;
+}
+
 @keyframes fade-in {
   0% {
     opacity: 0;

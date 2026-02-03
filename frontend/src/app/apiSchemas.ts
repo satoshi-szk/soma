@@ -164,6 +164,7 @@ export const apiSchemas = {
     payload: z.object({
       pitch_bend_range: z.number().optional(),
       amplitude_mapping: z.string().optional(),
+      amplitude_curve: z.string().optional(),
       bpm: z.number().optional(),
     }),
     response: z.union([okStatusSchema.extend({ paths: z.array(z.string()) }), errorStatusSchema]),
@@ -172,6 +173,7 @@ export const apiSchemas = {
     payload: z.object({
       pitch_bend_range: z.number().optional(),
       amplitude_mapping: z.string().optional(),
+      amplitude_curve: z.string().optional(),
       bpm: z.number().optional(),
     }),
     response: z.union([okStatusSchema.extend({ paths: z.array(z.string()) }), errorStatusSchema]),
@@ -180,6 +182,7 @@ export const apiSchemas = {
     payload: z.object({
       pitch_bend_range: z.number().optional(),
       amplitude_mapping: z.string().optional(),
+      amplitude_curve: z.string().optional(),
       bpm: z.number().optional(),
     }),
     response: z.union([okStatusSchema.extend({ paths: z.array(z.string()) }), errorStatusSchema]),
@@ -191,8 +194,10 @@ export const apiSchemas = {
       output_type: z.string().optional(),
       cv_base_freq: z.number().optional(),
       cv_full_scale_volts: z.number().optional(),
+      cv_mode: z.string().optional(),
+      amplitude_curve: z.string().optional(),
     }),
-    response: z.union([okStatusSchema.extend({ path: z.string() }), errorStatusSchema]),
+    response: z.union([okStatusSchema.extend({ path: z.string(), paths: z.array(z.string()).optional() }), errorStatusSchema]),
   },
   request_viewport_preview: {
     payload: z.object({

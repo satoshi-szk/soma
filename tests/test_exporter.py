@@ -12,9 +12,11 @@ from soma.exporter import (  # noqa: E402
     MpeExportSettings,
     MultiTrackExportSettings,
     export_audio,
+    export_cv_audio,
     export_monophonic_midi,
     export_mpe,
     export_multitrack_midi,
+    render_cv_voice_buffers,
 )
 from soma.models import Partial, PartialPoint  # noqa: E402
 
@@ -160,3 +162,113 @@ def test_export_cv(tmp_path: Path) -> None:
     assert data.shape == (2, 2)
     assert np.allclose(data[:, 0], [0.0, 0.1], atol=1e-6)
     assert np.allclose(data[:, 1], [-1.0, 1.0], atol=1e-6)
+
+
+def test_export_mpe_cc1_mapping(tmp_path: Path) -> None:
+    partials = [
+        Partial(
+            id="p1",
+            points=[
+                PartialPoint(time=0.0, freq=440.0, amp=0.2),
+                PartialPoint(time=0.5, freq=440.0, amp=0.4),
+            ],
+        )
+    ]
+    settings = MpeExportSettings(pitch_bend_range=48, amplitude_mapping="cc1")
+    path = tmp_path / "cc1.mid"
+    results = export_mpe(partials, path, settings)
+    midi = pytest.importorskip("mido").MidiFile(results[0])
+    cc1 = [msg.value for msg in midi.tracks[1] if msg.type == "control_change" and msg.control == 1]
+    assert len(cc1) >= 2
+
+
+def test_export_mpe_amp_db_curve_changes_values(tmp_path: Path) -> None:
+    partials = [
+        Partial(
+            id="p1",
+            points=[
+                PartialPoint(time=0.0, freq=440.0, amp=0.2),
+                PartialPoint(time=0.5, freq=440.0, amp=0.15),
+                PartialPoint(time=1.0, freq=440.0, amp=0.1),
+            ],
+        )
+    ]
+    linear_settings = MpeExportSettings(pitch_bend_range=48, amplitude_mapping="pressure", amplitude_curve="linear")
+    db_settings = MpeExportSettings(pitch_bend_range=48, amplitude_mapping="pressure", amplitude_curve="db")
+    linear_path = export_mpe(partials, tmp_path / "linear.mid", linear_settings)[0]
+    db_path = export_mpe(partials, tmp_path / "db.mid", db_settings)[0]
+    linear_midi = pytest.importorskip("mido").MidiFile(linear_path)
+    db_midi = pytest.importorskip("mido").MidiFile(db_path)
+    linear_pressure = [msg.value for msg in linear_midi.tracks[1] if msg.type == "aftertouch"]
+    db_pressure = [msg.value for msg in db_midi.tracks[1] if msg.type == "aftertouch"]
+    assert len(linear_pressure) >= 3
+    assert len(db_pressure) >= 3
+    assert db_pressure[1] > linear_pressure[1]
+
+
+def test_render_cv_mono_prefers_latest_started_partial() -> None:
+    partials = [
+        Partial(
+            id="p1",
+            points=[
+                PartialPoint(time=0.0, freq=100.0, amp=0.5),
+                PartialPoint(time=1.0, freq=100.0, amp=0.5),
+            ],
+        ),
+        Partial(
+            id="p2",
+            points=[
+                PartialPoint(time=0.5, freq=200.0, amp=0.2),
+                PartialPoint(time=1.2, freq=200.0, amp=0.2),
+            ],
+        ),
+    ]
+    voice_buffers, _, _ = render_cv_voice_buffers(partials, sample_rate=10, duration_sec=1.5, mode="mono")
+    pitch, amp = voice_buffers[0]
+    assert pitch[2] == pytest.approx(100.0, abs=1e-6)
+    assert pitch[7] == pytest.approx(200.0, abs=1e-6)
+    assert amp[7] == pytest.approx(0.2, abs=1e-6)
+
+
+def test_render_cv_holds_pitch_after_last_partial() -> None:
+    partials = [
+        Partial(
+            id="p1",
+            points=[
+                PartialPoint(time=0.2, freq=300.0, amp=0.8),
+                PartialPoint(time=0.4, freq=300.0, amp=0.8),
+            ],
+        )
+    ]
+    voice_buffers, _, _ = render_cv_voice_buffers(partials, sample_rate=10, duration_sec=1.0, mode="mono")
+    pitch, amp = voice_buffers[0]
+    assert pitch[1] == pytest.approx(0.0, abs=1e-6)
+    assert pitch[5] == pytest.approx(300.0, abs=1e-6)
+    assert amp[5] == pytest.approx(0.0, abs=1e-6)
+
+
+def test_export_cv_audio_poly_outputs_per_voice_files(tmp_path: Path) -> None:
+    partials = [
+        Partial(
+            id="p1",
+            points=[
+                PartialPoint(time=0.0, freq=110.0, amp=0.3),
+                PartialPoint(time=1.0, freq=110.0, amp=0.3),
+            ],
+        ),
+        Partial(
+            id="p2",
+            points=[
+                PartialPoint(time=0.2, freq=220.0, amp=0.5),
+                PartialPoint(time=1.2, freq=220.0, amp=0.5),
+            ],
+        ),
+    ]
+    settings = AudioExportSettings(sample_rate=10, bit_depth=32, output_type="cv", cv_mode="poly")
+    voice_buffers, amp_min, amp_max = render_cv_voice_buffers(partials, sample_rate=10, duration_sec=1.5, mode="poly")
+    output = export_cv_audio(tmp_path / "poly.wav", settings, voice_buffers, amp_min, amp_max)
+    assert len(output) == 2
+    assert output[0].name.endswith("_01.wav")
+    assert output[1].name.endswith("_02.wav")
+    assert output[0].exists()
+    assert output[1].exists()

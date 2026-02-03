@@ -47,9 +47,11 @@ from soma.exporter import (
     MpeExportSettings,
     MultiTrackExportSettings,
     export_audio,
+    export_cv_audio,
     export_monophonic_midi,
     export_mpe,
     export_multitrack_midi,
+    render_cv_voice_buffers,
 )
 from soma.logging_utils import configure_logging, get_session_log_dir
 from soma.models import AnalysisSettings, PartialPoint, SpectrogramPreview
@@ -572,6 +574,7 @@ class SomaApi:
         settings = MpeExportSettings(
             pitch_bend_range=parsed.pitch_bend_range,
             amplitude_mapping=parsed.amplitude_mapping,
+            amplitude_curve=parsed.amplitude_curve,
             bpm=parsed.bpm,
         )
         paths = export_mpe(self._doc.store.all(), Path(selection), settings)
@@ -599,6 +602,7 @@ class SomaApi:
         settings = MultiTrackExportSettings(
             pitch_bend_range=parsed.pitch_bend_range,
             amplitude_mapping=parsed.amplitude_mapping,
+            amplitude_curve=parsed.amplitude_curve,
             bpm=parsed.bpm,
         )
         paths = export_multitrack_midi(self._doc.store.all(), Path(selection), settings)
@@ -626,6 +630,7 @@ class SomaApi:
         settings = MonophonicExportSettings(
             pitch_bend_range=parsed.pitch_bend_range,
             amplitude_mapping=parsed.amplitude_mapping,
+            amplitude_curve=parsed.amplitude_curve,
             bpm=parsed.bpm,
         )
         paths = export_monophonic_midi(self._doc.store.all(), Path(selection), settings)
@@ -657,23 +662,21 @@ class SomaApi:
             output_type=parsed.output_type,
             cv_base_freq=parsed.cv_base_freq if parsed.cv_base_freq is not None else 440.0,
             cv_full_scale_volts=parsed.cv_full_scale_volts if parsed.cv_full_scale_volts is not None else 10.0,
+            cv_mode=parsed.cv_mode,
+            amplitude_curve=parsed.amplitude_curve,
         )
         buffer = self._doc.synth.get_mix_buffer().astype(np.float32)
         if settings.sample_rate != self._doc.audio_info.sample_rate:
             buffer, _ = resample_audio(buffer, self._doc.audio_info.sample_rate, settings.sample_rate)
         if settings.output_type == "cv":
-            pitch, amp, amp_min, amp_max = self._doc.render_cv_buffers(settings.sample_rate)
-            export_audio(
-                Path(selection),
-                buffer,
-                settings,
-                self._doc.settings.freq_min,
-                self._doc.settings.freq_max,
-                pitch_buffer=pitch,
-                amp_buffer=amp,
-                amp_min=amp_min,
-                amp_max=amp_max,
+            voice_buffers, amp_min, amp_max = render_cv_voice_buffers(
+                self._doc.store.all(),
+                settings.sample_rate,
+                self._doc.audio_info.duration_sec,
+                settings.cv_mode,
             )
+            paths = export_cv_audio(Path(selection), settings, voice_buffers, amp_min, amp_max)
+            return {"status": "ok", "path": str(paths[0]), "paths": [str(path) for path in paths]}
         else:
             export_audio(Path(selection), buffer, settings, self._doc.settings.freq_min, self._doc.settings.freq_max)
         return {"status": "ok", "path": str(selection)}

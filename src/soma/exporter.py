@@ -14,7 +14,8 @@ from soma.models import Partial
 @dataclass(frozen=True)
 class MidiExportSettings:
     pitch_bend_range: int = 48
-    amplitude_mapping: str = "velocity"  # velocity | pressure | cc74
+    amplitude_mapping: str = "velocity"  # velocity | pressure | cc74 | cc1
+    amplitude_curve: str = "linear"  # linear | db
     bpm: float = 120.0
     ticks_per_beat: int = 960
 
@@ -41,6 +42,8 @@ class AudioExportSettings:
     output_type: str = "sine"  # sine | cv
     cv_base_freq: float = 440.0
     cv_full_scale_volts: float = 10.0
+    cv_mode: str = "mono"  # mono | poly
+    amplitude_curve: str = "linear"  # linear | db
 
 
 def export_mpe(
@@ -115,7 +118,7 @@ def export_audio(
         if pitch_buffer is None or amp_buffer is None:
             raise ValueError("CV export requires pitch and amplitude buffers.")
         pitch_cv = _normalize_cv(pitch_buffer, settings.cv_base_freq, settings.cv_full_scale_volts)
-        amp_cv = _normalize_amp_cv(amp_buffer, amp_min, amp_max)
+        amp_cv = _normalize_amp_cv(amp_buffer, amp_min, amp_max, settings.amplitude_curve)
         stacked = np.vstack([pitch_cv, amp_cv]).T
         data = _convert_bit_depth(stacked, settings.bit_depth)
         wavfile.write(output_path, settings.sample_rate, data)
@@ -125,6 +128,129 @@ def export_audio(
     data = _convert_bit_depth(normalized, settings.bit_depth)
     wavfile.write(output_path, settings.sample_rate, data)
     return output_path
+
+
+def export_cv_audio(
+    output_path: Path,
+    settings: AudioExportSettings,
+    voice_buffers: list[tuple[np.ndarray, np.ndarray]],
+    amp_min: float,
+    amp_max: float,
+) -> list[Path]:
+    base = output_path.with_suffix("")
+    written: list[Path] = []
+    for index, (pitch_buffer, amp_buffer) in enumerate(voice_buffers, start=1):
+        suffix = f"_{index:02d}.wav" if len(voice_buffers) > 1 else ".wav"
+        path = base.with_suffix("").with_name(base.name + suffix)
+        pitch_cv = _normalize_cv(pitch_buffer, settings.cv_base_freq, settings.cv_full_scale_volts)
+        amp_cv = _normalize_amp_cv(amp_buffer, amp_min, amp_max, settings.amplitude_curve)
+        stacked = np.vstack([pitch_cv, amp_cv]).T
+        data = _convert_bit_depth(stacked, settings.bit_depth)
+        wavfile.write(path, settings.sample_rate, data)
+        written.append(path)
+    return written
+
+
+def render_cv_voice_buffers(
+    partials: Iterable[Partial],
+    sample_rate: int,
+    duration_sec: float,
+    mode: str,
+) -> tuple[list[tuple[np.ndarray, np.ndarray]], float, float]:
+    partial_list = [partial for partial in partials if len(partial.points) >= 2 and not partial.is_muted]
+    amp_min, amp_max = _amp_range(partial_list)
+    total_samples = max(1, int(duration_sec * sample_rate))
+    empty = (np.zeros(total_samples, dtype=np.float32), np.zeros(total_samples, dtype=np.float32))
+    if not partial_list:
+        return [empty], amp_min, amp_max
+
+    if mode == "poly":
+        allocations = _allocate_voices(partial_list, max_voices=None)
+        voices = [voice for group in allocations for voice in group]
+    else:
+        voices = [partial_list]
+
+    rendered = [_render_cv_voice(voice, sample_rate, duration_sec) for voice in voices]
+    return rendered if rendered else [empty], amp_min, amp_max
+
+
+@dataclass(frozen=True)
+class _CvSegment:
+    start_time: float
+    start_idx: int
+    end_idx: int
+    times: np.ndarray
+    freqs: np.ndarray
+    amps: np.ndarray
+
+
+def _render_cv_voice(
+    partials: list[Partial],
+    sample_rate: int,
+    duration_sec: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    total_samples = max(1, int(duration_sec * sample_rate))
+    pitch_buffer = np.zeros(total_samples, dtype=np.float32)
+    amp_buffer = np.zeros(total_samples, dtype=np.float32)
+    owner_start = np.full(total_samples, float("-inf"), dtype=np.float64)
+    owner_index = np.full(total_samples, -1, dtype=np.int32)
+
+    segments: list[_CvSegment] = []
+    for partial in partials:
+        points = partial.sorted_points()
+        if len(points) < 2:
+            continue
+        times = np.array([point.time for point in points], dtype=np.float64)
+        freqs = np.array([point.freq for point in points], dtype=np.float64)
+        amps = np.array([point.amp for point in points], dtype=np.float64)
+        start_time = max(0.0, float(times[0]))
+        end_time = min(float(times[-1]), duration_sec)
+        start_idx = int(start_time * sample_rate)
+        end_idx = int(end_time * sample_rate)
+        if end_idx <= start_idx:
+            continue
+        segments.append(
+            _CvSegment(
+                start_time=start_time,
+                start_idx=start_idx,
+                end_idx=end_idx,
+                times=times,
+                freqs=freqs,
+                amps=amps,
+            )
+        )
+
+    if not segments:
+        return pitch_buffer, amp_buffer
+
+    for idx, segment in enumerate(segments):
+        active_owner = owner_start[segment.start_idx : segment.end_idx]
+        mask = segment.start_time >= active_owner
+        active_owner[mask] = segment.start_time
+        owner_index[segment.start_idx : segment.end_idx][mask] = idx
+
+    for idx, segment in enumerate(segments):
+        sample_times = (np.arange(segment.end_idx - segment.start_idx) / sample_rate) + segment.start_time
+        freq_interp = np.interp(sample_times, segment.times, segment.freqs)
+        amp_interp = np.interp(sample_times, segment.times, segment.amps)
+        active = owner_index[segment.start_idx : segment.end_idx] == idx
+        pitch_slice = pitch_buffer[segment.start_idx : segment.end_idx]
+        amp_slice = amp_buffer[segment.start_idx : segment.end_idx]
+        pitch_slice[active] = freq_interp[active].astype(np.float32)
+        amp_slice[active] = amp_interp[active].astype(np.float32)
+
+    last_pitch = 0.0
+    has_pitch = False
+    for sample_idx in range(total_samples):
+        if owner_index[sample_idx] >= 0:
+            if pitch_buffer[sample_idx] > 0.0:
+                last_pitch = float(pitch_buffer[sample_idx])
+                has_pitch = True
+            continue
+        if has_pitch:
+            pitch_buffer[sample_idx] = last_pitch
+
+    return pitch_buffer, amp_buffer
 
 
 def _build_mpe_file(voices: list[list[Partial]], settings: MpeExportSettings) -> MidiFile:
@@ -231,7 +357,7 @@ def _partial_timed_events(
         return []
     events: list[TimedEvent] = []
     current_note = _freq_to_midi(points[0].freq)
-    velocity = _amp_to_velocity(_normalize_amp(points[0].amp, amp_min, amp_max))
+    velocity = _amp_to_velocity(_normalize_amp(points[0].amp, amp_min, amp_max, settings.amplitude_curve))
     events.append(
         TimedEvent(
             time=points[0].time,
@@ -252,7 +378,7 @@ def _partial_timed_events(
                 )
             )
             current_note = _freq_to_midi(point.freq)
-            velocity = _amp_to_velocity(_normalize_amp(point.amp, amp_min, amp_max))
+            velocity = _amp_to_velocity(_normalize_amp(point.amp, amp_min, amp_max, settings.amplitude_curve))
             events.append(
                 TimedEvent(
                     time=point.time,
@@ -262,7 +388,7 @@ def _partial_timed_events(
                 )
             )
         pitch_bend = _freq_to_pitch_bend(point.freq, current_note, settings.pitch_bend_range)
-        normalized_amp = _normalize_amp(point.amp, amp_min, amp_max)
+        normalized_amp = _normalize_amp(point.amp, amp_min, amp_max, settings.amplitude_curve)
         events.append(
             TimedEvent(
                 time=point.time,
@@ -286,6 +412,15 @@ def _partial_timed_events(
                     time=point.time,
                     order=_message_order("control_change"),
                     message=Message("control_change", control=74, value=_amp_to_cc(normalized_amp), channel=channel),
+                    partial_id=partial.id,
+                )
+            )
+        elif settings.amplitude_mapping == "cc1":
+            events.append(
+                TimedEvent(
+                    time=point.time,
+                    order=_message_order("control_change"),
+                    message=Message("control_change", control=1, value=_amp_to_cc(normalized_amp), channel=channel),
                     partial_id=partial.id,
                 )
             )
@@ -500,10 +635,11 @@ def _amp_range(partials: list[Partial]) -> tuple[float, float]:
     return min_amp, max_amp
 
 
-def _normalize_amp(amp: float, amp_min: float, amp_max: float) -> float:
+def _normalize_amp(amp: float, amp_min: float, amp_max: float, curve: str) -> float:
     if amp_max <= amp_min:
         return 1.0
-    return float(np.clip((amp - amp_min) / (amp_max - amp_min), 0.0, 1.0))
+    linear = float(np.clip((amp - amp_min) / (amp_max - amp_min), 0.0, 1.0))
+    return _apply_amp_curve(linear, curve)
 
 
 def _needs_retrigger(freq: float, midi_note: int, pitch_bend_range: int) -> bool:
@@ -550,10 +686,36 @@ def _normalize_cv(buffer: np.ndarray, base_freq: float, full_scale_volts: float)
     return np.asarray(np.clip(volts / scale, -1.0, 1.0), dtype=np.float32)
 
 
-def _normalize_amp_cv(buffer: np.ndarray, amp_min: float | None, amp_max: float | None) -> np.ndarray:
+def _normalize_amp_cv(
+    buffer: np.ndarray,
+    amp_min: float | None,
+    amp_max: float | None,
+    curve: str,
+) -> np.ndarray:
     if buffer.size == 0:
         return buffer.astype(np.float32)
     if amp_min is None or amp_max is None or amp_max <= amp_min:
-        return np.asarray(np.clip(buffer, 0.0, 1.0) * 2.0 - 1.0, dtype=np.float32)
-    normalized = (buffer - amp_min) / (amp_max - amp_min)
-    return np.asarray(np.clip(normalized * 2.0 - 1.0, -1.0, 1.0), dtype=np.float32)
+        normalized = np.clip(buffer, 0.0, 1.0)
+    else:
+        normalized = np.clip((buffer - amp_min) / (amp_max - amp_min), 0.0, 1.0)
+    curved = _apply_amp_curve_array(normalized, curve)
+    return np.asarray(np.clip(curved * 2.0 - 1.0, -1.0, 1.0), dtype=np.float32)
+
+
+def _apply_amp_curve(value: float, curve: str) -> float:
+    if curve != "db":
+        return value
+    floor_db = -60.0
+    eps = 1e-8
+    db = 20.0 * np.log10(max(value, eps))
+    return float(np.clip((db - floor_db) / (-floor_db), 0.0, 1.0))
+
+
+def _apply_amp_curve_array(values: np.ndarray, curve: str) -> np.ndarray:
+    if curve != "db":
+        return values
+    floor_db = -60.0
+    eps = 1e-8
+    db = 20.0 * np.log10(np.maximum(values.astype(np.float64), eps))
+    curved = (db - floor_db) / (-floor_db)
+    return np.clip(curved, 0.0, 1.0)
