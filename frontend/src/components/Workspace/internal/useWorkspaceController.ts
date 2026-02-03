@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import { AUTOMATION_LANE_HEIGHT, RULER_HEIGHT, ZOOM_X_MAX_PX_PER_SEC, ZOOM_X_MIN_PX_PER_SEC } from '../../../app/constants'
-import type { Partial, PartialPoint } from '../../../app/types'
+import type { Partial } from '../../../app/types'
 import { mapColor } from '../../../app/utils'
 import { freqToY, positionToTime, positionToTimeFreq, timeToX } from './coordinate'
 import { useDropAudio } from './useDropAudio'
+import { useTraceSelectionInteraction } from './useTraceSelectionInteraction'
 import { useViewportImageCache } from './useViewportImageCache'
 import type { WorkspaceProps } from '../types'
-
-type SelectionBox = { x: number; y: number; w: number; h: number }
 
 export type EndpointDragParams = {
   partial: Partial
@@ -49,10 +48,6 @@ export function useWorkspaceController(props: WorkspaceProps) {
     onOpenAudioFile: props.onOpenAudioFile,
   })
   const [stageSize, setStageSize] = useState({ width: 900, height: 420 })
-  const [tracePath, setTracePath] = useState<PartialPoint[]>([])
-  const [isTracing, setIsTracing] = useState(false)
-  const [committedTrace, setCommittedTrace] = useState<PartialPoint[]>([])
-  const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null)
   const [draggedPartial, setDraggedPartial] = useState<Partial | null>(null)
   const [hudPosition, setHudPosition] = useState({ x: 16, y: 16 })
   const automationPadding = { top: 18, bottom: 16 }
@@ -194,6 +189,14 @@ export function useWorkspaceController(props: WorkspaceProps) {
     [preview, duration, freqMin, freqMax, pan, scale, contentOffset]
   )
 
+  const { tracePath, committedTrace, selectionBox, beginAt, moveAt, endInteraction } = useTraceSelectionInteraction({
+    activeTool,
+    positionToTimeFreq: positionToTimeFreqValue,
+    onTraceCommit,
+    onEraseCommit,
+    onSelectBoxCommit,
+  })
+
   const freqRulerMarks = useMemo(() => {
     if (!preview) return []
     const marks: { freq: number; label: string }[] = []
@@ -251,19 +254,9 @@ export function useWorkspaceController(props: WorkspaceProps) {
       const pointer = stage.getPointerPosition()
       if (!pointer) return
       if (pointer.y < rulerHeight || pointer.y > spectrogramAreaHeight) return
-
-      if (activeTool === 'trace' || activeTool === 'erase') {
-        const { time, freq } = positionToTimeFreqValue(pointer.x, pointer.y)
-        setTracePath([{ time, freq, amp: 0.5 }])
-        setIsTracing(true)
-        setCommittedTrace([])
-      }
-
-      if (activeTool === 'select') {
-        setSelectionBox({ x: pointer.x, y: pointer.y, w: 0, h: 0 })
-      }
+      beginAt(pointer)
     },
-    [preview, rulerHeight, spectrogramAreaHeight, activeTool, positionToTimeFreqValue]
+    [preview, rulerHeight, spectrogramAreaHeight, beginAt]
   )
 
   const handleStageMouseMove = useCallback(
@@ -288,64 +281,15 @@ export function useWorkspaceController(props: WorkspaceProps) {
         return { x: nextX, y: nextY }
       })
 
-      if (isTracing) {
-        setTracePath((prev) => [...prev, { ...cursor, amp: 0.5 }])
-      }
-      if (selectionBox) {
-        setSelectionBox((prev) =>
-          prev
-            ? { ...prev, w: pointer.x - prev.x, h: pointer.y - prev.y }
-            : { x: pointer.x, y: pointer.y, w: 0, h: 0 },
-        )
-      }
+      moveAt(pointer, cursor)
     },
-    [preview, rulerHeight, spectrogramAreaHeight, positionToTimeFreqValue, onCursorMove, stageSize, isTracing, selectionBox]
+    [preview, rulerHeight, spectrogramAreaHeight, positionToTimeFreqValue, onCursorMove, stageSize, moveAt]
   )
 
   const handleStageMouseUp = useCallback(() => {
     if (!preview) return
-    if (activeTool === 'trace' && isTracing) {
-      const trace = tracePath.map((point) => [point.time, point.freq] as [number, number])
-      setCommittedTrace(tracePath)
-      setTracePath([])
-      setIsTracing(false)
-      void onTraceCommit(trace).then((ok) => {
-        if (ok) setCommittedTrace([])
-      })
-      return
-    }
-
-    if (activeTool === 'erase' && isTracing) {
-      const trace = tracePath.map((point) => [point.time, point.freq] as [number, number])
-      onEraseCommit(trace)
-      setTracePath([])
-      setIsTracing(false)
-      return
-    }
-
-    if (activeTool === 'select' && selectionBox) {
-      const box = selectionBox
-      setSelectionBox(null)
-      const start = positionToTimeFreqValue(box.x, box.y)
-      const end = positionToTimeFreqValue(box.x + box.w, box.y + box.h)
-      onSelectBoxCommit({
-        time_start: start.time,
-        time_end: end.time,
-        freq_start: start.freq,
-        freq_end: end.freq,
-      })
-    }
-  }, [
-    preview,
-    activeTool,
-    isTracing,
-    tracePath,
-    onTraceCommit,
-    onEraseCommit,
-    selectionBox,
-    positionToTimeFreqValue,
-    onSelectBoxCommit,
-  ])
+    endInteraction()
+  }, [preview, endInteraction])
 
   const handleStageClick = useCallback(
     (event: KonvaEventObject<MouseEvent>) => {
