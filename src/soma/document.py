@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import logging
 import shutil
-import threading
 import tempfile
+import threading
 import uuid
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
@@ -702,11 +702,11 @@ class SomaDocument:
         if not source_path.exists():
             raise ValueError("Source audio file is missing and cannot be saved.")
 
-        source_info = self._bundle_source_audio(project_path, source_path)
+        source_info = self._bundle_source_audio(project_path, source_path, source_info)
         self.source_info = source_info
         return source_info
 
-    def _bundle_source_audio(self, project_path: Path, source_path: Path) -> SourceInfo:
+    def _bundle_source_audio(self, project_path: Path, source_path: Path, source_info: SourceInfo) -> SourceInfo:
         bundle_dir = project_path.parent / f"{project_path.stem}_assets"
         bundle_dir.mkdir(parents=True, exist_ok=True)
         preferred_name = self.audio_info.name if self.audio_info is not None else source_path.name
@@ -716,9 +716,9 @@ class SomaDocument:
         relative_path = destination.relative_to(project_path.parent).as_posix()
         return SourceInfo(
             file_path=relative_path,
-            sample_rate=self.source_info.sample_rate,
-            duration_sec=self.source_info.duration_sec,
-            md5_hash=self.source_info.md5_hash,
+            sample_rate=source_info.sample_rate,
+            duration_sec=source_info.duration_sec,
+            md5_hash=source_info.md5_hash,
         )
 
     def load_project(self, path: Path) -> dict[str, Any]:
@@ -823,10 +823,7 @@ def _unique_destination(path: Path) -> Path:
 
 
 def _intersects_trace(partial: Partial, trace: list[tuple[float, float]], radius_hz: float) -> bool:
-    for point in partial.points:
-        if _point_in_erase_path(point, trace, radius_hz):
-            return True
-    return False
+    return any(_point_in_erase_path(point, trace, radius_hz) for point in partial.points)
 
 
 def _point_in_erase_path(point: PartialPoint, trace: list[tuple[float, float]], radius_hz: float) -> bool:
