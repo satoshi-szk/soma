@@ -57,8 +57,8 @@ function App() {
     onToolChange: setActiveTool,
     onUndo: partialsHook.undo,
     onRedo: partialsHook.redo,
-    onPlay: () => {
-      if (analysis.analysisState !== 'analyzing') playback.play()
+    onPlayToggle: () => {
+      if (analysis.analysisState !== 'analyzing') playback.togglePlayStop()
     },
     onSave: async () => {
       const success = await analysis.saveProject()
@@ -302,13 +302,14 @@ function App() {
     setShowExportModal(false)
   }
 
-  const handlePlay = () => {
-    if (analysis.analysisState !== 'analyzing') playback.play()
-  }
-
   const handleRewind = () => {
     if (playback.isPlaying) return
     playback.setPlayheadPosition(0)
+  }
+
+  const handlePlayStop = () => {
+    if (!playback.isPlaying && analysis.analysisState === 'analyzing') return
+    void playback.togglePlayStop()
   }
 
   const statusLabel =
@@ -362,16 +363,13 @@ function App() {
           menuOpen={menuOpen}
           activeTool={activeTool}
           isPlaying={playback.isPlaying}
-          isLooping={playback.isLooping}
           mixValue={playback.mixValue}
           playbackTimeLabel={formatDuration(playback.playbackPosition)}
           onMenuToggle={() => setMenuOpen((prev) => !prev)}
           onMenuAction={handleMenuAction}
           onToolChange={setActiveTool}
-          onStop={playback.stop}
-          onPlay={handlePlay}
+          onPlayStop={handlePlayStop}
           onRewind={handleRewind}
-          onLoopToggle={playback.toggleLoop}
           onMixChange={playback.setMixValue}
           menuRef={menuRef}
           playDisabled={analysis.analysisState === 'analyzing'}

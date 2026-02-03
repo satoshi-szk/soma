@@ -5,17 +5,14 @@ export type HeaderToolbarProps = {
   menuOpen: boolean
   activeTool: ToolId
   isPlaying: boolean
-  isLooping: boolean
   mixValue: number
   playbackTimeLabel: string
   playDisabled: boolean
   onMenuToggle: () => void
   onMenuAction: (label: string) => void
   onToolChange: (tool: ToolId) => void
-  onStop: () => void
-  onPlay: () => void
+  onPlayStop: () => void
   onRewind: () => void
-  onLoopToggle: () => void
   onMixChange: (value: number) => void
   menuRef: React.RefObject<HTMLDivElement | null>
 }
@@ -24,17 +21,14 @@ export function HeaderToolbar({
   menuOpen,
   activeTool,
   isPlaying,
-  isLooping,
   mixValue,
   playbackTimeLabel,
   playDisabled,
   onMenuToggle,
   onMenuAction,
   onToolChange,
-  onStop,
-  onPlay,
+  onPlayStop,
   onRewind,
-  onLoopToggle,
   onMixChange,
   menuRef,
 }: HeaderToolbarProps) {
@@ -81,12 +75,6 @@ export function HeaderToolbar({
       <div className="flex flex-wrap items-center gap-3">
         <div className="flex items-center gap-2 rounded-md border border-[var(--panel-border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--ink)]">
           <button
-            onClick={onStop}
-            className="rounded-md border border-transparent px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-[var(--muted)] hover:border-[var(--panel-border)]"
-          >
-            Stop
-          </button>
-          <button
             onClick={onRewind}
             className={`rounded-md px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
               isPlaying
@@ -94,29 +82,23 @@ export function HeaderToolbar({
                 : 'border border-[var(--panel-border)] text-[var(--muted)]'
             }`}
             disabled={isPlaying}
+            aria-label="Rewind"
+            title="Rewind"
           >
-            Rewind
+            ⏮
           </button>
           <button
-            onClick={onPlay}
+            onClick={onPlayStop}
             className={`rounded-md px-4 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
-              playDisabled || isPlaying
+              playDisabled && !isPlaying
                 ? 'bg-[var(--panel-strong)] text-[var(--muted)]'
                 : 'bg-[var(--accent)] text-white'
             }`}
-            disabled={playDisabled || isPlaying}
+            disabled={playDisabled && !isPlaying}
+            aria-label={isPlaying ? 'Stop' : 'Play'}
+            title={isPlaying ? 'Stop' : 'Play'}
           >
-            Play
-          </button>
-          <button
-            onClick={onLoopToggle}
-            className={`rounded-md px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] ${
-              isLooping
-                ? 'bg-[var(--accent-warm)] text-white'
-                : 'border border-[var(--panel-border)] text-[var(--muted)]'
-            }`}
-          >
-            Loop
+            {isPlaying ? '⏹' : '▶'}
           </button>
         </div>
         <div className="flex flex-col">
@@ -149,6 +131,8 @@ export function HeaderToolbar({
                   ? 'bg-[var(--accent)] text-white'
                   : 'text-[var(--muted)] hover:bg-[var(--panel-strong)]'
               }`}
+              aria-label={tool.label}
+              title={tool.label}
             >
               {tool.label}
               <span className="ml-2 font-mono text-[9px] text-white/70">{TOOL_KEYS[tool.id]}</span>

@@ -5,7 +5,6 @@ type ReportError = (context: string, message: string) => void
 
 export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'analyzing' | 'error') {
   const [isPlaying, setIsPlaying] = useState(false)
-  const [isLooping, setIsLooping] = useState(false)
   const [mixValue, setMixValue] = useState(55)
   const [playbackPosition, setPlaybackPosition] = useState(0)
   const playbackStartRef = useRef(0)
@@ -41,7 +40,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       const startPosition = playbackPosition
       const result = await api.play({
         mix_ratio: mixValue / 100,
-        loop: isLooping,
+        loop: false,
         start_position_sec: startPosition,
       })
       if (result.status === 'ok') {
@@ -54,7 +53,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       const message = error instanceof Error ? error.message : 'Unexpected error'
       reportError('Playback', message)
     }
-  }, [analysisState, isPlaying, mixValue, isLooping, playbackPosition, reportError])
+  }, [analysisState, isPlaying, mixValue, playbackPosition, reportError])
 
   const stop = useCallback(async () => {
     const api = isPywebviewApiAvailable() ? pywebviewApi : null
@@ -77,10 +76,6 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
     }
   }, [reportError])
 
-  const toggleLoop = useCallback(() => {
-    setIsLooping((prev) => !prev)
-  }, [])
-
   const setPlayheadPosition = useCallback(
     (positionSec: number) => {
       if (isPlaying) return
@@ -89,15 +84,22 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
     [isPlaying],
   )
 
+  const togglePlayStop = useCallback(async () => {
+    if (isPlaying) {
+      await stop()
+      return
+    }
+    await play()
+  }, [isPlaying, play, stop])
+
   return {
     isPlaying,
-    isLooping,
     mixValue,
     playbackPosition,
     setMixValue,
     play,
     stop,
-    toggleLoop,
+    togglePlayStop,
     setPlayheadPosition,
   }
 }
