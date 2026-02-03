@@ -5,6 +5,7 @@ import type { Partial } from '../../../app/types'
 import { mapColor } from '../../../app/utils'
 import { freqToY, positionToTime, positionToTimeFreq, timeToX } from './coordinate'
 import { useDropAudio } from './useDropAudio'
+import { useRulerMetrics } from './useRulerMetrics'
 import { useTraceSelectionInteraction } from './useTraceSelectionInteraction'
 import { useViewportImageCache } from './useViewportImageCache'
 import type { WorkspaceProps } from '../types'
@@ -114,14 +115,6 @@ export function useWorkspaceController(props: WorkspaceProps) {
   const freqMin = preview?.freq_min ?? settings.freq_min
   const freqMax = preview?.freq_max ?? settings.freq_max
 
-  const pxPerOctave = useMemo(() => {
-    if (!preview) return 0
-    const effectiveHeight = spectrogramAreaHeight - contentOffset.y
-    const totalOctaves = Math.log2(freqMax / freqMin)
-    const basePxPerOctave = effectiveHeight / totalOctaves
-    return basePxPerOctave * zoomY
-  }, [preview, spectrogramAreaHeight, contentOffset.y, freqMax, freqMin, zoomY])
-
   const viewportPositionsByKey = useMemo(() => {
     if (!viewportPreviews || !preview) return new Map<string, { x: number; y: number; width: number; height: number }>()
     const logMin = Math.log(freqMin)
@@ -196,19 +189,6 @@ export function useWorkspaceController(props: WorkspaceProps) {
     onEraseCommit,
     onSelectBoxCommit,
   })
-
-  const freqRulerMarks = useMemo(() => {
-    if (!preview) return []
-    const marks: { freq: number; label: string }[] = []
-    const frequencies = [50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000]
-    for (const freq of frequencies) {
-      if (freq >= freqMin && freq <= freqMax) {
-        const label = freq >= 1000 ? `${freq / 1000}k` : `${freq}`
-        marks.push({ freq, label })
-      }
-    }
-    return marks
-  }, [preview, freqMin, freqMax])
 
   const onStageWheel = useCallback(
     (event: KonvaEventObject<WheelEvent>) => {
@@ -363,16 +343,6 @@ export function useWorkspaceController(props: WorkspaceProps) {
     [positionToTimeFreqValue, scale, pan, onUpdatePartial],
   )
 
-  const maxAmp = useMemo(() => {
-    let max = 0
-    for (const partial of partials) {
-      for (const point of partial.points) {
-        if (point.amp > max) max = point.amp
-      }
-    }
-    return max > 0 ? max : 1
-  }, [partials])
-
   const committedTracePath = useMemo(() => {
     if (committedTrace.length < 2 || !preview) return ''
     return committedTrace
@@ -395,48 +365,21 @@ export function useWorkspaceController(props: WorkspaceProps) {
       .join(' ')
   }, [tracePath, preview, pan, contentOffset, timeToXValue, freqToYValue, scale])
 
-  const ampToLaneY = useCallback(
-    (amp: number) => {
-      const normalized = Math.min(1, Math.max(0, amp / maxAmp))
-      return automationContentHeight - normalized * automationContentHeight
-    },
-    [automationContentHeight, maxAmp],
-  )
-
-  const visibleRange = useMemo(() => {
-    if (!preview) return { start: 0, end: 0 }
-    const start = Math.max(0, ((-pan.x - contentOffset.x) / scale.x / preview.width) * duration)
-    const end = Math.min(
-      duration,
-      ((stageSize.width - pan.x - contentOffset.x) / scale.x / preview.width) * duration,
-    )
-    return { start, end }
-  }, [preview, pan, scale, stageSize, duration, contentOffset])
-
-  const timeMarks = useMemo(() => {
-    if (!preview) return []
-    const range = Math.max(0.001, visibleRange.end - visibleRange.start)
-    const step =
-      range > 120
-        ? 10
-        : range > 60
-          ? 5
-          : range > 30
-            ? 2
-            : range > 10
-              ? 1
-              : range > 5
-                ? 0.5
-                : range > 1
-                  ? 0.25
-                  : 0.1
-    const first = Math.ceil(visibleRange.start / step) * step
-    const marks = []
-    for (let t = first; t <= visibleRange.end; t += step) {
-      marks.push(t)
-    }
-    return marks
-  }, [preview, visibleRange])
+  const { pxPerOctave, freqRulerMarks, timeMarks, ampToLaneY } = useRulerMetrics({
+    preview,
+    freqMin,
+    freqMax,
+    zoomY,
+    spectrogramAreaHeight,
+    contentOffsetX: contentOffset.x,
+    contentOffsetY: contentOffset.y,
+    pan,
+    scale,
+    stageSize,
+    duration,
+    automationContentHeight,
+    partials,
+  })
 
   return {
     containerRef,
