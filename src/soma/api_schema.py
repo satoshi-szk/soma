@@ -76,18 +76,21 @@ class StopPayload(PayloadBase):
 class ExportMpePayload(PayloadBase):
     pitch_bend_range: int = 48
     amplitude_mapping: str = "velocity"
+    amplitude_curve: str = "linear"
     bpm: float = 120.0
 
 
 class ExportMultiTrackMidiPayload(PayloadBase):
     pitch_bend_range: int = 48
     amplitude_mapping: str = "velocity"
+    amplitude_curve: str = "linear"
     bpm: float = 120.0
 
 
 class ExportMonophonicMidiPayload(PayloadBase):
     pitch_bend_range: int = 48
     amplitude_mapping: str = "velocity"
+    amplitude_curve: str = "linear"
     bpm: float = 120.0
 
 
@@ -97,6 +100,8 @@ class ExportAudioPayload(PayloadBase):
     output_type: str = "sine"
     cv_base_freq: float | None = None
     cv_full_scale_volts: float | None = None
+    cv_mode: str = "mono"
+    amplitude_curve: str = "linear"
 
 
 class OpenAudioPathPayload(PayloadBase):

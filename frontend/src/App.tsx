@@ -26,18 +26,22 @@ function App() {
   })
   const [showAnalysisModal, setShowAnalysisModal] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
-  const [exportTab, setExportTab] = useState<'mpe' | 'multitrack' | 'mono' | 'audio'>('mpe')
+  const [exportTab, setExportTab] = useState<'mpe' | 'multitrack' | 'mono' | 'audio' | 'cv'>('mpe')
   const [mpePitchBendRange, setMpePitchBendRange] = useState('48')
   const [multitrackPitchBendRange, setMultitrackPitchBendRange] = useState('48')
   const [monoPitchBendRange, setMonoPitchBendRange] = useState('48')
   const [mpeAmpMapping, setMpeAmpMapping] = useState('cc74')
   const [multitrackAmpMapping, setMultitrackAmpMapping] = useState('cc74')
   const [monoAmpMapping, setMonoAmpMapping] = useState('cc74')
+  const [mpeAmpCurve, setMpeAmpCurve] = useState('linear')
+  const [multitrackAmpCurve, setMultitrackAmpCurve] = useState('linear')
+  const [monoAmpCurve, setMonoAmpCurve] = useState('linear')
+  const [cvAmpCurve, setCvAmpCurve] = useState('linear')
   const [exportSampleRate, setExportSampleRate] = useState('44100')
   const [exportBitDepth, setExportBitDepth] = useState('16')
-  const [exportType, setExportType] = useState<'sine' | 'cv'>('sine')
   const [exportCvBaseFreq, setExportCvBaseFreq] = useState('440')
   const [exportCvFullScaleVolts, setExportCvFullScaleVolts] = useState('10')
+  const [exportCvMode, setExportCvMode] = useState<'mono' | 'poly'>('mono')
 
   const menuRef = useRef<HTMLDivElement | null>(null)
 
@@ -226,6 +230,14 @@ function App() {
       exportTab === 'mpe' ? mpePitchBendRange : exportTab === 'multitrack' ? multitrackPitchBendRange : monoPitchBendRange
     const currentAmpMapping =
       exportTab === 'mpe' ? mpeAmpMapping : exportTab === 'multitrack' ? multitrackAmpMapping : monoAmpMapping
+    const currentAmpCurve =
+      exportTab === 'mpe'
+        ? mpeAmpCurve
+        : exportTab === 'multitrack'
+          ? multitrackAmpCurve
+          : exportTab === 'mono'
+            ? monoAmpCurve
+            : cvAmpCurve
     const pitchBendRange = parseOptionalNumber(currentPitchBendRange)
     const sampleRate = parseOptionalNumber(exportSampleRate)
     const bitDepth = parseOptionalNumber(exportBitDepth)
@@ -235,15 +247,15 @@ function App() {
       reportError('Export', 'Pitch Bend Range is invalid')
       return
     }
-    if (exportTab === 'audio' && !sampleRate.valid) {
+    if ((exportTab === 'audio' || exportTab === 'cv') && !sampleRate.valid) {
       reportError('Export', 'Sample Rate is invalid')
       return
     }
-    if (exportTab === 'audio' && !bitDepth.valid) {
+    if ((exportTab === 'audio' || exportTab === 'cv') && !bitDepth.valid) {
       reportError('Export', 'Bit Depth is invalid')
       return
     }
-    if (exportTab === 'audio' && exportType === 'cv') {
+    if (exportTab === 'cv') {
       if (!cvBaseFreq.valid || (cvBaseFreq.value !== undefined && cvBaseFreq.value <= 0)) {
         reportError('Export', 'CV Base Frequency is invalid')
         return
@@ -255,7 +267,11 @@ function App() {
     }
     try {
       if (exportTab === 'mpe') {
-        const result = await api.export_mpe({ pitch_bend_range: pitchBendRange.value, amplitude_mapping: currentAmpMapping })
+        const result = await api.export_mpe({
+          pitch_bend_range: pitchBendRange.value,
+          amplitude_mapping: currentAmpMapping,
+          amplitude_curve: currentAmpCurve,
+        })
         if (result.status === 'ok') {
           setStatusNote(`Exported ${result.paths.length} MIDI file(s).`)
         } else if (result.status === 'error') {
@@ -265,6 +281,7 @@ function App() {
         const result = await api.export_multitrack_midi({
           pitch_bend_range: pitchBendRange.value,
           amplitude_mapping: currentAmpMapping,
+          amplitude_curve: currentAmpCurve,
         })
         if (result.status === 'ok') {
           setStatusNote(`Exported ${result.paths.length} MIDI file(s).`)
@@ -275,6 +292,7 @@ function App() {
         const result = await api.export_monophonic_midi({
           pitch_bend_range: pitchBendRange.value,
           amplitude_mapping: currentAmpMapping,
+          amplitude_curve: currentAmpCurve,
         })
         if (result.status === 'ok') {
           setStatusNote(`Exported ${result.paths.length} MIDI file(s).`)
@@ -285,12 +303,16 @@ function App() {
         const result = await api.export_audio({
           sample_rate: sampleRate.value,
           bit_depth: bitDepth.value,
-          output_type: exportType,
-          cv_base_freq: exportType === 'cv' ? cvBaseFreq.value : undefined,
-          cv_full_scale_volts: exportType === 'cv' ? cvFullScaleVolts.value : undefined,
+          output_type: exportTab === 'cv' ? 'cv' : 'sine',
+          cv_base_freq: exportTab === 'cv' ? cvBaseFreq.value : undefined,
+          cv_full_scale_volts: exportTab === 'cv' ? cvFullScaleVolts.value : undefined,
+          cv_mode: exportTab === 'cv' ? exportCvMode : undefined,
+          amplitude_curve: exportTab === 'cv' ? currentAmpCurve : undefined,
         })
         if (result.status === 'ok') {
-          setStatusNote(`Exported ${result.path}`)
+          setStatusNote(
+            result.paths && result.paths.length > 1 ? `Exported ${result.paths.length} CV file(s).` : `Exported ${result.path}`
+          )
         } else if (result.status === 'error') {
           reportError('Export', result.message ?? 'Failed to export audio')
         }
@@ -444,11 +466,14 @@ function App() {
             exportTab === 'mpe' ? mpePitchBendRange : exportTab === 'multitrack' ? multitrackPitchBendRange : monoPitchBendRange
           }
           amplitudeMapping={exportTab === 'mpe' ? mpeAmpMapping : exportTab === 'multitrack' ? multitrackAmpMapping : monoAmpMapping}
+          amplitudeCurve={
+            exportTab === 'mpe' ? mpeAmpCurve : exportTab === 'multitrack' ? multitrackAmpCurve : exportTab === 'mono' ? monoAmpCurve : cvAmpCurve
+          }
           exportSampleRate={exportSampleRate}
           exportBitDepth={exportBitDepth}
-          exportType={exportType}
           exportCvBaseFreq={exportCvBaseFreq}
           exportCvFullScaleVolts={exportCvFullScaleVolts}
+          exportCvMode={exportCvMode}
           onTabChange={setExportTab}
           onPitchBendChange={(value) => {
             if (exportTab === 'mpe') {
@@ -468,11 +493,22 @@ function App() {
               setMonoAmpMapping(value)
             }
           }}
+          onAmplitudeCurveChange={(value) => {
+            if (exportTab === 'mpe') {
+              setMpeAmpCurve(value)
+            } else if (exportTab === 'multitrack') {
+              setMultitrackAmpCurve(value)
+            } else if (exportTab === 'mono') {
+              setMonoAmpCurve(value)
+            } else {
+              setCvAmpCurve(value)
+            }
+          }}
           onSampleRateChange={setExportSampleRate}
           onBitDepthChange={setExportBitDepth}
-          onOutputTypeChange={setExportType}
           onCvBaseFreqChange={setExportCvBaseFreq}
           onCvFullScaleVoltsChange={setExportCvFullScaleVolts}
+          onCvModeChange={setExportCvMode}
           onCancel={() => setShowExportModal(false)}
           onExport={handleExport}
         />
