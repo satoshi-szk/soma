@@ -84,6 +84,15 @@ def test_export_audio(tmp_path: Path) -> None:
     assert output.exists()
 
 
+def test_export_audio_peak_normalizes_sine(tmp_path: Path) -> None:
+    buffer = np.array([0.0, 2.0, -2.0], dtype=np.float32)
+    settings = AudioExportSettings(sample_rate=44100, bit_depth=32, output_type="sine")
+    path = tmp_path / "normalized.wav"
+    output = export_audio(path, buffer, settings, 20.0, 20000.0)
+    _rate, data = wavfile.read(output)
+    assert np.allclose(data, [0.0, 0.99, -0.99], atol=1e-6)
+
+
 def test_export_multitrack_midi(tmp_path: Path) -> None:
     partials = [
         Partial(
