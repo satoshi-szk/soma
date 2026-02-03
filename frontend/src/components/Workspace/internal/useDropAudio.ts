@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { DragEvent as ReactDragEvent } from 'react'
+import type { RefObject } from 'react'
 
 type Params = {
+  containerRef: RefObject<HTMLDivElement | null>
   allowDrop: boolean
   onOpenAudioPath: (path: string) => void
   onOpenAudioFile: (file: File) => void
 }
 
-export function useDropAudio({ allowDrop, onOpenAudioPath, onOpenAudioFile }: Params) {
-  const containerRef = useRef<HTMLDivElement | null>(null)
+export function useDropAudio({ containerRef, allowDrop, onOpenAudioPath, onOpenAudioFile }: Params) {
   const [isDragActive, setIsDragActive] = useState(false)
 
   const resolveDroppedPath = useCallback((dataTransfer: DataTransfer | null) => {
@@ -57,7 +58,7 @@ export function useDropAudio({ allowDrop, onOpenAudioPath, onOpenAudioFile }: Pa
       return withPath.composedPath().includes(container)
     }
     return container.contains(event.target as Node)
-  }, [])
+  }, [containerRef])
 
   const handleDragOver = useCallback(
     (event: ReactDragEvent<HTMLDivElement>) => {
@@ -154,7 +155,6 @@ export function useDropAudio({ allowDrop, onOpenAudioPath, onOpenAudioFile }: Pa
   }, [allowDrop, isEventInsideContainer, resolveDroppedPath, onOpenAudioPath, onOpenAudioFile])
 
   return {
-    containerRef,
     isDragActive,
     handleDragOver,
     handleDragEnter,
@@ -162,4 +162,3 @@ export function useDropAudio({ allowDrop, onOpenAudioPath, onOpenAudioFile }: Pa
     handleDrop,
   }
 }
-

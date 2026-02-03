@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import { AUTOMATION_LANE_HEIGHT, RULER_HEIGHT, ZOOM_X_MAX_PX_PER_SEC, ZOOM_X_MIN_PX_PER_SEC } from '../../../app/constants'
 import type { Partial } from '../../../app/types'
 import { mapColor } from '../../../app/utils'
 import { freqToY, positionToTime, positionToTimeFreq, timeToX } from './coordinate'
-import { useDropAudio } from './useDropAudio'
 import { useRulerMetrics } from './useRulerMetrics'
 import { useTraceSelectionInteraction } from './useTraceSelectionInteraction'
 import { useViewportImageCache } from './useViewportImageCache'
@@ -16,7 +15,7 @@ export type EndpointDragParams = {
   position: { x: number; y: number }
 }
 
-export function useWorkspaceController(props: WorkspaceProps) {
+export function useWorkspaceController(props: WorkspaceProps, stageSize: { width: number; height: number }) {
   const {
     preview,
     viewportPreviews,
@@ -31,7 +30,6 @@ export function useWorkspaceController(props: WorkspaceProps) {
     canEditPlayhead,
     onZoomXChange,
     onPanChange,
-    onStageSizeChange,
     onTraceCommit,
     onEraseCommit,
     onSelectBoxCommit,
@@ -39,31 +37,12 @@ export function useWorkspaceController(props: WorkspaceProps) {
     onUpdatePartial,
     onConnectPick,
     onPlayheadChange,
-    allowDrop,
     onCursorMove,
   } = props
 
-  const { containerRef, isDragActive, handleDragOver, handleDragEnter, handleDragLeave, handleDrop } = useDropAudio({
-    allowDrop,
-    onOpenAudioPath: props.onOpenAudioPath,
-    onOpenAudioFile: props.onOpenAudioFile,
-  })
-  const [stageSize, setStageSize] = useState({ width: 900, height: 420 })
   const [draggedPartial, setDraggedPartial] = useState<Partial | null>(null)
   const [hudPosition, setHudPosition] = useState({ x: 16, y: 16 })
   const automationPadding = { top: 18, bottom: 16 }
-
-  useEffect(() => {
-    const observer = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect
-        setStageSize({ width, height })
-        onStageSizeChange({ width, height })
-      }
-    })
-    if (containerRef.current) observer.observe(containerRef.current)
-    return () => observer.disconnect()
-  }, [containerRef, onStageSizeChange])
 
   const previewImage = useMemo(() => {
     if (!preview) return null
@@ -382,9 +361,7 @@ export function useWorkspaceController(props: WorkspaceProps) {
   })
 
   return {
-    containerRef,
     stageSize,
-    isDragActive,
     hudPosition,
     tracePathD,
     committedTracePath,
@@ -407,10 +384,6 @@ export function useWorkspaceController(props: WorkspaceProps) {
     ampToLaneY,
     timeToX: timeToXValue,
     freqToY: freqToYValue,
-    handleDragOver,
-    handleDragEnter,
-    handleDragLeave,
-    handleDrop,
     onStageWheel,
     handleStageMouseDown,
     handleStageMouseMove,

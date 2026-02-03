@@ -1,12 +1,33 @@
+import { useEffect, useRef, useState } from 'react'
 import { SelectionHud } from '../SelectionHud'
 import { WorkspaceCanvas } from './internal/WorkspaceCanvas'
+import { useDropAudio } from './internal/useDropAudio'
 import { useWorkspaceController } from './internal/useWorkspaceController'
 import type { WorkspaceProps } from './types'
 
 export function Workspace(props: WorkspaceProps) {
-  const controller = useWorkspaceController(props)
-  const { preview, selectedInfo, selectedIds, onOpenAudio, analysisState, allowDrop, isSnapping, onPartialMute, onPartialDelete, onZoomInY, onZoomOutY } = props
-  const { containerRef, stageSize, isDragActive, tracePathD, committedTracePath, hudPosition, handleDragOver, handleDragEnter, handleDragLeave, handleDrop, pxPerOctave } = controller
+  const { preview, selectedInfo, selectedIds, onOpenAudio, analysisState, allowDrop, isSnapping, onPartialMute, onPartialDelete, onZoomInY, onZoomOutY, onStageSizeChange } = props
+  const containerRef = useRef<HTMLDivElement | null>(null)
+  const [stageSize, setStageSize] = useState({ width: 900, height: 420 })
+  const { isDragActive, handleDragOver, handleDragEnter, handleDragLeave, handleDrop } = useDropAudio({
+    containerRef,
+    allowDrop,
+    onOpenAudioPath: props.onOpenAudioPath,
+    onOpenAudioFile: props.onOpenAudioFile,
+  })
+  useEffect(() => {
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const { width, height } = entry.contentRect
+        setStageSize({ width, height })
+        onStageSizeChange({ width, height })
+      }
+    })
+    if (containerRef.current) observer.observe(containerRef.current)
+    return () => observer.disconnect()
+  }, [onStageSizeChange])
+  const controller = useWorkspaceController(props, stageSize)
+  const { tracePathD, committedTracePath, hudPosition, pxPerOctave } = controller
 
   return (
     <div
@@ -91,4 +112,3 @@ export function Workspace(props: WorkspaceProps) {
     </div>
   )
 }
-
