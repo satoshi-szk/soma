@@ -192,7 +192,8 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
       const oldScaleX = zoomX
       const direction = event.evt.deltaY > 0 ? -1 : 1
       const newScaleX = direction > 0 ? oldScaleX * scaleBy : oldScaleX / scaleBy
-      const clampedX = Math.min(ZOOM_X_MAX_PX_PER_SEC, Math.max(ZOOM_X_MIN_PX_PER_SEC, newScaleX))
+      const minZoomX = Math.max(ZOOM_X_MIN_PX_PER_SEC, stageSize.width / Math.max(duration, 1e-6))
+      const clampedX = Math.min(ZOOM_X_MAX_PX_PER_SEC, Math.max(minZoomX, newScaleX))
 
       const oldTimeScale = (duration * oldScaleX) / preview.width
       const newTimeScale = (duration * clampedX) / preview.width
@@ -203,7 +204,7 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
       }
       onZoomXChange(clampedX, newPan)
     },
-    [preview, pan, onPanChange, zoomX, duration, onZoomXChange]
+    [preview, pan, onPanChange, zoomX, duration, onZoomXChange, stageSize.width]
   )
 
   const handleStageMouseDown = useCallback(

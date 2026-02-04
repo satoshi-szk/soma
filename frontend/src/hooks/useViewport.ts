@@ -129,8 +129,11 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
   }, [currentPreviewId])
 
   const clampZoomX = useCallback(
-    (value: number) => Math.min(ZOOM_X_MAX_PX_PER_SEC, Math.max(ZOOM_X_MIN_PX_PER_SEC, value)),
-    []
+    (value: number) => {
+      const minZoomX = Math.max(ZOOM_X_MIN_PX_PER_SEC, baseZoomX)
+      return Math.min(ZOOM_X_MAX_PX_PER_SEC, Math.max(minZoomX, value))
+    },
+    [baseZoomX]
   )
 
   const clampZoomY = useCallback(
