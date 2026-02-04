@@ -36,6 +36,9 @@ from soma.synth import AudioPlayer, Synthesizer
 from soma.workers import ComputeManager, SnapParams, ViewportParams
 
 _CWT_PREVIEW_WINDOW_THRESHOLD_SEC = 2.0
+_SNAP_TIME_MARGIN_SEC = 0.25
+_SNAP_FREQ_MARGIN_OCTAVES = 0.5
+_SNAP_QUEUE_MAX_WAITING = 2
 
 
 @dataclass
@@ -107,8 +110,9 @@ class SomaDocument:
         self._viewport_request_id: str | None = None
         self._viewport_preview: SpectrogramPreview | None = None
         self._event_sink = event_sink
-        self._pending_snap_request_id: str | None = None
-        self._pending_snap_trace: list[tuple[float, float]] | None = None
+        self._active_snap_request_id: str | None = None
+        self._active_snap_trace: list[tuple[float, float]] | None = None
+        self._queued_snaps: list[tuple[str, list[tuple[float, float]]]] = []
         self._playback_mode: str | None = None
 
         # バックグラウンド処理用の compute manager を初期化する。
@@ -135,8 +139,9 @@ class SomaDocument:
         self.synth.reset(sample_rate=44100, duration_sec=0.0)
         self._viewport_request_id = None
         self._viewport_preview = None
-        self._pending_snap_request_id = None
-        self._pending_snap_trace = None
+        self._active_snap_request_id = None
+        self._active_snap_trace = None
+        self._queued_snaps = []
         self._playback_mode = None
 
     def _emit(self, payload: dict[str, Any]) -> None:
@@ -222,43 +227,47 @@ class SomaDocument:
         request_id = result.get("request_id")
         error = result.get("error")
 
-        # この結果が現在待機中のリクエストかどうかを確認する。
+        queued_snap: tuple[str, list[tuple[float, float]]] | None = None
         with self._lock:
-            if request_id != self._pending_snap_request_id:
+            if request_id != self._active_snap_request_id:
                 self._logger.debug(
                     "Ignoring stale snap result: %s (current: %s)",
                     request_id[:8] if request_id else "unknown",
-                    self._pending_snap_request_id[:8] if self._pending_snap_request_id else "none",
+                    self._active_snap_request_id[:8] if self._active_snap_request_id else "none",
                 )
                 return
-            self._pending_snap_request_id = None
-            self._pending_snap_trace = None
+            self._active_snap_request_id = None
+            self._active_snap_trace = None
+            if self._queued_snaps:
+                next_request_id, next_trace = self._queued_snaps.pop(0)
+                queued_snap = (next_request_id, list(next_trace))
 
         if error:
             self._logger.error("Snap computation error: %s", error)
             self._emit({"type": "snap_error", "request_id": request_id, "message": error})
-            return
+        else:
+            points_list = result.get("points", [])
+            if len(points_list) < 2:
+                self._logger.warning("Snap returned less than 2 points")
+                self._emit({"type": "snap_error", "request_id": request_id, "message": "Failed to create partial"})
+            else:
+                # list 形式の点を PartialPoint オブジェクトへ変換する。
+                snapped = [PartialPoint(time=p[0], freq=p[1], amp=p[2]) for p in points_list]
 
-        points_list = result.get("points", [])
-        if len(points_list) < 2:
-            self._logger.warning("Snap returned less than 2 points")
-            self._emit({"type": "snap_error", "request_id": request_id, "message": "Failed to create partial"})
-            return
+                # Partial を作成してストアへ追加する。
+                partial_id = str(uuid.uuid4())
+                partial = Partial(id=partial_id, points=snapped, color=generate_bright_color())
+                before = self._snapshot_state(partial_ids=[partial_id])
+                self.store.add(partial)
+                self.synth.apply_partial(partial)
+                after = self._snapshot_state(partial_ids=[partial_id])
+                self.undo_manager.push(HistoryEntry(before=before, after=after))
 
-        # list 形式の点を PartialPoint オブジェクトへ変換する。
-        snapped = [PartialPoint(time=p[0], freq=p[1], amp=p[2]) for p in points_list]
+                self._logger.debug("Snap completed: partial_id=%s points=%d", partial_id[:8], len(snapped))
+                self._emit({"type": "snap_completed", "request_id": request_id, "partial": partial.to_dict()})
 
-        # Partial を作成してストアへ追加する。
-        partial_id = str(uuid.uuid4())
-        partial = Partial(id=partial_id, points=snapped, color=generate_bright_color())
-        before = self._snapshot_state(partial_ids=[partial_id])
-        self.store.add(partial)
-        self.synth.apply_partial(partial)
-        after = self._snapshot_state(partial_ids=[partial_id])
-        self.undo_manager.push(HistoryEntry(before=before, after=after))
-
-        self._logger.debug("Snap completed: partial_id=%s points=%d", partial_id[:8], len(snapped))
-        self._emit({"type": "snap_completed", "request_id": request_id, "partial": partial.to_dict()})
+        if queued_snap is not None:
+            self._start_snap_request(queued_snap[0], queued_snap[1])
 
     def load_audio(
         self,
@@ -307,50 +316,115 @@ class SomaDocument:
             return None
 
         request_id = str(uuid.uuid4())
-        amp_reference = self._ensure_snap_amp_reference() or self._amp_reference
 
+        start_now = False
         with self._lock:
-            self._pending_snap_request_id = request_id
-            self._pending_snap_trace = trace
-
-        params = SnapParams(
-            audio=self.audio_data,
-            sample_rate=self.audio_info.sample_rate,
-            settings=self.settings,
-            trace=trace,
-            amp_reference=amp_reference,
-        )
-
-        self._logger.debug("Starting snap computation: %s", request_id[:8])
-        self._compute_manager.submit_snap(request_id, params)
+            has_active = self._active_snap_request_id is not None
+            if not has_active:
+                start_now = True
+            else:
+                if len(self._queued_snaps) >= _SNAP_QUEUE_MAX_WAITING:
+                    raise RuntimeError("Snap queue is full. Wait for current processing.")
+                self._queued_snaps.append((request_id, list(trace)))
+        if start_now:
+            self._start_snap_request(request_id, trace)
         return request_id
 
-    def _ensure_snap_amp_reference(self) -> float | None:
+    def _start_snap_request(self, request_id: str, trace: list[tuple[float, float]]) -> None:
         with self._lock:
-            if self._snap_amp_reference is not None:
-                return self._snap_amp_reference
             if self.audio_data is None or self.audio_info is None:
-                return None
+                if self._active_snap_request_id == request_id:
+                    self._active_snap_request_id = None
+                    self._active_snap_trace = None
+                self._emit({"type": "snap_error", "request_id": request_id, "message": "No audio loaded."})
+                return
+            self._active_snap_request_id = request_id
+            self._active_snap_trace = list(trace)
             audio = self.audio_data
             sample_rate = self.audio_info.sample_rate
             settings = self.settings
 
+        params = self._build_snap_params(audio, sample_rate, settings, trace)
+        self._logger.debug("Starting snap computation: %s", request_id[:8])
+        self._compute_manager.submit_snap(request_id, params)
+
+    def _build_snap_params(
+        self,
+        audio: np.ndarray,
+        sample_rate: int,
+        settings: AnalysisSettings,
+        trace: list[tuple[float, float]],
+    ) -> SnapParams:
+        start_sec, end_sec = self._snap_time_roi(trace, sample_rate, audio.shape[0])
+        start_index = max(0, int(start_sec * sample_rate))
+        end_index = min(audio.shape[0], int(end_sec * sample_rate))
+        if end_index <= start_index:
+            end_index = min(audio.shape[0], start_index + 1)
+        local_audio = audio[start_index:end_index]
+        time_offset_sec = start_index / float(sample_rate)
+        local_trace = [(time_sec - time_offset_sec, freq_hz) for time_sec, freq_hz in trace]
+        amp_reference = self._estimate_snap_amp_reference_for_trace(local_audio, sample_rate, settings, trace)
+        return SnapParams(
+            audio=local_audio,
+            sample_rate=sample_rate,
+            settings=settings,
+            trace=local_trace,
+            amp_reference=amp_reference,
+            time_offset_sec=time_offset_sec,
+        )
+
+    def _snap_time_roi(
+        self,
+        trace: list[tuple[float, float]],
+        sample_rate: int,
+        total_samples: int,
+    ) -> tuple[float, float]:
+        if not trace:
+            total_duration = total_samples / float(sample_rate)
+            return 0.0, min(total_duration, _SNAP_TIME_MARGIN_SEC)
+        total_duration = total_samples / float(sample_rate)
+        min_time = min(point[0] for point in trace)
+        max_time = max(point[0] for point in trace)
+        start = max(0.0, min_time - _SNAP_TIME_MARGIN_SEC)
+        end = min(total_duration, max_time + _SNAP_TIME_MARGIN_SEC)
+        if end - start < 1.0 / float(sample_rate):
+            end = min(total_duration, start + 1.0 / float(sample_rate))
+        return start, end
+
+    def _estimate_snap_amp_reference_for_trace(
+        self,
+        audio: np.ndarray,
+        sample_rate: int,
+        settings: AnalysisSettings,
+        trace: list[tuple[float, float]],
+    ) -> float | None:
+        if audio.size == 0:
+            return None
+        if trace:
+            min_freq = min(point[1] for point in trace)
+            max_freq = max(point[1] for point in trace)
+        else:
+            min_freq = settings.freq_min
+            max_freq = settings.freq_max
+        freq_scale = 2.0**_SNAP_FREQ_MARGIN_OCTAVES
+        freq_min = max(settings.freq_min, min_freq / freq_scale)
+        freq_max = min(settings.freq_max, max_freq * freq_scale)
+        freq_max = max(freq_max, freq_min * 1.001)
+
+        with self._lock:
+            fallback = self._amp_reference
+
         try:
-            reference = estimate_cwt_amp_reference(
+            return estimate_cwt_amp_reference(
                 audio=audio,
                 sample_rate=sample_rate,
                 settings=settings,
-                freq_min=settings.freq_min,
-                freq_max=settings.freq_max,
+                freq_min=freq_min,
+                freq_max=freq_max,
             )
         except Exception:  # pragma: no cover - keep snapping usable
             self._logger.exception("snap amp reference estimation failed")
-            return None
-
-        with self._lock:
-            if self.audio_data is audio and self._snap_amp_reference is None:
-                self._snap_amp_reference = reference
-            return self._snap_amp_reference
+            return fallback
 
     def erase_path(self, trace: list[tuple[float, float]], radius_hz: float = 40.0) -> list[Partial]:
         if not trace:

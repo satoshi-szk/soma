@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import type { PartialPoint, ToolId } from '../../../app/types'
 
 type SelectionBox = { x: number; y: number; w: number; h: number }
@@ -21,8 +21,10 @@ export function useTraceSelectionInteraction({
 }: Params) {
   const [tracePath, setTracePath] = useState<PartialPoint[]>([])
   const [isTracing, setIsTracing] = useState(false)
-  const [committedTrace, setCommittedTrace] = useState<PartialPoint[]>([])
+  const [committedTraces, setCommittedTraces] = useState<Array<{ id: number; points: PartialPoint[] }>>([])
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null)
+  const traceDirectionRef = useRef<-1 | 0 | 1>(0)
+  const nextTraceIdRef = useRef(1)
 
   const beginAt = useCallback(
     (pointer: { x: number; y: number }) => {
@@ -30,7 +32,7 @@ export function useTraceSelectionInteraction({
         const { time, freq } = positionToTimeFreq(pointer.x, pointer.y)
         setTracePath([{ time, freq, amp: 0.5 }])
         setIsTracing(true)
-        setCommittedTrace([])
+        traceDirectionRef.current = 0
       }
       if (activeTool === 'select') {
         setSelectionBox({ x: pointer.x, y: pointer.y, w: 0, h: 0 })
@@ -42,7 +44,20 @@ export function useTraceSelectionInteraction({
   const moveAt = useCallback(
     (pointer: { x: number; y: number }, cursor: CursorPoint) => {
       if (isTracing) {
-        setTracePath((prev) => [...prev, { ...cursor, amp: 0.5 }])
+        setTracePath((prev) => {
+          if (prev.length === 0) return prev
+          const last = prev[prev.length - 1]
+          const delta = cursor.time - last.time
+          if (Math.abs(delta) <= 1e-9) {
+            return prev
+          }
+          if (traceDirectionRef.current === 0) {
+            traceDirectionRef.current = delta > 0 ? 1 : -1
+          } else if ((delta > 0 ? 1 : -1) !== traceDirectionRef.current) {
+            return prev
+          }
+          return [...prev, { ...cursor, amp: 0.5 }]
+        })
       }
       if (selectionBox) {
         setSelectionBox((prev) =>
@@ -58,11 +73,14 @@ export function useTraceSelectionInteraction({
   const endInteraction = useCallback(() => {
     if (activeTool === 'trace' && isTracing) {
       const trace = tracePath.map((point) => [point.time, point.freq] as [number, number])
-      setCommittedTrace(tracePath)
+      const committedId = nextTraceIdRef.current
+      nextTraceIdRef.current += 1
+      setCommittedTraces((prev) => [...prev, { id: committedId, points: tracePath }])
       setTracePath([])
       setIsTracing(false)
-      void onTraceCommit(trace).then((ok) => {
-        if (ok) setCommittedTrace([])
+      traceDirectionRef.current = 0
+      void onTraceCommit(trace).then(() => {
+        setCommittedTraces((prev) => prev.filter((item) => item.id !== committedId))
       })
       return
     }
@@ -72,6 +90,7 @@ export function useTraceSelectionInteraction({
       onEraseCommit(trace)
       setTracePath([])
       setIsTracing(false)
+      traceDirectionRef.current = 0
       return
     }
 
@@ -100,11 +119,10 @@ export function useTraceSelectionInteraction({
 
   return {
     tracePath,
-    committedTrace,
+    committedTraces,
     selectionBox,
     beginAt,
     moveAt,
     endInteraction,
   }
 }
-

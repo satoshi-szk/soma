@@ -57,6 +57,7 @@ class SnapParams:
     settings: AnalysisSettings
     trace: list[tuple[float, float]]
     amp_reference: float | None = None
+    time_offset_sec: float = 0.0
 
 
 @dataclass
@@ -192,6 +193,15 @@ def _snap_worker_fn(
             trace=params.trace,
             amp_reference=params.amp_reference,
         )
+        if params.time_offset_sec:
+            points = [
+                PartialPoint(
+                    time=point.time + params.time_offset_sec,
+                    freq=point.freq,
+                    amp=point.amp,
+                )
+                for point in points
+            ]
 
         result_queue.put(
             {

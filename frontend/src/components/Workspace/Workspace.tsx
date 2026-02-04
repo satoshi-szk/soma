@@ -27,7 +27,7 @@ export function Workspace(props: WorkspaceProps) {
     return () => observer.disconnect()
   }, [onStageSizeChange])
   const controller = useWorkspaceController(props, stageSize)
-  const { tracePathD, committedTracePath, hudPosition, pxPerOctave } = controller
+  const { tracePathD, committedTracePaths, hudPosition, pxPerOctave } = controller
 
   return (
     <div
@@ -41,7 +41,7 @@ export function Workspace(props: WorkspaceProps) {
       onDrop={handleDrop}
     >
       <WorkspaceCanvas controller={controller} />
-      {tracePathD || committedTracePath ? (
+      {tracePathD || committedTracePaths.length > 0 ? (
         <svg
           className="pointer-events-none absolute inset-4"
           width={stageSize.width}
@@ -49,13 +49,16 @@ export function Workspace(props: WorkspaceProps) {
           viewBox={`0 0 ${stageSize.width} ${stageSize.height}`}
         >
           {tracePathD ? <path d={tracePathD} fill="none" stroke="#7feeff" strokeWidth={3.75} /> : null}
-          <path
-            d={committedTracePath}
-            fill="none"
-            stroke={isSnapping ? '#7feeff' : 'rgba(245, 159, 139, 0.5)'}
-            strokeWidth={isSnapping ? 3.75 : 1.25}
-            className={isSnapping ? 'animate-pulse' : ''}
-          />
+          {committedTracePaths.map((path) => (
+            <path
+              key={path}
+              d={path}
+              fill="none"
+              stroke={isSnapping ? '#7feeff' : 'rgba(245, 159, 139, 0.5)'}
+              strokeWidth={isSnapping ? 3.75 : 1.25}
+              className={isSnapping ? 'animate-pulse' : ''}
+            />
+          ))}
         </svg>
       ) : null}
       {!preview ? (
