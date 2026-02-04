@@ -6,7 +6,7 @@ import { useWorkspaceController } from './internal/useWorkspaceController'
 import type { WorkspaceProps } from './types'
 
 export function Workspace(props: WorkspaceProps) {
-  const { preview, selectedInfo, selectedIds, onOpenAudio, analysisState, allowDrop, isSnapping, onPartialMute, onPartialDelete, onZoomInY, onZoomOutY, onStageSizeChange } = props
+  const { preview, selectedInfo, selectedIds, onOpenAudio, analysisState, allowDrop, isSnapping, onPartialMute, onPartialDelete, onZoomInY, onZoomOutY, onStageSizeChange, spectrogramDim } = props
   const containerRef = useRef<HTMLDivElement | null>(null)
   const [stageSize, setStageSize] = useState({ width: 900, height: 420 })
   const { isDragActive, handleDragOver, handleDragEnter, handleDragLeave, handleDrop } = useDropAudio({
@@ -40,7 +40,7 @@ export function Workspace(props: WorkspaceProps) {
       onDragLeave={handleDragLeave}
       onDrop={handleDrop}
     >
-      <WorkspaceCanvas controller={controller} />
+      <WorkspaceCanvas controller={controller} spectrogramDim={spectrogramDim} />
       {tracePathD || committedTracePaths.length > 0 ? (
         <svg
           className="pointer-events-none absolute inset-4"

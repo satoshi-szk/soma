@@ -19,6 +19,7 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [activeTool, setActiveTool] = useState<ToolId>('trace')
   const [statusNote, setStatusNote] = useState<string | null>(null)
+  const [spectrogramDim, setSpectrogramDim] = useState(0)
   const [cursorInfo, setCursorInfo] = useState<{ time: number; freq: number; amp: number | null }>({
     time: 0,
     freq: 440,
@@ -449,12 +450,21 @@ function App() {
                 onPartialDelete={handlePartialDelete}
                 onZoomInY={viewport.zoomInY}
                 onZoomOutY={viewport.zoomOutY}
+                spectrogramDim={spectrogramDim}
               />
             </div>
           </section>
         </main>
 
-        <StatusBar statusLabel={statusLabel} cursorLabel={cursorLabel} statusNote={statusNote} apiBadge={apiBadge} />
+        <StatusBar
+          statusLabel={statusLabel}
+          cursorLabel={cursorLabel}
+          statusNote={statusNote}
+          apiBadge={apiBadge}
+          spectrogramDim={spectrogramDim}
+          spectrogramDimEnabled={!!analysis.preview}
+          onSpectrogramDimChange={setSpectrogramDim}
+        />
       </div>
 
       {showAnalysisModal ? (

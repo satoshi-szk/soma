@@ -17,9 +17,10 @@ const hexToRgba = (hex: string, alpha: number) => {
 
 type Props = {
   controller: WorkspaceController
+  spectrogramDim: number
 }
 
-export function WorkspaceCanvas({ controller }: Props) {
+export function WorkspaceCanvas({ controller, spectrogramDim }: Props) {
   const {
     stageSize,
     pan,
@@ -88,13 +89,20 @@ export function WorkspaceCanvas({ controller }: Props) {
             : null}
         </Group>
       </Layer>
+      <Layer listening={false}>
+        {preview && spectrogramDim > 0 ? (
+          <Group x={pan.x + contentOffset.x} y={pan.y + contentOffset.y} scaleX={scale.x} scaleY={scale.y}>
+            <Rect width={preview.width} height={preview.height} fill="rgba(0, 0, 0, 1)" opacity={spectrogramDim} />
+          </Group>
+        ) : null}
+      </Layer>
       <Layer>
         <Group x={pan.x + contentOffset.x} y={pan.y + contentOffset.y} scaleX={scale.x} scaleY={scale.y}>
           {unselectedPartials.map((partial) => (
             <Line
               key={partial.id}
               points={partial.points.flatMap((point) => [timeToX(point.time), freqToY(point.freq)])}
-              stroke={hexToRgba(partial.color, partial.is_muted ? 0.25 : 0.6)}
+              stroke={hexToRgba(partial.color, partial.is_muted ? 0.25 : 1)}
               strokeWidth={3}
               strokeScaleEnabled={false}
               lineCap="round"
@@ -106,7 +114,7 @@ export function WorkspaceCanvas({ controller }: Props) {
             <Line
               key={partial.id}
               points={partial.points.flatMap((point) => [timeToX(point.time), freqToY(point.freq)])}
-              stroke={hexToRgba(partial.color, partial.is_muted ? 0.35 : 0.95)}
+              stroke={hexToRgba(partial.color, partial.is_muted ? 0.35 : 1)}
               strokeWidth={3}
               strokeScaleEnabled={false}
               lineCap="round"
@@ -213,7 +221,7 @@ export function WorkspaceCanvas({ controller }: Props) {
             <Line
               key={`amp-${partial.id}`}
               points={partial.points.flatMap((point) => [timeToX(point.time), ampToLaneY(point.amp)])}
-              stroke={hexToRgba(partial.color, partial.is_muted ? 0.25 : 0.85)}
+              stroke={hexToRgba(partial.color, partial.is_muted ? 0.25 : 1)}
               strokeWidth={3}
               strokeScaleEnabled={false}
             />
