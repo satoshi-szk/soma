@@ -27,7 +27,7 @@ export function StatusBar({
         {cursorLabel}
       </div>
       <div className="flex items-center rounded-sm border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2 font-mono text-[9px]">
-        Mem: 42MB <span className="ml-2 uppercase tracking-[0.18em] text-[var(--muted)]">{apiBadge}</span>
+        <span className="uppercase tracking-[0.18em] text-[var(--muted)]">{apiBadge}</span>
       </div>
       <div className="flex items-center rounded-sm border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2 font-mono text-[9px]">
         <label className="flex w-full items-center gap-2 uppercase tracking-[0.16em]">

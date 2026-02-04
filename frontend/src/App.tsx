@@ -357,10 +357,9 @@ function App() {
   }, [partialsHook.selection, partialsHook.partials])
 
   const cursorLabel = useMemo(() => {
-    if (!analysis.preview) return 'T: -- | F: -- | A: --dB'
+    if (!analysis.preview) return 'T: -- | F: --'
     const note = formatNoteWithCents(cursorInfo.freq)
-    const ampLabel = cursorInfo.amp === null ? '--dB' : `${cursorInfo.amp.toFixed(1)}dB`
-    return `T: ${cursorInfo.time.toFixed(2)}s | F: ${cursorInfo.freq.toFixed(1)}Hz (${note}) | A: ${ampLabel}`
+    return `T: ${cursorInfo.time.toFixed(2)}s | F: ${cursorInfo.freq.toFixed(1)}Hz (${note})`
   }, [cursorInfo, analysis.preview])
 
   const timeScaleLabel = useMemo(() => {
