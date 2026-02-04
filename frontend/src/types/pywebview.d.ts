@@ -26,6 +26,9 @@ declare global {
         undo: () => Promise<unknown>
         redo: () => Promise<unknown>
         play: (payload: unknown) => Promise<unknown>
+        start_harmonic_probe: (payload: unknown) => Promise<unknown>
+        update_harmonic_probe: (payload: unknown) => Promise<unknown>
+        stop_harmonic_probe: () => Promise<unknown>
         pause: () => Promise<unknown>
         stop: () => Promise<unknown>
         playback_state: () => Promise<unknown>

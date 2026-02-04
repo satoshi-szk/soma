@@ -2,7 +2,7 @@ import { useCallback, useMemo, useState } from 'react'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import { AUTOMATION_LANE_HEIGHT, RULER_HEIGHT, ZOOM_X_MAX_PX_PER_SEC, ZOOM_X_MIN_PX_PER_SEC } from '../../../app/constants'
 import type { Partial } from '../../../app/types'
-import { mapColor } from '../../../app/utils'
+import { formatNoteWithCents, mapColor } from '../../../app/utils'
 import { freqToY, positionToTime, positionToTimeFreq, timeToX } from './coordinate'
 import { useRulerMetrics } from './useRulerMetrics'
 import { useTraceSelectionInteraction } from './useTraceSelectionInteraction'
@@ -360,6 +360,36 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
     partials,
   })
 
+  const playheadIntersections = useMemo(() => {
+    if (!preview) return []
+    const x = pan.x + contentOffset.x + timeToXValue(playbackPosition) * scale.x
+    return partials
+      .map((partial) => {
+        const sample = samplePartialAtTime(partial, playbackPosition)
+        if (!sample) return null
+        const y = pan.y + contentOffset.y + freqToYValue(sample.freq) * scale.y
+        if (y < rulerHeight || y > spectrogramAreaHeight) return null
+        return {
+          id: partial.id,
+          x,
+          y,
+          text: formatNoteWithCents(sample.freq),
+        }
+      })
+      .filter((item): item is { id: string; x: number; y: number; text: string } => item !== null)
+  }, [
+    preview,
+    pan,
+    contentOffset,
+    timeToXValue,
+    playbackPosition,
+    scale,
+    partials,
+    freqToYValue,
+    rulerHeight,
+    spectrogramAreaHeight,
+  ])
+
   return {
     stageSize,
     hudPosition,
@@ -392,9 +422,30 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
     handleEndpointDragMove,
     handleEndpointDragEnd,
     playbackPosition,
+    playheadIntersections,
     pan,
     preview,
     buildViewportKey,
     partials,
   }
+}
+
+const samplePartialAtTime = (partial: Partial, timeSec: number): { freq: number; amp: number } | null => {
+  const points = [...partial.points].sort((a, b) => a.time - b.time)
+  if (points.length < 2) return null
+  if (timeSec < points[0].time || timeSec > points[points.length - 1].time) return null
+  for (let idx = 0; idx < points.length - 1; idx += 1) {
+    const start = points[idx]
+    const end = points[idx + 1]
+    if (timeSec < start.time || timeSec > end.time) continue
+    const dt = end.time - start.time
+    if (dt <= 1e-9) return { freq: end.freq, amp: end.amp }
+    const ratio = (timeSec - start.time) / dt
+    return {
+      freq: start.freq + (end.freq - start.freq) * ratio,
+      amp: start.amp + (end.amp - start.amp) * ratio,
+    }
+  }
+  const tail = points[points.length - 1]
+  return { freq: tail.freq, amp: tail.amp }
 }

@@ -73,6 +73,10 @@ class StopPayload(PayloadBase):
     return_position_sec: float | None = None
 
 
+class HarmonicProbePayload(PayloadBase):
+    time_sec: float
+
+
 class ExportMpePayload(PayloadBase):
     pitch_bend_range: int = 48
     amplitude_mapping: str = "velocity"

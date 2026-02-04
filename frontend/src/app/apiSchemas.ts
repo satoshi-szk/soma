@@ -73,6 +73,7 @@ const updateSettingsResponseSchema = z.union([
 const statusResponseSchema = z.object({
   status: z.literal('ok'),
   is_playing: z.boolean(),
+  is_probe_playing: z.boolean(),
   is_resynthesizing: z.boolean(),
   position: z.number(),
 })
@@ -155,6 +156,15 @@ export const apiSchemas = {
     }),
     response: z.union([okStatusSchema, errorStatusSchema]),
   },
+  start_harmonic_probe: {
+    payload: z.object({ time_sec: z.number() }),
+    response: z.union([okStatusSchema, errorStatusSchema]),
+  },
+  update_harmonic_probe: {
+    payload: z.object({ time_sec: z.number() }),
+    response: z.union([okStatusSchema, errorStatusSchema]),
+  },
+  stop_harmonic_probe: { response: z.union([okStatusSchema, errorStatusSchema]) },
   pause: { response: z.union([okStatusSchema, errorStatusSchema]) },
   stop: {
     payload: z.object({ return_position_sec: z.number().optional() }),

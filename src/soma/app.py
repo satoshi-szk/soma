@@ -24,6 +24,7 @@ from soma.api_schema import (
     ExportMonophonicMidiPayload,
     ExportMpePayload,
     ExportMultiTrackMidiPayload,
+    HarmonicProbePayload,
     HitTestPayload,
     MergePartialsPayload,
     OpenAudioDataPayload,
@@ -491,6 +492,40 @@ class SomaApi:
             logger.exception("play failed")
             return {"status": "error", "message": str(exc)}
 
+    def start_harmonic_probe(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            parsed = _validated_payload(HarmonicProbePayload, payload, "start_harmonic_probe")
+            if isinstance(parsed, dict):
+                return parsed
+            started = self._doc.start_harmonic_probe(parsed.time_sec)
+            if not started:
+                return {"status": "error", "message": "Failed to start harmonic probe."}
+            return {"status": "ok"}
+        except Exception as exc:  # pragma: no cover - surface errors to UI
+            logger.exception("start_harmonic_probe failed")
+            return {"status": "error", "message": str(exc)}
+
+    def update_harmonic_probe(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            parsed = _validated_payload(HarmonicProbePayload, payload, "update_harmonic_probe")
+            if isinstance(parsed, dict):
+                return parsed
+            updated = self._doc.update_harmonic_probe(parsed.time_sec)
+            if not updated:
+                return {"status": "error", "message": "Failed to update harmonic probe."}
+            return {"status": "ok"}
+        except Exception as exc:  # pragma: no cover - surface errors to UI
+            logger.exception("update_harmonic_probe failed")
+            return {"status": "error", "message": str(exc)}
+
+    def stop_harmonic_probe(self) -> dict[str, Any]:
+        try:
+            self._doc.stop_harmonic_probe()
+            return {"status": "ok"}
+        except Exception as exc:  # pragma: no cover - surface errors to UI
+            logger.exception("stop_harmonic_probe failed")
+            return {"status": "error", "message": str(exc)}
+
     def pause(self) -> dict[str, Any]:
         try:
             self._doc.pause()
@@ -548,6 +583,7 @@ class SomaApi:
         return {
             "status": "ok",
             "is_playing": self._doc.is_playing(),
+            "is_probe_playing": self._doc.is_probe_playing(),
             "is_resynthesizing": self._doc.is_resynthesizing(),
             "position": self._doc.playback_position(),
         }

@@ -109,6 +109,7 @@ class SomaDocument:
         self._event_sink = event_sink
         self._pending_snap_request_id: str | None = None
         self._pending_snap_trace: list[tuple[float, float]] | None = None
+        self._playback_mode: str | None = None
 
         # バックグラウンド処理用の compute manager を初期化する。
         self._compute_manager = ComputeManager(
@@ -136,6 +137,7 @@ class SomaDocument:
         self._viewport_preview = None
         self._pending_snap_request_id = None
         self._pending_snap_trace = None
+        self._playback_mode = None
 
     def _emit(self, payload: dict[str, Any]) -> None:
         if self._event_sink is None:
@@ -283,6 +285,7 @@ class SomaDocument:
         self.preview_error = None
         self.synth.reset(sample_rate=info.sample_rate, duration_sec=info.duration_sec)
         self.player.load(self._mix_buffer(0.5), info.sample_rate)
+        self._playback_mode = None
         return info
 
     def set_settings(self, settings: AnalysisSettings) -> SpectrogramPreview | None:
@@ -471,6 +474,7 @@ class SomaDocument:
         with self._lock:
             self._is_resynthesizing = False
         self.player.load(self._mix_buffer(0.5), self.audio_info.sample_rate)
+        self._playback_mode = None
 
     def start_preview_async(self) -> None:
         """Generate overview preview using STFT only (fast, for base layer).
@@ -617,20 +621,54 @@ class SomaDocument:
             return
         if self.is_resynthesizing():
             return
+        if self.player.is_playing():
+            self.player.stop(reset_position_sec=None)
+            self._playback_mode = None
         self.player.load(self._mix_buffer(mix_ratio), self.audio_info.sample_rate)
         self.player.play(loop=loop, start_position_sec=start_position_sec or 0.0)
+        self._playback_mode = "normal"
+
+    def start_harmonic_probe(self, time_sec: float) -> bool:
+        if self.audio_info is None:
+            return False
+        freqs, amps = self._harmonic_probe_tones(time_sec)
+        if self.player.is_playing():
+            self.player.stop(reset_position_sec=None)
+        started = self.player.play_probe(freqs, amps)
+        if started:
+            self._playback_mode = "probe"
+        return started
+
+    def update_harmonic_probe(self, time_sec: float) -> bool:
+        if self._playback_mode != "probe":
+            return False
+        freqs, amps = self._harmonic_probe_tones(time_sec)
+        return self.player.update_probe(freqs, amps)
+
+    def stop_harmonic_probe(self) -> None:
+        if self._playback_mode != "probe":
+            return
+        stopped = self.player.stop_probe()
+        if not stopped:
+            self.player.stop(reset_position_sec=None)
+        self._playback_mode = None
 
     def pause(self) -> None:
         self.player.pause()
+        self._playback_mode = None
 
     def stop(self, return_position_sec: float | None = 0.0) -> None:
         self.player.stop(reset_position_sec=return_position_sec)
+        self._playback_mode = None
 
     def playback_position(self) -> float:
         return self.player.position_sec()
 
     def is_playing(self) -> bool:
-        return self.player.is_playing()
+        return self._playback_mode == "normal" and self.player.is_playing()
+
+    def is_probe_playing(self) -> bool:
+        return self._playback_mode == "probe" and self.player.is_playing()
 
     def render_cv_buffers(self, sample_rate: int) -> tuple[np.ndarray, np.ndarray, float, float]:
         if self.audio_info is None:
@@ -797,6 +835,24 @@ class SomaDocument:
             source_info=self.source_info,
         )
 
+    def _harmonic_probe_tones(self, time_sec: float) -> tuple[np.ndarray, np.ndarray]:
+        freqs: list[float] = []
+        amps: list[float] = []
+        for partial in self.store.all():
+            if partial.is_muted:
+                continue
+            sample = _partial_sample_at_time(partial, time_sec)
+            if sample is None:
+                continue
+            freq, amp = sample
+            if freq <= 0.0 or amp <= 0.0:
+                continue
+            freqs.append(freq)
+            amps.append(amp)
+        if not freqs:
+            return np.array([], dtype=np.float64), np.array([], dtype=np.float64)
+        return np.asarray(freqs, dtype=np.float64), np.asarray(amps, dtype=np.float64)
+
 
 def _ensure_soma_extension(path: Path) -> Path:
     if path.name.lower().endswith(".soma"):
@@ -822,6 +878,29 @@ def _unique_destination(path: Path) -> Path:
         if not candidate.exists():
             return candidate
         index += 1
+
+
+def _partial_sample_at_time(partial: Partial, time_sec: float) -> tuple[float, float] | None:
+    points = partial.sorted_points()
+    if len(points) < 2:
+        return None
+    if time_sec < points[0].time or time_sec > points[-1].time:
+        return None
+    for idx in range(len(points) - 1):
+        start = points[idx]
+        end = points[idx + 1]
+        if end.time < start.time:
+            continue
+        if time_sec < start.time or time_sec > end.time:
+            continue
+        dt = end.time - start.time
+        if dt <= 1e-9:
+            return end.freq, end.amp
+        ratio = (time_sec - start.time) / dt
+        freq = start.freq + (end.freq - start.freq) * ratio
+        amp = start.amp + (end.amp - start.amp) * ratio
+        return float(freq), float(amp)
+    return float(points[-1].freq), float(points[-1].amp)
 
 
 def _intersects_trace(partial: Partial, trace: list[tuple[float, float]], radius_hz: float) -> bool:

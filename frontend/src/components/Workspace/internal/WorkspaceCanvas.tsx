@@ -39,6 +39,7 @@ export function WorkspaceCanvas({ controller }: Props) {
     automationContentTop,
     rulerWidth,
     partials,
+    playheadIntersections,
     freqRulerMarks,
     timeMarks,
     timeToX,
@@ -148,9 +149,19 @@ export function WorkspaceCanvas({ controller }: Props) {
             ]}
             stroke="rgba(247, 245, 242, 0.8)"
             strokeWidth={1}
-            dash={[6, 4]}
           />
         ) : null}
+        {playheadIntersections.map((intersection) => (
+          <Text
+            key={`playhead-note-${intersection.id}`}
+            x={intersection.x + 6}
+            y={intersection.y - 6}
+            text={intersection.text}
+            fontSize={10}
+            fill="rgba(247, 245, 242, 0.9)"
+            fontFamily="monospace"
+          />
+        ))}
       </Layer>
       <Layer>
         <Rect x={0} y={0} width={stageSize.width} height={rulerHeight} fill="rgba(12, 18, 30, 0.7)" />
@@ -223,4 +234,3 @@ export function WorkspaceCanvas({ controller }: Props) {
     </Stage>
   )
 }
-
