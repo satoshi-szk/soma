@@ -223,7 +223,7 @@ export function WorkspaceCanvas({ controller, spectrogramDim }: Props) {
                 y={2}
                 text={`${time.toFixed(time < 1 ? 2 : 1)}s`}
                 fontSize={9}
-                fill="rgba(111, 208, 243, 0.75)"
+                fill="rgba(245, 247, 250, 1)"
                 fontFamily="monospace"
               />
             </Group>
@@ -241,8 +241,8 @@ export function WorkspaceCanvas({ controller, spectrogramDim }: Props) {
           x={12}
           y={automationTop + 6}
           text="Partial Amplitude"
-          fontSize={9}
-          fill="rgba(111, 208, 243, 0.7)"
+          fontSize={10}
+          fill="rgba(245, 247, 250, 1)"
           fontFamily="monospace"
         />
         <Group x={pan.x + contentOffset.x} y={automationContentTop} scaleX={scale.x}>
@@ -281,7 +281,7 @@ export function WorkspaceCanvas({ controller, spectrogramDim }: Props) {
                   y={y}
                   text={mark.label}
                   fontSize={10}
-                  fill="rgba(111, 208, 243, 0.8)"
+                  fill="rgba(245, 247, 250, 1)"
                   fontFamily="monospace"
                   scaleY={1 / scale.y}
                   offsetY={5}

@@ -100,7 +100,7 @@ export function Workspace(props: WorkspaceProps) {
           >
             <span className="text-sm font-bold">+</span>
           </button>
-          <div className="flex h-5 items-center justify-center text-[9px] text-[var(--muted)] font-mono whitespace-nowrap">
+          <div className="flex h-5 items-center justify-center rounded-sm bg-[rgba(8,12,18,0.72)] px-2 text-[9px] text-[rgba(245,247,250,0.98)] font-mono whitespace-nowrap">
             {pxPerOctave.toFixed(0)} px/oct
           </div>
           <button
