@@ -42,6 +42,7 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
 
   const [draggedPartial, setDraggedPartial] = useState<Partial | null>(null)
   const [hudPosition, setHudPosition] = useState({ x: 16, y: 16 })
+  const [hoverPointer, setHoverPointer] = useState<{ x: number; y: number } | null>(null)
   const automationPadding = { top: 18, bottom: 16 }
 
   const previewImage = useMemo(() => {
@@ -225,6 +226,7 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
       if (!stage) return
       const pointer = stage.getPointerPosition()
       if (!pointer) return
+      setHoverPointer(pointer)
       if (pointer.y < rulerHeight || pointer.y > spectrogramAreaHeight) return
 
       const cursor = positionToTimeFreqValue(pointer.x, pointer.y)
@@ -249,6 +251,11 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
     if (!preview) return
     endInteraction()
   }, [preview, endInteraction])
+
+  const handleStageMouseLeave = useCallback(() => {
+    setHoverPointer(null)
+    endInteraction()
+  }, [endInteraction])
 
   const handleStageClick = useCallback(
     (event: KonvaEventObject<MouseEvent>) => {
@@ -395,6 +402,59 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
     spectrogramAreaHeight,
   ])
 
+  const showResolutionAssist = zoomX / 1000 >= 0.8
+
+  const hoverResolutionCell = useMemo(() => {
+    if (!preview || !hoverPointer) return null
+    if (hoverPointer.y < rulerHeight || hoverPointer.y > spectrogramAreaHeight) return null
+    if (freqMin <= 0 || freqMax <= freqMin) return null
+    if (!showResolutionAssist) return null
+
+    const timeResolutionSec = Math.max(0.001, settings.time_resolution_ms / 1000)
+    const binsPerOctave = Math.max(1, Math.round(settings.bins_per_octave))
+    const cursor = positionToTimeFreqValue(hoverPointer.x, hoverPointer.y)
+
+    const clampedTime = Math.max(0, Math.min(duration, cursor.time))
+    const timeStart = Math.floor(clampedTime / timeResolutionSec) * timeResolutionSec
+    const timeEnd = Math.min(duration, timeStart + timeResolutionSec)
+
+    const logMin = Math.log2(freqMin)
+    const logCursor = Math.log2(Math.max(freqMin, Math.min(freqMax, cursor.freq)))
+    const binIndex = Math.floor((logCursor - logMin) * binsPerOctave)
+    const freqStart = Math.max(freqMin, 2 ** (logMin + binIndex / binsPerOctave))
+    const freqEnd = Math.min(freqMax, 2 ** (logMin + (binIndex + 1) / binsPerOctave))
+
+    const x0 = pan.x + contentOffset.x + timeToXValue(timeStart) * scale.x
+    const x1 = pan.x + contentOffset.x + timeToXValue(timeEnd) * scale.x
+    const y0 = pan.y + contentOffset.y + freqToYValue(freqStart) * scale.y
+    const y1 = pan.y + contentOffset.y + freqToYValue(freqEnd) * scale.y
+
+    const rectX = Math.min(x0, x1)
+    const rectY = Math.min(y0, y1)
+    const rectW = Math.abs(x1 - x0)
+    const rectH = Math.abs(y1 - y0)
+
+    if (rectW < 1 || rectH < 1) return null
+    return { x: rectX, y: rectY, w: rectW, h: rectH }
+  }, [
+    preview,
+    hoverPointer,
+    rulerHeight,
+    spectrogramAreaHeight,
+    freqMin,
+    freqMax,
+    settings.time_resolution_ms,
+    settings.bins_per_octave,
+    showResolutionAssist,
+    positionToTimeFreqValue,
+    duration,
+    pan,
+    contentOffset,
+    timeToXValue,
+    scale,
+    freqToYValue,
+  ])
+
   return {
     stageSize,
     hudPosition,
@@ -423,6 +483,7 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
     handleStageMouseDown,
     handleStageMouseMove,
     handleStageMouseUp,
+    handleStageMouseLeave,
     handleStageClick,
     handleEndpointDragMove,
     handleEndpointDragEnd,
@@ -432,6 +493,8 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
     preview,
     buildViewportKey,
     partials,
+    hoverResolutionCell,
+    showResolutionAssist,
   }
 }
 

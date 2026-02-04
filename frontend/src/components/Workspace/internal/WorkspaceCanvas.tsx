@@ -40,6 +40,7 @@ export function WorkspaceCanvas({ controller, spectrogramDim }: Props) {
     automationContentTop,
     rulerWidth,
     partials,
+    showResolutionAssist,
     playheadIntersections,
     freqRulerMarks,
     timeMarks,
@@ -50,9 +51,11 @@ export function WorkspaceCanvas({ controller, spectrogramDim }: Props) {
     handleStageMouseDown,
     handleStageMouseMove,
     handleStageMouseUp,
+    handleStageMouseLeave,
     handleStageClick,
     handleEndpointDragMove,
     handleEndpointDragEnd,
+    hoverResolutionCell,
   } = controller
 
   return (
@@ -63,6 +66,7 @@ export function WorkspaceCanvas({ controller, spectrogramDim }: Props) {
       onMouseDown={handleStageMouseDown}
       onMouseMove={handleStageMouseMove}
       onMouseUp={handleStageMouseUp}
+      onMouseLeave={handleStageMouseLeave}
       onClick={handleStageClick}
     >
       <Layer>
@@ -144,8 +148,33 @@ export function WorkspaceCanvas({ controller, spectrogramDim }: Props) {
             </>
           ) : null}
         </Group>
+        {showResolutionAssist
+          ? partials.map((partial) =>
+              partial.points.map((point, index) => (
+                <Circle
+                  key={`point-${partial.id}-${index}`}
+                  x={pan.x + contentOffset.x + timeToX(point.time) * scale.x}
+                  y={pan.y + contentOffset.y + freqToY(point.freq) * scale.y}
+                  radius={3}
+                  fill="rgba(245, 247, 250, 0.95)"
+                  listening={false}
+                />
+              )),
+            )
+          : null}
         {selectionBox ? (
           <Rect x={selectionBox.x} y={selectionBox.y} width={selectionBox.w} height={selectionBox.h} stroke="#f59f8b" dash={[4, 4]} />
+        ) : null}
+        {hoverResolutionCell ? (
+          <Rect
+            x={hoverResolutionCell.x}
+            y={hoverResolutionCell.y}
+            width={hoverResolutionCell.w}
+            height={hoverResolutionCell.h}
+            stroke="rgba(111, 208, 243, 0.9)"
+            strokeWidth={1}
+            listening={false}
+          />
         ) : null}
         {preview ? (
           <Line
@@ -227,6 +256,20 @@ export function WorkspaceCanvas({ controller, spectrogramDim }: Props) {
             />
           ))}
         </Group>
+        {showResolutionAssist
+          ? partials.map((partial) =>
+              partial.points.map((point, index) => (
+                <Circle
+                  key={`amp-point-${partial.id}-${index}`}
+                  x={pan.x + contentOffset.x + timeToX(point.time) * scale.x}
+                  y={automationContentTop + ampToLaneY(point.amp)}
+                  radius={3}
+                  fill="rgba(245, 247, 250, 0.95)"
+                  listening={false}
+                />
+              )),
+            )
+          : null}
         <Group x={stageSize.width - rulerWidth} y={pan.y + contentOffset.y} scaleY={scale.y}>
           {freqRulerMarks.map((mark) => {
             const y = freqToY(mark.freq)
