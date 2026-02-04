@@ -27,6 +27,16 @@ def test_parse_payload_rejects_bad_trace() -> None:
     assert error is not None
 
 
+def test_parse_payload_rejects_non_monotonic_trace() -> None:
+    parsed, error = parse_payload(
+        TracePartialPayload,
+        {"trace": [[0.0, 440.0], [0.2, 450.0], [0.1, 460.0]]},
+    )
+    assert parsed is None
+    assert error is not None
+    assert "one time direction" in error
+
+
 def test_parse_payload_accepts_audio_path() -> None:
     parsed, error = parse_payload(OpenAudioPathPayload, {"path": "/tmp/example.wav"})
     assert error is None

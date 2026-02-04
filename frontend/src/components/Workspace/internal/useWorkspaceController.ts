@@ -161,7 +161,7 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
     [preview, duration, freqMin, freqMax, pan, scale, contentOffset]
   )
 
-  const { tracePath, committedTrace, selectionBox, beginAt, moveAt, endInteraction } = useTraceSelectionInteraction({
+  const { tracePath, committedTraces, selectionBox, beginAt, moveAt, endInteraction } = useTraceSelectionInteraction({
     activeTool,
     positionToTimeFreq: positionToTimeFreqValue,
     onTraceCommit,
@@ -322,16 +322,21 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
     [positionToTimeFreqValue, scale, pan, onUpdatePartial],
   )
 
-  const committedTracePath = useMemo(() => {
-    if (committedTrace.length < 2 || !preview) return ''
-    return committedTrace
-      .map((point, index) => {
-        const x = pan.x + contentOffset.x + timeToXValue(point.time) * scale.x
-        const y = pan.y + contentOffset.y + freqToYValue(point.freq) * scale.y
-        return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`
+  const committedTracePaths = useMemo(() => {
+    if (!preview) return []
+    return committedTraces
+      .map((trace) => {
+        if (trace.points.length < 2) return ''
+        return trace.points
+          .map((point, index) => {
+            const x = pan.x + contentOffset.x + timeToXValue(point.time) * scale.x
+            const y = pan.y + contentOffset.y + freqToYValue(point.freq) * scale.y
+            return `${index === 0 ? 'M' : 'L'}${x.toFixed(2)},${y.toFixed(2)}`
+          })
+          .join(' ')
       })
-      .join(' ')
-  }, [committedTrace, preview, pan, contentOffset, timeToXValue, freqToYValue, scale])
+      .filter((path) => path.length > 0)
+  }, [committedTraces, preview, pan, contentOffset, timeToXValue, freqToYValue, scale])
 
   const tracePathD = useMemo(() => {
     if (tracePath.length < 2 || !preview) return ''
@@ -394,7 +399,7 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
     stageSize,
     hudPosition,
     tracePathD,
-    committedTracePath,
+    committedTracePaths,
     selectionBox,
     previewImage,
     viewportImages,

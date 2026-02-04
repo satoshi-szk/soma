@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 
 class PayloadBase(BaseModel):
@@ -25,6 +25,22 @@ class UpdateSettingsPayload(PayloadBase):
 
 class TracePartialPayload(PayloadBase):
     trace: list[tuple[float, float]] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_time_direction(self) -> TracePartialPayload:
+        direction = 0
+        epsilon = 1e-9
+        for index in range(1, len(self.trace)):
+            delta = self.trace[index][0] - self.trace[index - 1][0]
+            if abs(delta) <= epsilon:
+                continue
+            current = 1 if delta > 0 else -1
+            if direction == 0:
+                direction = current
+                continue
+            if current != direction:
+                raise ValueError("Trace must move in one time direction.")
+        return self
 
 
 class ErasePartialPayload(PayloadBase):

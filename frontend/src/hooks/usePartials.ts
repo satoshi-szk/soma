@@ -53,16 +53,14 @@ const initialState: PartialsState = {
   selection: [],
   isSnapping: false,
 }
+const MAX_PENDING_SNAP_REQUESTS = 3
 
 type ReportError = (context: string, message: string) => void
 
 export function usePartials(reportError: ReportError) {
   const [state, dispatch] = useReducer(partialsReducer, initialState)
   const connectQueueRef = useRef<string[]>([])
-  const pendingSnapRef = useRef<{
-    requestId: string
-    resolve: (value: boolean) => void
-  } | null>(null)
+  const pendingSnapRef = useRef<Map<string, (value: boolean) => void>>(new Map())
 
   // snap イベントを購読する
   useEffect(() => {
@@ -77,14 +75,14 @@ export function usePartials(reportError: ReportError) {
           | { id: string; is_muted: boolean; color?: string; points: number[][] }
           | undefined
 
-        // 現在待機中のリクエストかどうかを確認する
-        if (pendingSnapRef.current && pendingSnapRef.current.requestId === requestId) {
+        if (requestId && pendingSnapRef.current.has(requestId)) {
           if (partial) {
             dispatch({ type: 'ADD', partial: toPartial(partial) })
           }
-          dispatch({ type: 'SET_SNAPPING', value: false })
-          pendingSnapRef.current.resolve(!!partial)
-          pendingSnapRef.current = null
+          const resolve = pendingSnapRef.current.get(requestId)
+          pendingSnapRef.current.delete(requestId)
+          resolve?.(!!partial)
+          dispatch({ type: 'SET_SNAPPING', value: pendingSnapRef.current.size > 0 })
         }
       }
 
@@ -92,11 +90,12 @@ export function usePartials(reportError: ReportError) {
         const requestId = payload.request_id as string | undefined
         const message = payload.message as string | undefined
 
-        if (pendingSnapRef.current && pendingSnapRef.current.requestId === requestId) {
+        if (requestId && pendingSnapRef.current.has(requestId)) {
           reportError('Trace', message ?? 'Failed to create partial')
-          dispatch({ type: 'SET_SNAPPING', value: false })
-          pendingSnapRef.current.resolve(false)
-          pendingSnapRef.current = null
+          const resolve = pendingSnapRef.current.get(requestId)
+          pendingSnapRef.current.delete(requestId)
+          resolve?.(false)
+          dispatch({ type: 'SET_SNAPPING', value: pendingSnapRef.current.size > 0 })
         }
       }
     }
@@ -122,35 +121,38 @@ export function usePartials(reportError: ReportError) {
         reportError('Trace', 'API not available')
         return false
       }
+      if (pendingSnapRef.current.size >= MAX_PENDING_SNAP_REQUESTS) {
+        reportError('Trace', 'Snap queue is full. Please wait.')
+        return false
+      }
       dispatch({ type: 'SET_SNAPPING', value: true })
       try {
         const result = await api.trace_partial({ trace })
         if (result.status === 'accepted') {
           // snap_completed イベントを待つ
           return new Promise<boolean>((resolve) => {
-            pendingSnapRef.current = {
-              requestId: result.request_id,
-              resolve,
-            }
+            pendingSnapRef.current.set(result.request_id, resolve)
             // 5 分でタイムアウト（ワーカー側タイムアウトと同じ）
             setTimeout(() => {
-              if (pendingSnapRef.current?.requestId === result.request_id) {
+              const pending = pendingSnapRef.current
+              if (pending.has(result.request_id)) {
                 reportError('Trace', 'Snap computation timed out')
-                dispatch({ type: 'SET_SNAPPING', value: false })
-                pendingSnapRef.current.resolve(false)
-                pendingSnapRef.current = null
+                const timeoutResolve = pending.get(result.request_id)
+                pending.delete(result.request_id)
+                timeoutResolve?.(false)
+                dispatch({ type: 'SET_SNAPPING', value: pending.size > 0 })
               }
             }, 5 * 60 * 1000)
           })
         }
         if (result.status === 'error') {
           reportError('Trace', result.message ?? 'Failed to create partial')
-          dispatch({ type: 'SET_SNAPPING', value: false })
+          dispatch({ type: 'SET_SNAPPING', value: pendingSnapRef.current.size > 0 })
         }
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unexpected error'
         reportError('Trace', message)
-        dispatch({ type: 'SET_SNAPPING', value: false })
+        dispatch({ type: 'SET_SNAPPING', value: pendingSnapRef.current.size > 0 })
       }
       return false
     },
