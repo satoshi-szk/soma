@@ -357,7 +357,7 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
       .join(' ')
   }, [tracePath, preview, pan, contentOffset, timeToXValue, freqToYValue, scale])
 
-  const { pxPerOctave, freqRulerMarks, timeMarks, ampToLaneY } = useRulerMetrics({
+  const { pxPerOctave, freqRulerMarks, timeMarks, ampToLaneY, maxAmp } = useRulerMetrics({
     preview,
     freqMin,
     freqMax,
@@ -386,7 +386,7 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
           id: partial.id,
           x,
           y,
-          text: formatNoteWithCents(sample.freq),
+          text: `${formatNoteWithCents(sample.freq)} | ${formatAmpDb(sample.amp, maxAmp)}`,
         }
       })
       .filter((item): item is { id: string; x: number; y: number; text: string } => item !== null)
@@ -398,6 +398,7 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
     playbackPosition,
     scale,
     partials,
+    maxAmp,
     freqToYValue,
     rulerHeight,
     spectrogramAreaHeight,
@@ -517,4 +518,14 @@ const samplePartialAtTime = (partial: Partial, timeSec: number): { freq: number;
   }
   const tail = points[points.length - 1]
   return { freq: tail.freq, amp: tail.amp }
+}
+
+const formatAmpDb = (amp: number, maxAmp: number): string => {
+  const floorDb = -60
+  if (!Number.isFinite(amp) || amp <= 0 || !Number.isFinite(maxAmp) || maxAmp <= 0) {
+    return `${floorDb.toFixed(1)}dB`
+  }
+  const db = 20 * Math.log10(Math.max(amp, 1e-12) / maxAmp)
+  const clamped = Math.max(floorDb, Math.min(0, db))
+  return `${clamped.toFixed(1)}dB`
 }
