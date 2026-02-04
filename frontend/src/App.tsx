@@ -385,7 +385,7 @@ function App() {
 
   return (
     <div className={`page ${ready ? 'is-ready' : ''} h-screen`}>
-      <div className="mx-auto flex h-full w-full max-w-none flex-col gap-4 px-4 pb-6 pt-6 sm:px-6">
+      <div className="mx-auto flex h-full w-full max-w-none flex-col gap-2 px-2 pb-2 pt-2">
         <HeaderToolbar
           menuOpen={menuOpen}
           activeTool={activeTool}
@@ -404,8 +404,8 @@ function App() {
           playDisabled={analysis.analysisState === 'analyzing' || playback.isProbePlaying}
         />
 
-        <main className="flex h-full flex-1 min-h-0 flex-col gap-4">
-          <section className="panel flex flex-1 min-h-0 flex-col rounded-none px-4 py-4">
+        <main className="flex h-full flex-1 min-h-0 flex-col gap-2">
+          <section className="panel flex flex-1 min-h-0 flex-col rounded-none px-2 py-2">
             <div className="flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.22em] text-[var(--muted)]">
               <span className="flex min-w-0 items-center gap-3">
                 <span>Workspace</span>
@@ -415,7 +415,7 @@ function App() {
               </span>
               <span className="font-mono text-[10px]">{timeScaleLabel}</span>
             </div>
-            <div className="mt-3 flex-1 min-h-0 h-full">
+            <div className="mt-1 flex-1 min-h-0 h-full">
               <Workspace
                 preview={analysis.preview}
                 viewportPreviews={viewport.viewportPreviews}

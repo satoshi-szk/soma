@@ -182,19 +182,19 @@ export function WorkspaceCanvas({ controller, spectrogramDim }: Props) {
       </Layer>
       <Layer>
         <Rect x={0} y={0} width={stageSize.width} height={rulerHeight} fill="rgba(12, 18, 30, 0.7)" />
-        <Line points={[0, rulerHeight, stageSize.width, rulerHeight]} stroke="rgba(248, 209, 154, 0.35)" />
+        <Line points={[0, rulerHeight, stageSize.width, rulerHeight]} stroke="rgba(111, 208, 243, 0.35)" />
         {timeMarks.map((time) => {
           const x = pan.x + contentOffset.x + timeToX(time) * scale.x
           if (x < 0 || x > stageSize.width) return null
           return (
             <Group key={time}>
-              <Line points={[x, rulerHeight - 6, x, rulerHeight]} stroke="rgba(248, 209, 154, 0.6)" />
+              <Line points={[x, rulerHeight - 6, x, rulerHeight]} stroke="rgba(111, 208, 243, 0.6)" />
               <Text
                 x={x + 4}
                 y={2}
                 text={`${time.toFixed(time < 1 ? 2 : 1)}s`}
                 fontSize={9}
-                fill="rgba(248, 209, 154, 0.75)"
+                fill="rgba(111, 208, 243, 0.75)"
                 fontFamily="monospace"
               />
             </Group>
@@ -207,13 +207,13 @@ export function WorkspaceCanvas({ controller, spectrogramDim }: Props) {
           height={AUTOMATION_LANE_HEIGHT}
           fill="rgba(10, 14, 20, 0.82)"
         />
-        <Line points={[0, automationTop, stageSize.width, automationTop]} stroke="rgba(248, 209, 154, 0.25)" strokeWidth={1} />
+        <Line points={[0, automationTop, stageSize.width, automationTop]} stroke="rgba(111, 208, 243, 0.25)" strokeWidth={1} />
         <Text
           x={12}
           y={automationTop + 6}
           text="Partial Amplitude"
           fontSize={9}
-          fill="rgba(248, 209, 154, 0.7)"
+          fill="rgba(111, 208, 243, 0.7)"
           fontFamily="monospace"
         />
         <Group x={pan.x + contentOffset.x} y={automationContentTop} scaleX={scale.x}>
@@ -232,13 +232,13 @@ export function WorkspaceCanvas({ controller, spectrogramDim }: Props) {
             const y = freqToY(mark.freq)
             return (
               <Group key={mark.freq}>
-                <Line points={[0, y, 8, y]} stroke="rgba(248, 209, 154, 0.5)" strokeWidth={1} />
+                <Line points={[0, y, 8, y]} stroke="rgba(111, 208, 243, 0.5)" strokeWidth={1} />
                 <Text
                   x={12}
                   y={y}
                   text={mark.label}
                   fontSize={10}
-                  fill="rgba(248, 209, 154, 0.8)"
+                  fill="rgba(111, 208, 243, 0.8)"
                   fontFamily="monospace"
                   scaleY={1 / scale.y}
                   offsetY={5}

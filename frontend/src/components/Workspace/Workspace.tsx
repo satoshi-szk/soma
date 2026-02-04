@@ -32,7 +32,7 @@ export function Workspace(props: WorkspaceProps) {
   return (
     <div
       ref={containerRef}
-      className={`canvas-surface relative h-full min-h-[520px] rounded-none p-4 ${
+      className={`canvas-surface relative h-full min-h-0 rounded-none p-1 ${
         allowDrop && isDragActive ? 'ring-2 ring-[var(--accent)] ring-offset-2 ring-offset-[var(--canvas)]' : ''
       }`}
       onDragOver={handleDragOver}
@@ -43,7 +43,7 @@ export function Workspace(props: WorkspaceProps) {
       <WorkspaceCanvas controller={controller} spectrogramDim={spectrogramDim} />
       {tracePathD || committedTracePaths.length > 0 ? (
         <svg
-          className="pointer-events-none absolute inset-4"
+          className="pointer-events-none absolute inset-1"
           width={stageSize.width}
           height={stageSize.height}
           viewBox={`0 0 ${stageSize.width} ${stageSize.height}`}
@@ -66,7 +66,7 @@ export function Workspace(props: WorkspaceProps) {
           <div className="text-xs uppercase tracking-[0.3em]">No Audio Loaded</div>
           {allowDrop ? <div className="text-[10px] uppercase tracking-[0.24em] text-white/60">Drop a WAV file here</div> : null}
           <button
-            className="rounded-md bg-white/90 px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-strong)]"
+            className="rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-strong)]"
             onClick={onOpenAudio}
           >
             Open Audio
@@ -74,7 +74,7 @@ export function Workspace(props: WorkspaceProps) {
         </div>
       ) : null}
       {allowDrop && isDragActive ? (
-        <div className="pointer-events-none absolute inset-3 rounded-md border border-dashed border-white/60" />
+        <div className="pointer-events-none absolute inset-1 rounded-sm border border-dashed border-white/60" />
       ) : null}
       {analysisState === 'analyzing' ? (
         <div className="absolute inset-0 flex items-center justify-center bg-black/40 text-xs uppercase tracking-[0.24em] text-white">
@@ -92,7 +92,7 @@ export function Workspace(props: WorkspaceProps) {
         />
       ) : null}
       {preview ? (
-        <div className="absolute right-6 top-1/2 -translate-y-1/2 flex flex-col gap-1">
+        <div className="absolute right-2 top-1/2 -translate-y-1/2 flex flex-col gap-1">
           <button
             className="flex h-7 w-7 items-center justify-center rounded-sm bg-[rgba(12,18,30,0.85)] text-[var(--muted)] hover:bg-[rgba(20,28,45,0.95)] hover:text-white transition-colors"
             onClick={onZoomInY}

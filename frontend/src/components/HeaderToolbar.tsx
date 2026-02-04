@@ -37,11 +37,11 @@ export function HeaderToolbar({
   menuRef,
 }: HeaderToolbarProps) {
   return (
-    <header className="panel flex flex-col gap-4 rounded-none px-4 py-3 lg:flex-row lg:items-center lg:justify-between">
-      <div className="flex items-center gap-4">
+    <header className="panel flex flex-col gap-2 rounded-none px-2 py-2 lg:flex-row lg:items-center lg:justify-between">
+      <div className="flex items-center gap-2">
         <div className="relative" ref={menuRef}>
           <button
-            className="flex h-9 w-10 flex-col items-center justify-center gap-1 rounded-md border border-[var(--panel-border)] bg-white text-[var(--accent-strong)]"
+            className="flex h-9 w-10 flex-col items-center justify-center gap-1 rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] text-[var(--accent-strong)]"
             onClick={onMenuToggle}
             aria-expanded={menuOpen}
             aria-label="Menu"
@@ -52,7 +52,7 @@ export function HeaderToolbar({
             <span className="h-0.5 w-4 rounded-full bg-[var(--accent-strong)]" />
           </button>
           {menuOpen ? (
-            <div className="absolute left-0 top-[calc(100%+8px)] z-20 w-56 rounded-md border border-[var(--panel-border)] bg-white p-3 text-xs shadow-lg">
+            <div className="absolute left-0 top-[calc(100%+8px)] z-20 w-56 rounded-md border border-[var(--panel-border)] bg-[var(--panel)] p-3 text-xs shadow-lg">
               {MENU_SECTIONS.map((section) => (
                 <div key={section.label} className="border-b border-[var(--panel-border)] py-2 last:border-b-0">
                   <div className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)]">
@@ -76,8 +76,8 @@ export function HeaderToolbar({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="flex items-center gap-2 rounded-md border border-[var(--panel-border)] bg-white px-3 py-2 text-sm font-semibold text-[var(--ink)]">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2 rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2 text-sm font-semibold text-[var(--ink)]">
           <button
             onClick={onRewind}
             className={`flex h-8 w-8 items-center justify-center rounded-md ${
@@ -139,8 +139,8 @@ export function HeaderToolbar({
         </div>
       </div>
 
-      <div className="flex flex-wrap items-center gap-3">
-        <div className="grid grid-cols-2 gap-2 rounded-md border border-[var(--panel-border)] bg-white p-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)] lg:grid-cols-4">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="grid grid-cols-2 gap-2 rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] p-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)] lg:grid-cols-4">
           {TOOL_LIST.map((tool) => (
             <button
               key={tool.id}
@@ -154,7 +154,9 @@ export function HeaderToolbar({
               title={tool.label}
             >
               {tool.label}
-              <span className="ml-2 font-mono text-[9px] text-white/70">{TOOL_KEYS[tool.id]}</span>
+              <span className={`ml-2 font-mono text-[9px] ${activeTool === tool.id ? 'text-white/70' : 'text-[var(--muted)]'}`}>
+                {TOOL_KEYS[tool.id]}
+              </span>
             </button>
           ))}
         </div>
