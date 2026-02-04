@@ -18,7 +18,6 @@ class UpdateSettingsPayload(PayloadBase):
     preview_bins_per_octave: int = 48
     wavelet_bandwidth: float = 8.0
     wavelet_center_freq: float = 1.5
-    color_map: str = "magma"
     brightness: float = 0.0
     contrast: float = 1.0
 

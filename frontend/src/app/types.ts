@@ -9,7 +9,6 @@ export type AnalysisSettings = {
   preview_bins_per_octave: number
   wavelet_bandwidth: number
   wavelet_center_freq: number
-  color_map: string
   brightness: number
   contrast: number
 }

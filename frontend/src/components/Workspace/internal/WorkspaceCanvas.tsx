@@ -17,9 +17,10 @@ const hexToRgba = (hex: string, alpha: number) => {
 
 type Props = {
   controller: WorkspaceController
+  spectrogramDim: number
 }
 
-export function WorkspaceCanvas({ controller }: Props) {
+export function WorkspaceCanvas({ controller, spectrogramDim }: Props) {
   const {
     stageSize,
     pan,
@@ -39,6 +40,7 @@ export function WorkspaceCanvas({ controller }: Props) {
     automationContentTop,
     rulerWidth,
     partials,
+    showResolutionAssist,
     playheadIntersections,
     freqRulerMarks,
     timeMarks,
@@ -49,9 +51,11 @@ export function WorkspaceCanvas({ controller }: Props) {
     handleStageMouseDown,
     handleStageMouseMove,
     handleStageMouseUp,
+    handleStageMouseLeave,
     handleStageClick,
     handleEndpointDragMove,
     handleEndpointDragEnd,
+    hoverResolutionCell,
   } = controller
 
   return (
@@ -62,6 +66,7 @@ export function WorkspaceCanvas({ controller }: Props) {
       onMouseDown={handleStageMouseDown}
       onMouseMove={handleStageMouseMove}
       onMouseUp={handleStageMouseUp}
+      onMouseLeave={handleStageMouseLeave}
       onClick={handleStageClick}
     >
       <Layer>
@@ -88,13 +93,20 @@ export function WorkspaceCanvas({ controller }: Props) {
             : null}
         </Group>
       </Layer>
+      <Layer listening={false}>
+        {preview && spectrogramDim > 0 ? (
+          <Group x={pan.x + contentOffset.x} y={pan.y + contentOffset.y} scaleX={scale.x} scaleY={scale.y}>
+            <Rect width={preview.width} height={preview.height} fill="rgba(0, 0, 0, 1)" opacity={spectrogramDim} />
+          </Group>
+        ) : null}
+      </Layer>
       <Layer>
         <Group x={pan.x + contentOffset.x} y={pan.y + contentOffset.y} scaleX={scale.x} scaleY={scale.y}>
           {unselectedPartials.map((partial) => (
             <Line
               key={partial.id}
               points={partial.points.flatMap((point) => [timeToX(point.time), freqToY(point.freq)])}
-              stroke={hexToRgba(partial.color, partial.is_muted ? 0.25 : 0.6)}
+              stroke={hexToRgba(partial.color, partial.is_muted ? 0.25 : 1)}
               strokeWidth={3}
               strokeScaleEnabled={false}
               lineCap="round"
@@ -106,7 +118,7 @@ export function WorkspaceCanvas({ controller }: Props) {
             <Line
               key={partial.id}
               points={partial.points.flatMap((point) => [timeToX(point.time), freqToY(point.freq)])}
-              stroke={hexToRgba(partial.color, partial.is_muted ? 0.35 : 0.95)}
+              stroke={hexToRgba(partial.color, partial.is_muted ? 0.35 : 1)}
               strokeWidth={3}
               strokeScaleEnabled={false}
               lineCap="round"
@@ -136,8 +148,33 @@ export function WorkspaceCanvas({ controller }: Props) {
             </>
           ) : null}
         </Group>
+        {showResolutionAssist
+          ? partials.map((partial) =>
+              partial.points.map((point, index) => (
+                <Circle
+                  key={`point-${partial.id}-${index}`}
+                  x={pan.x + contentOffset.x + timeToX(point.time) * scale.x}
+                  y={pan.y + contentOffset.y + freqToY(point.freq) * scale.y}
+                  radius={3}
+                  fill="rgba(245, 247, 250, 0.95)"
+                  listening={false}
+                />
+              )),
+            )
+          : null}
         {selectionBox ? (
           <Rect x={selectionBox.x} y={selectionBox.y} width={selectionBox.w} height={selectionBox.h} stroke="#f59f8b" dash={[4, 4]} />
+        ) : null}
+        {hoverResolutionCell ? (
+          <Rect
+            x={hoverResolutionCell.x}
+            y={hoverResolutionCell.y}
+            width={hoverResolutionCell.w}
+            height={hoverResolutionCell.h}
+            stroke="rgba(111, 208, 243, 0.9)"
+            strokeWidth={1}
+            listening={false}
+          />
         ) : null}
         {preview ? (
           <Line
@@ -152,32 +189,41 @@ export function WorkspaceCanvas({ controller }: Props) {
           />
         ) : null}
         {playheadIntersections.map((intersection) => (
-          <Text
-            key={`playhead-note-${intersection.id}`}
-            x={intersection.x + 6}
-            y={intersection.y - 6}
-            text={intersection.text}
-            fontSize={10}
-            fill="rgba(247, 245, 242, 0.9)"
-            fontFamily="monospace"
-          />
+          <Group key={`playhead-note-${intersection.id}`} x={intersection.x + 6} y={intersection.y - 8}>
+            <Rect
+              width={Math.max(32, intersection.text.length * 6 + 8)}
+              height={14}
+              fill="rgba(8, 12, 18, 0.72)"
+              cornerRadius={3}
+              listening={false}
+            />
+            <Text
+              x={4}
+              y={2}
+              text={intersection.text}
+              fontSize={10}
+              fill="rgba(245, 247, 250, 0.98)"
+              fontFamily="monospace"
+              listening={false}
+            />
+          </Group>
         ))}
       </Layer>
       <Layer>
         <Rect x={0} y={0} width={stageSize.width} height={rulerHeight} fill="rgba(12, 18, 30, 0.7)" />
-        <Line points={[0, rulerHeight, stageSize.width, rulerHeight]} stroke="rgba(248, 209, 154, 0.35)" />
+        <Line points={[0, rulerHeight, stageSize.width, rulerHeight]} stroke="rgba(111, 208, 243, 0.35)" />
         {timeMarks.map((time) => {
           const x = pan.x + contentOffset.x + timeToX(time) * scale.x
           if (x < 0 || x > stageSize.width) return null
           return (
             <Group key={time}>
-              <Line points={[x, rulerHeight - 6, x, rulerHeight]} stroke="rgba(248, 209, 154, 0.6)" />
+              <Line points={[x, rulerHeight - 6, x, rulerHeight]} stroke="rgba(111, 208, 243, 0.6)" />
               <Text
                 x={x + 4}
                 y={2}
                 text={`${time.toFixed(time < 1 ? 2 : 1)}s`}
                 fontSize={9}
-                fill="rgba(248, 209, 154, 0.75)"
+                fill="rgba(111, 208, 243, 0.75)"
                 fontFamily="monospace"
               />
             </Group>
@@ -190,13 +236,13 @@ export function WorkspaceCanvas({ controller }: Props) {
           height={AUTOMATION_LANE_HEIGHT}
           fill="rgba(10, 14, 20, 0.82)"
         />
-        <Line points={[0, automationTop, stageSize.width, automationTop]} stroke="rgba(248, 209, 154, 0.25)" strokeWidth={1} />
+        <Line points={[0, automationTop, stageSize.width, automationTop]} stroke="rgba(111, 208, 243, 0.25)" strokeWidth={1} />
         <Text
           x={12}
           y={automationTop + 6}
           text="Partial Amplitude"
           fontSize={9}
-          fill="rgba(248, 209, 154, 0.7)"
+          fill="rgba(111, 208, 243, 0.7)"
           fontFamily="monospace"
         />
         <Group x={pan.x + contentOffset.x} y={automationContentTop} scaleX={scale.x}>
@@ -204,24 +250,38 @@ export function WorkspaceCanvas({ controller }: Props) {
             <Line
               key={`amp-${partial.id}`}
               points={partial.points.flatMap((point) => [timeToX(point.time), ampToLaneY(point.amp)])}
-              stroke={hexToRgba(partial.color, partial.is_muted ? 0.25 : 0.85)}
+              stroke={hexToRgba(partial.color, partial.is_muted ? 0.25 : 1)}
               strokeWidth={3}
               strokeScaleEnabled={false}
             />
           ))}
         </Group>
+        {showResolutionAssist
+          ? partials.map((partial) =>
+              partial.points.map((point, index) => (
+                <Circle
+                  key={`amp-point-${partial.id}-${index}`}
+                  x={pan.x + contentOffset.x + timeToX(point.time) * scale.x}
+                  y={automationContentTop + ampToLaneY(point.amp)}
+                  radius={3}
+                  fill="rgba(245, 247, 250, 0.95)"
+                  listening={false}
+                />
+              )),
+            )
+          : null}
         <Group x={stageSize.width - rulerWidth} y={pan.y + contentOffset.y} scaleY={scale.y}>
           {freqRulerMarks.map((mark) => {
             const y = freqToY(mark.freq)
             return (
               <Group key={mark.freq}>
-                <Line points={[0, y, 8, y]} stroke="rgba(248, 209, 154, 0.5)" strokeWidth={1} />
+                <Line points={[0, y, 8, y]} stroke="rgba(111, 208, 243, 0.5)" strokeWidth={1} />
                 <Text
                   x={12}
                   y={y}
                   text={mark.label}
                   fontSize={10}
-                  fill="rgba(248, 209, 154, 0.8)"
+                  fill="rgba(111, 208, 243, 0.8)"
                   fontFamily="monospace"
                   scaleY={1 / scale.y}
                   offsetY={5}

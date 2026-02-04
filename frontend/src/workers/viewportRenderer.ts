@@ -6,7 +6,6 @@ type RenderRequest = {
   width: number
   height: number
   data: number[]
-  color_map: string
   brightness: number
   contrast: number
 }
@@ -16,7 +15,7 @@ type RenderResponse =
   | { type: 'error'; key: string; message: string }
 
 const renderViewport = (message: RenderRequest) => {
-  const { key, width, height, data, color_map, brightness, contrast } = message
+  const { key, width, height, data, brightness, contrast } = message
   if (width <= 0 || height <= 0) {
     return { type: 'error', key, message: 'Invalid viewport dimensions' } satisfies RenderResponse
   }
@@ -39,7 +38,7 @@ const renderViewport = (message: RenderRequest) => {
     const normalized = data[i] / 255
     const adjusted = Math.min(1, Math.max(0, (normalized - 0.5) * contrast + 0.5 + brightness))
     const value = Math.round(adjusted * 255)
-    const color = mapColor(color_map as never, value)
+    const color = mapColor(value)
     const offset = i * 4
     image.data[offset] = color[0]
     image.data[offset + 1] = color[1]

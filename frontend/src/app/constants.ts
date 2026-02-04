@@ -23,7 +23,6 @@ export const DEFAULT_SETTINGS: AnalysisSettings = {
   preview_bins_per_octave: 48,
   wavelet_bandwidth: 8.0,
   wavelet_center_freq: 1.5,
-  color_map: "magma",
   brightness: 0,
   contrast: 1,
 };

@@ -2,7 +2,7 @@ import type { AnalysisSettings } from '../../app/types'
 import { useEffect, useMemo, useState } from 'react'
 
 type DraftSettings = Record<keyof AnalysisSettings, string>
-type NumericKey = Exclude<keyof AnalysisSettings, 'color_map'>
+type NumericKey = keyof AnalysisSettings
 
 const intFields = new Set<NumericKey>(['bins_per_octave', 'preview_bins_per_octave'])
 const numericKeys: NumericKey[] = [
@@ -27,7 +27,6 @@ const toDraft = (settings: AnalysisSettings): DraftSettings => ({
   preview_bins_per_octave: String(settings.preview_bins_per_octave),
   wavelet_bandwidth: String(settings.wavelet_bandwidth),
   wavelet_center_freq: String(settings.wavelet_center_freq),
-  color_map: settings.color_map,
   brightness: String(settings.brightness),
   contrast: String(settings.contrast),
 })
@@ -55,7 +54,6 @@ const helpText: Record<string, string> = {
   freq_max: 'Maximum frequency for display/analysis. Higher values may reduce density.',
   preview_freq_max: 'Upper frequency limit for preview only. Higher values increase render cost.',
   preview_bins_per_octave: 'Frequency resolution for preview. Higher values provide finer detail.',
-  color_map: 'Color table used for preview rendering.',
   brightness: 'Adjusts overall preview brightness.',
   contrast: 'Adjusts preview contrast.',
   bins_per_octave: 'Frequency resolution for snap analysis. Higher values provide finer detail.',
@@ -233,23 +231,6 @@ export function AnalysisSettingsModal({ settings, onCancel, onApply }: AnalysisS
                 onChange={(event) => handleNumberChange('preview_bins_per_octave', event.target.value)}
                 onBlur={() => handleNumberBlur('preview_bins_per_octave')}
               />
-            </label>
-            <label>
-              <span className="modal-label-row">
-                Color Map
-                <button type="button" className="modal-help" onClick={() => toggleHelp('color_map')}>
-                  ?
-                </button>
-              </span>
-              {helpOpen.color_map ? <span className="modal-help-detail">{helpText.color_map}</span> : null}
-              <select
-                value={draft.color_map}
-                onChange={(event) => setDraft((prev) => ({ ...prev, color_map: event.target.value }))}
-              >
-                <option value="magma">Magma</option>
-                <option value="viridis">Viridis</option>
-                <option value="gray">Gray</option>
-              </select>
             </label>
             <label>
               <span className="modal-label-row">

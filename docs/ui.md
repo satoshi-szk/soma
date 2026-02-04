@@ -104,7 +104,7 @@
 
 - **Frequency Range:** Min / Max (Hz)
 - **Time Resolution:** Bins per Octave (48, 60, 96...)
-- **Visualization:** Color Map (Magma/Viridis/Gray), Brightness, Contrast
+- **Visualization:** Magma (fixed), Brightness, Contrast
 - **[Cancel]** / **[Apply & Re-analyze]**
 
 ### 3-B. Export Modal

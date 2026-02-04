@@ -12,7 +12,7 @@ export type SelectionHudProps = {
 export function SelectionHud({ selected, canMute, canDelete, onMute, onDelete, position }: SelectionHudProps) {
   return (
     <div
-      className="pointer-events-auto absolute z-10 w-64 -translate-y-3 rounded-none border border-[var(--panel-border)] bg-white px-4 py-3 text-sm text-[var(--muted)] shadow-lg"
+      className="pointer-events-auto absolute z-10 w-64 -translate-y-3 rounded-none border border-[var(--panel-border)] bg-[var(--panel)] px-4 py-3 text-sm text-[var(--muted)] shadow-lg"
       style={{ left: position.x, top: position.y }}
     >
       <div className="flex items-center justify-between text-[10px] uppercase tracking-[0.22em] text-[var(--muted)]">

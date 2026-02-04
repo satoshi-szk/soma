@@ -34,4 +34,5 @@ export type WorkspaceProps = {
   onPartialDelete: () => void
   onZoomInY: () => void
   onZoomOutY: () => void
+  spectrogramDim: number
 }
