@@ -62,8 +62,9 @@ function App() {
     onUndo: partialsHook.undo,
     onRedo: partialsHook.redo,
     onPlayToggle: () => {
-      if (analysis.analysisState !== 'analyzing') playback.togglePlayStop()
+      if (analysis.analysisState !== 'analyzing' && !playback.isProbePlaying) playback.togglePlayStop()
     },
+    onProbeToggle: playback.toggleHarmonicProbe,
     onSave: async () => {
       const success = await analysis.saveProject()
       if (success) setStatusNote('Project saved')
@@ -326,10 +327,11 @@ function App() {
 
   const handleRewind = () => {
     if (playback.isPlaying) return
-    playback.setPlayheadPosition(0)
+    void playback.setPlayheadPosition(0)
   }
 
   const handlePlayStop = () => {
+    if (playback.isProbePlaying) return
     if (!playback.isPlaying && analysis.analysisState === 'analyzing') return
     void playback.togglePlayStop()
   }
@@ -339,6 +341,8 @@ function App() {
       ? 'Analyzing'
       : analysis.analysisState === 'error'
         ? 'Error'
+        : playback.isProbePlaying
+          ? 'Harmonic Probe'
         : playback.isPlaying
           ? 'Playing'
           : 'Ready'
@@ -387,14 +391,16 @@ function App() {
           isPlaying={playback.isPlaying}
           mixValue={playback.mixValue}
           playbackTimeLabel={formatDuration(playback.playbackPosition)}
+          isProbePlaying={playback.isProbePlaying}
           onMenuToggle={() => setMenuOpen((prev) => !prev)}
           onMenuAction={handleMenuAction}
           onToolChange={setActiveTool}
           onPlayStop={handlePlayStop}
+          onProbeToggle={() => void playback.toggleHarmonicProbe()}
           onRewind={handleRewind}
           onMixChange={playback.setMixValue}
           menuRef={menuRef}
-          playDisabled={analysis.analysisState === 'analyzing'}
+          playDisabled={analysis.analysisState === 'analyzing' || playback.isProbePlaying}
         />
 
         <main className="flex h-full flex-1 min-h-0 flex-col gap-4">

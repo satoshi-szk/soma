@@ -27,7 +27,7 @@ export type WorkspaceProps = {
   onOpenAudio: () => void
   onOpenAudioPath: (path: string) => void
   onOpenAudioFile: (file: File) => void
-  onPlayheadChange: (time: number) => void
+  onPlayheadChange: (time: number) => void | Promise<void>
   allowDrop: boolean
   onCursorMove: (cursor: { time: number; freq: number; amp: number | null }) => void
   onPartialMute: () => void
@@ -35,4 +35,3 @@ export type WorkspaceProps = {
   onZoomInY: () => void
   onZoomOutY: () => void
 }
-

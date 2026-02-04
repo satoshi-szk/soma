@@ -5,6 +5,7 @@ export type HeaderToolbarProps = {
   menuOpen: boolean
   activeTool: ToolId
   isPlaying: boolean
+  isProbePlaying: boolean
   mixValue: number
   playbackTimeLabel: string
   playDisabled: boolean
@@ -12,6 +13,7 @@ export type HeaderToolbarProps = {
   onMenuAction: (label: string) => void
   onToolChange: (tool: ToolId) => void
   onPlayStop: () => void
+  onProbeToggle: () => void
   onRewind: () => void
   onMixChange: (value: number) => void
   menuRef: React.RefObject<HTMLDivElement | null>
@@ -21,6 +23,7 @@ export function HeaderToolbar({
   menuOpen,
   activeTool,
   isPlaying,
+  isProbePlaying,
   mixValue,
   playbackTimeLabel,
   playDisabled,
@@ -28,6 +31,7 @@ export function HeaderToolbar({
   onMenuAction,
   onToolChange,
   onPlayStop,
+  onProbeToggle,
   onRewind,
   onMixChange,
   menuRef,
@@ -99,6 +103,21 @@ export function HeaderToolbar({
             title={isPlaying ? 'Stop' : 'Play'}
           >
             {isPlaying ? <StopIcon /> : <PlayIcon />}
+          </button>
+          <button
+            onClick={onProbeToggle}
+            className={`rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${
+              isProbePlaying
+                ? 'bg-[var(--accent)] text-white'
+                : isPlaying
+                  ? 'bg-[var(--panel-strong)] text-[var(--muted)]'
+                  : 'border border-[var(--panel-border)] text-[var(--muted)]'
+            }`}
+            disabled={isPlaying}
+            aria-label="Harmonic Probe"
+            title="Harmonic Probe (H)"
+          >
+            Probe
           </button>
         </div>
         <div className="flex flex-col">
