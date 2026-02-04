@@ -1,4 +1,4 @@
-import type { AnalysisSettings, Partial } from './types'
+import type { Partial } from './types'
 
 export const formatDuration = (seconds: number) => {
   const total = Math.max(0, Math.floor(seconds))
@@ -42,22 +42,7 @@ export const toPartial = (raw: { id: string; is_muted: boolean; color?: string; 
   points: raw.points.map((point) => ({ time: point[0], freq: point[1], amp: point[2] })),
 })
 
-export const mapColor = (mapName: AnalysisSettings['color_map'], value: number): [number, number, number] => {
-  if (mapName === 'gray') {
-    return [value, value, value]
-  }
-  if (mapName === 'viridis') {
-    return interpolateColor(
-      value,
-      [
-        [68, 1, 84],
-        [59, 82, 139],
-        [33, 145, 140],
-        [94, 201, 97],
-        [253, 231, 37],
-      ],
-    )
-  }
+export const mapColor = (value: number): [number, number, number] => {
   return interpolateColor(
     value,
     [

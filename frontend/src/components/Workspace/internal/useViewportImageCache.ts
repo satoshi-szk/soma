@@ -24,7 +24,6 @@ export function useViewportImageCache(
         current.freq_max,
         current.width,
         current.height,
-        settings.color_map,
         settings.brightness,
         settings.contrast,
       ].join('|'),
@@ -112,7 +111,6 @@ export function useViewportImageCache(
           width: current.width,
           height: current.height,
           data: current.data,
-          color_map: settings.color_map,
           brightness: settings.brightness,
           contrast: settings.contrast,
         })
@@ -161,4 +159,3 @@ export function useViewportImageCache(
 
   return { buildViewportKey, viewportImages }
 }
-

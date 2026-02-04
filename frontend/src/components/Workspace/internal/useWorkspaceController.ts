@@ -57,7 +57,7 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
       const normalized = preview.data[i] / 255
       const adjusted = Math.min(1, Math.max(0, (normalized - 0.5) * settings.contrast + 0.5 + settings.brightness))
       const value = Math.round(adjusted * 255)
-      const color = mapColor(settings.color_map, value)
+      const color = mapColor(value)
       const offset = i * 4
       image.data[offset] = color[0]
       image.data[offset + 1] = color[1]

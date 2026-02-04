@@ -55,7 +55,6 @@ def parse_settings(data: dict[str, Any]) -> AnalysisSettings:
         preview_bins_per_octave=int(settings.get("preview_bins_per_octave", 12)),
         wavelet_bandwidth=float(settings.get("wavelet_bandwidth", 8.0)),
         wavelet_center_freq=float(settings.get("wavelet_center_freq", 1.5)),
-        color_map=str(settings.get("color_map", "magma")),
         brightness=float(settings.get("brightness", 0.0)),
         contrast=float(settings.get("contrast", 1.0)),
     )

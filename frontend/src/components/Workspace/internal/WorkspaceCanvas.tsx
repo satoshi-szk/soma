@@ -152,15 +152,24 @@ export function WorkspaceCanvas({ controller }: Props) {
           />
         ) : null}
         {playheadIntersections.map((intersection) => (
-          <Text
-            key={`playhead-note-${intersection.id}`}
-            x={intersection.x + 6}
-            y={intersection.y - 6}
-            text={intersection.text}
-            fontSize={10}
-            fill="rgba(247, 245, 242, 0.9)"
-            fontFamily="monospace"
-          />
+          <Group key={`playhead-note-${intersection.id}`} x={intersection.x + 6} y={intersection.y - 8}>
+            <Rect
+              width={Math.max(32, intersection.text.length * 6 + 8)}
+              height={14}
+              fill="rgba(8, 12, 18, 0.72)"
+              cornerRadius={3}
+              listening={false}
+            />
+            <Text
+              x={4}
+              y={2}
+              text={intersection.text}
+              fontSize={10}
+              fill="rgba(245, 247, 250, 0.98)"
+              fontFamily="monospace"
+              listening={false}
+            />
+          </Group>
         ))}
       </Layer>
       <Layer>
