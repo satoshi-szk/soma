@@ -9,6 +9,7 @@ const DEFAULT_SPEED_PRESET_INDEX = 3
 export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'analyzing' | 'error') {
   const [isPlaying, setIsPlaying] = useState(false)
   const [isProbePlaying, setIsProbePlaying] = useState(false)
+  const [isPreparingPlayback, setIsPreparingPlayback] = useState(false)
   const [mixValue, setMixValue] = useState(55)
   const [speedPresetIndex, setSpeedPresetIndex] = useState(DEFAULT_SPEED_PRESET_INDEX)
   const [timeStretchMode, setTimeStretchMode] = useState<TimeStretchMode>('librosa')
@@ -18,26 +19,28 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
 
   // 再生位置をポーリングで取得する
   useEffect(() => {
-    if (!isPlaying && !isProbePlaying) return
+    if (!isPlaying && !isProbePlaying && !isPreparingPlayback) return
     const interval = window.setInterval(async () => {
       const api = isPywebviewApiAvailable() ? pywebviewApi : null
       if (!api) return
       const result = await api.status()
       if (result?.status === 'ok') {
-        if (typeof result.position === 'number' && result.is_playing) {
+        if (typeof result.position === 'number' && (result.is_playing || result.is_preparing_playback)) {
           setPlaybackPosition(result.position)
         }
         setIsPlaying(result.is_playing)
         setIsProbePlaying(result.is_probe_playing)
+        setIsPreparingPlayback(result.is_preparing_playback)
       }
     }, 300)
     return () => window.clearInterval(interval)
-  }, [isPlaying, isProbePlaying])
+  }, [isPlaying, isProbePlaying, isPreparingPlayback])
 
   const play = useCallback(async () => {
     if (analysisState === 'analyzing') return
     if (isPlaying) return
     if (isProbePlaying) return
+    if (isPreparingPlayback) return
     const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.play) {
       reportError('Playback', 'API not available')
@@ -54,7 +57,11 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       })
       if (result.status === 'ok') {
         playbackStartRef.current = startPosition
-        setIsPlaying(true)
+        if (speedValue === 1) {
+          setIsPlaying(true)
+        } else {
+          setIsPreparingPlayback(true)
+        }
       } else if (result.status === 'error') {
         reportError('Playback', result.message ?? 'Failed to play')
       }
@@ -62,7 +69,17 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       const message = error instanceof Error ? error.message : 'Unexpected error'
       reportError('Playback', message)
     }
-  }, [analysisState, isPlaying, isProbePlaying, mixValue, playbackPosition, reportError, speedValue, timeStretchMode])
+  }, [
+    analysisState,
+    isPlaying,
+    isPreparingPlayback,
+    isProbePlaying,
+    mixValue,
+    playbackPosition,
+    reportError,
+    speedValue,
+    timeStretchMode,
+  ])
 
   const stop = useCallback(async () => {
     const api = isPywebviewApiAvailable() ? pywebviewApi : null
@@ -75,6 +92,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       const result = await api.stop({ return_position_sec: returnPosition })
       if (result.status === 'ok') {
         setIsPlaying(false)
+        setIsPreparingPlayback(false)
         setPlaybackPosition(returnPosition)
       } else if (result.status === 'error') {
         reportError('Stop', result.message ?? 'Failed to stop')
@@ -87,7 +105,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
 
   const setPlayheadPosition = useCallback(
     async (positionSec: number) => {
-      if (isPlaying) return
+      if (isPlaying || isPreparingPlayback) return
       const nextPosition = Math.max(0, positionSec)
       setPlaybackPosition(nextPosition)
       if (!isProbePlaying) return
@@ -103,7 +121,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
         reportError('Harmonic Probe', message)
       }
     },
-    [isPlaying, isProbePlaying, reportError],
+    [isPlaying, isPreparingPlayback, isProbePlaying, reportError],
   )
 
   const togglePlayStop = useCallback(async () => {
@@ -117,6 +135,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
   const toggleHarmonicProbe = useCallback(async () => {
     if (analysisState === 'analyzing') return
     if (isPlaying) return
+    if (isPreparingPlayback) return
     const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.start_harmonic_probe || !api?.stop_harmonic_probe) {
       reportError('Harmonic Probe', 'API not available')
@@ -142,11 +161,12 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       const message = error instanceof Error ? error.message : 'Unexpected error'
       reportError('Harmonic Probe', message)
     }
-  }, [analysisState, isPlaying, isProbePlaying, playbackPosition, reportError])
+  }, [analysisState, isPlaying, isPreparingPlayback, isProbePlaying, playbackPosition, reportError])
 
   return {
     isPlaying,
     isProbePlaying,
+    isPreparingPlayback,
     mixValue,
     speedValue,
     speedPresetIndex,

@@ -73,6 +73,7 @@ const statusResponseSchema = z.object({
   status: z.literal('ok'),
   is_playing: z.boolean(),
   is_probe_playing: z.boolean(),
+  is_preparing_playback: z.boolean(),
   is_resynthesizing: z.boolean(),
   position: z.number(),
 })

@@ -590,6 +590,7 @@ class SomaApi:
             "status": "ok",
             "is_playing": self._doc.is_playing(),
             "is_probe_playing": self._doc.is_probe_playing(),
+            "is_preparing_playback": self._doc.is_preparing_playback(),
             "is_resynthesizing": self._doc.is_resynthesizing(),
             "position": self._doc.playback_position(),
         }

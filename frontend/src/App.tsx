@@ -389,6 +389,7 @@ function App() {
           menuOpen={menuOpen}
           activeTool={activeTool}
           isPlaying={playback.isPlaying}
+          isPreparingPlayback={playback.isPreparingPlayback}
           mixValue={playback.mixValue}
           speedPresetIndex={playback.speedPresetIndex}
           speedValue={playback.speedValue}
@@ -405,7 +406,8 @@ function App() {
           onSpeedChange={playback.setSpeedPresetIndex}
           onTimeStretchModeChange={playback.setTimeStretchMode}
           menuRef={menuRef}
-          playDisabled={analysis.analysisState === 'analyzing' || playback.isProbePlaying}
+          playDisabled={analysis.analysisState === 'analyzing' || playback.isProbePlaying || playback.isPreparingPlayback}
+          controlsDisabled={playback.isPlaying || playback.isPreparingPlayback}
         />
 
         <main className="flex h-full flex-1 min-h-0 flex-col gap-2">
@@ -434,7 +436,7 @@ function App() {
                 zoomY={viewport.zoomY}
                 pan={viewport.pan}
                 playbackPosition={playback.playbackPosition}
-                canEditPlayhead={!playback.isPlaying}
+                canEditPlayhead={!playback.isPlaying && !playback.isPreparingPlayback}
                 onZoomXChange={viewport.setZoomX}
                 onPanChange={viewport.setPan}
                 onStageSizeChange={viewport.setStageSize}

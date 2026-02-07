@@ -115,6 +115,12 @@ class SomaDocument:
         self._queued_snaps: list[tuple[str, list[tuple[float, float]]]] = []
         self._playback_mode: str | None = None
         self._playback_speed_ratio = 1.0
+        self._is_preparing_playback = False
+        self._pending_playback_position_sec = 0.0
+        self._playback_prepare_request_id = 0
+        self._playback_content_revision = 0
+        self._playback_cache_key: tuple[int, float, float, str] | None = None
+        self._playback_cache_buffer: np.ndarray | None = None
 
         # バックグラウンド処理用の compute manager を初期化する。
         self._compute_manager = ComputeManager(
@@ -145,6 +151,10 @@ class SomaDocument:
         self._queued_snaps = []
         self._playback_mode = None
         self._playback_speed_ratio = 1.0
+        self._is_preparing_playback = False
+        self._pending_playback_position_sec = 0.0
+        self._playback_prepare_request_id += 1
+        self._invalidate_playback_cache()
 
     def _emit(self, payload: dict[str, Any]) -> None:
         if self._event_sink is None:
@@ -264,6 +274,7 @@ class SomaDocument:
                 self.synth.apply_partial(partial)
                 after = self._snapshot_state(partial_ids=[partial_id])
                 self.undo_manager.push(HistoryEntry(before=before, after=after))
+                self._invalidate_playback_cache()
 
                 self._logger.debug("Snap completed: partial_id=%s points=%d", partial_id[:8], len(snapped))
                 self._emit({"type": "snap_completed", "request_id": request_id, "partial": partial.to_dict()})
@@ -297,6 +308,7 @@ class SomaDocument:
         self.synth.reset(sample_rate=info.sample_rate, duration_sec=info.duration_sec)
         self.player.load(self._mix_buffer(0.5), info.sample_rate)
         self._playback_mode = None
+        self._invalidate_playback_cache()
         return info
 
     def set_settings(self, settings: AnalysisSettings) -> SpectrogramPreview | None:
@@ -454,6 +466,7 @@ class SomaDocument:
             self.synth.apply_partial(segment)
         after = self._snapshot_state(partial_ids=tracked_ids)
         self.undo_manager.push(HistoryEntry(before=before, after=after))
+        self._invalidate_playback_cache()
         return self.store.all()
 
     def toggle_mute(self, partial_id: str) -> Partial | None:
@@ -466,6 +479,7 @@ class SomaDocument:
         self.synth.apply_partial(partial)
         after = self._snapshot_state(partial_ids=[partial_id])
         self.undo_manager.push(HistoryEntry(before=before, after=after))
+        self._invalidate_playback_cache()
         return partial
 
     def delete_partials(self, partial_ids: Iterable[str]) -> None:
@@ -478,6 +492,7 @@ class SomaDocument:
             self.synth.remove_partial(partial_id)
         after = self._snapshot_state(partial_ids=ids)
         self.undo_manager.push(HistoryEntry(before=before, after=after))
+        self._invalidate_playback_cache()
 
     def update_partial_points(self, partial_id: str, points: list[PartialPoint]) -> Partial | None:
         partial = self.store.get(partial_id)
@@ -489,6 +504,7 @@ class SomaDocument:
         self.synth.apply_partial(updated)
         after = self._snapshot_state(partial_ids=[partial_id])
         self.undo_manager.push(HistoryEntry(before=before, after=after))
+        self._invalidate_playback_cache()
         return updated
 
     def merge_partials(self, first_id: str, second_id: str) -> Partial | None:
@@ -509,6 +525,7 @@ class SomaDocument:
         self.synth.apply_partial(merged)
         after = self._snapshot_state(partial_ids=tracked_ids)
         self.undo_manager.push(HistoryEntry(before=before, after=after))
+        self._invalidate_playback_cache()
         return merged
 
     def hit_test(self, time_sec: float, freq_hz: float, tolerance: float = 0.05) -> str | None:
@@ -551,6 +568,7 @@ class SomaDocument:
             self._is_resynthesizing = False
         self.player.load(self._mix_buffer(0.5), self.audio_info.sample_rate)
         self._playback_mode = None
+        self._invalidate_playback_cache()
 
     def start_preview_async(self) -> None:
         """Generate overview preview using STFT only (fast, for base layer).
@@ -704,27 +722,59 @@ class SomaDocument:
             return
         if self.is_resynthesizing():
             return
+        self._cancel_playback_prepare()
         if self.player.is_playing():
             self.player.stop(reset_position_sec=None)
             self._playback_mode = None
             self._playback_speed_ratio = 1.0
         clamped_speed = float(np.clip(speed_ratio, 0.125, 8.0))
-        mixed = self._mix_buffer(mix_ratio)
-        stretched = time_stretch_pitch_preserving(
-            mixed,
-            clamped_speed,
-            self.audio_info.sample_rate,
-            mode=time_stretch_mode,
-        )
-        self.player.load(peak_normalize_buffer(stretched), self.audio_info.sample_rate)
         start_sec = float(start_position_sec or 0.0)
-        self.player.play(loop=loop, start_position_sec=start_sec / clamped_speed)
+        self._pending_playback_position_sec = start_sec
         self._playback_mode = "normal"
         self._playback_speed_ratio = clamped_speed
+        if abs(clamped_speed - 1.0) <= 1e-4:
+            mixed = self._mix_buffer(mix_ratio)
+            self.player.load(peak_normalize_buffer(mixed), self.audio_info.sample_rate)
+            self.player.play(loop=loop, start_position_sec=start_sec)
+            return
+        cache_key = self._playback_cache_lookup_key(mix_ratio, clamped_speed, time_stretch_mode)
+        cached = self._lookup_playback_cache(cache_key)
+        if cached is not None:
+            self.player.load(cached, self.audio_info.sample_rate)
+            self.player.play(loop=loop, start_position_sec=start_sec / clamped_speed)
+            return
+        with self._lock:
+            self._playback_prepare_request_id += 1
+            request_id = self._playback_prepare_request_id
+            self._is_preparing_playback = True
+        sample_rate = self.audio_info.sample_rate
+
+        def _worker() -> None:
+            try:
+                prepared = self._build_speed_adjusted_buffer(mix_ratio, clamped_speed, sample_rate, time_stretch_mode)
+                with self._lock:
+                    if request_id != self._playback_prepare_request_id:
+                        return
+                    self._is_preparing_playback = False
+                self._store_playback_cache(cache_key, prepared)
+                self.player.load(prepared, sample_rate)
+                self.player.play(loop=loop, start_position_sec=start_sec / clamped_speed)
+            except Exception:
+                self._logger.exception("playback prepare failed")
+                with self._lock:
+                    if request_id != self._playback_prepare_request_id:
+                        return
+                    self._is_preparing_playback = False
+                    self._playback_mode = None
+                    self._playback_speed_ratio = 1.0
+
+        thread = threading.Thread(target=_worker, name="soma-playback-prepare", daemon=True)
+        thread.start()
 
     def start_harmonic_probe(self, time_sec: float) -> bool:
         if self.audio_info is None:
             return False
+        self._cancel_playback_prepare()
         freqs, amps = self._harmonic_probe_tones(time_sec)
         if self.player.is_playing():
             self.player.stop(reset_position_sec=None)
@@ -750,17 +800,22 @@ class SomaDocument:
         self._playback_speed_ratio = 1.0
 
     def pause(self) -> None:
+        self._cancel_playback_prepare()
         self.player.pause()
         self._playback_mode = None
         self._playback_speed_ratio = 1.0
 
     def stop(self, return_position_sec: float | None = 0.0) -> None:
+        self._cancel_playback_prepare()
         reset_position = None if return_position_sec is None else return_position_sec / self._playback_speed_ratio
         self.player.stop(reset_position_sec=reset_position)
         self._playback_mode = None
         self._playback_speed_ratio = 1.0
 
     def playback_position(self) -> float:
+        with self._lock:
+            if self._is_preparing_playback:
+                return self._pending_playback_position_sec
         return self.player.position_sec() * self._playback_speed_ratio
 
     def is_playing(self) -> bool:
@@ -768,6 +823,41 @@ class SomaDocument:
 
     def is_probe_playing(self) -> bool:
         return self._playback_mode == "probe" and self.player.is_playing()
+
+    def is_preparing_playback(self) -> bool:
+        with self._lock:
+            return self._is_preparing_playback
+
+    def _cancel_playback_prepare(self) -> None:
+        with self._lock:
+            self._playback_prepare_request_id += 1
+            self._is_preparing_playback = False
+
+    def _invalidate_playback_cache(self) -> None:
+        with self._lock:
+            self._playback_content_revision += 1
+            self._playback_cache_key = None
+            self._playback_cache_buffer = None
+
+    def _playback_cache_lookup_key(
+        self, mix_ratio: float, speed_ratio: float, mode: str
+    ) -> tuple[int, float, float, str]:
+        with self._lock:
+            revision = self._playback_content_revision
+        return (revision, round(float(mix_ratio), 4), round(float(speed_ratio), 6), mode)
+
+    def _lookup_playback_cache(self, key: tuple[int, float, float, str]) -> np.ndarray | None:
+        with self._lock:
+            if self._playback_cache_key != key or self._playback_cache_buffer is None:
+                return None
+            return self._playback_cache_buffer
+
+    def _store_playback_cache(self, key: tuple[int, float, float, str], buffer: np.ndarray) -> None:
+        with self._lock:
+            if key[0] != self._playback_content_revision:
+                return
+            self._playback_cache_key = key
+            self._playback_cache_buffer = buffer.astype(np.float32, copy=False)
 
     def render_cv_buffers(self, sample_rate: int) -> tuple[np.ndarray, np.ndarray, float, float]:
         if self.audio_info is None:
@@ -890,6 +980,61 @@ class SomaDocument:
             return np.concatenate([audio.astype(np.float32), pad])
         return audio[:length].astype(np.float32)
 
+    def _build_speed_adjusted_buffer(
+        self,
+        mix_ratio: float,
+        speed_ratio: float,
+        sample_rate: int,
+        time_stretch_mode: str,
+    ) -> np.ndarray:
+        if mix_ratio >= 1.0 - 1e-6:
+            return self._render_resynth_time_scaled(speed_ratio, sample_rate)
+        mixed = self._mix_buffer(mix_ratio)
+        stretched = time_stretch_pitch_preserving(
+            mixed,
+            speed_ratio,
+            sample_rate,
+            mode=time_stretch_mode,
+        )
+        return peak_normalize_buffer(stretched)
+
+    def _render_resynth_time_scaled(self, speed_ratio: float, sample_rate: int) -> np.ndarray:
+        if self.audio_info is None:
+            return np.zeros(1, dtype=np.float32)
+        duration = self.audio_info.duration_sec
+        total_samples = max(1, int((duration / speed_ratio) * sample_rate))
+        buffer = np.zeros(total_samples, dtype=np.float64)
+        fade_samples = max(1, int(sample_rate * 0.005))
+        for partial in self.store.all():
+            if partial.is_muted:
+                continue
+            points = partial.sorted_points()
+            if len(points) < 2:
+                continue
+            times = np.array([point.time for point in points], dtype=np.float64)
+            freqs = np.array([point.freq for point in points], dtype=np.float64)
+            amps = np.array([point.amp for point in points], dtype=np.float64)
+            start_scaled = max(0.0, float(times[0]) / speed_ratio)
+            end_scaled = min(float(times[-1]) / speed_ratio, total_samples / sample_rate)
+            start_idx = int(start_scaled * sample_rate)
+            end_idx = int(end_scaled * sample_rate)
+            if end_idx <= start_idx:
+                continue
+            scaled_times = (np.arange(end_idx - start_idx) / sample_rate) + start_scaled
+            source_times = scaled_times * speed_ratio
+            freq_interp = np.interp(source_times, times, freqs)
+            amp_interp = np.interp(source_times, times, amps)
+            phase = 2.0 * np.pi * np.cumsum(freq_interp) / sample_rate
+            wave = np.sin(phase) * amp_interp
+            fade = min(fade_samples, wave.size // 2)
+            if fade > 0:
+                fade_in = np.linspace(0.0, 1.0, fade, dtype=np.float64)
+                fade_out = np.linspace(1.0, 0.0, fade, dtype=np.float64)
+                wave[:fade] *= fade_in
+                wave[-fade:] *= fade_out
+            buffer[start_idx:end_idx] += wave
+        return peak_normalize_buffer(buffer.astype(np.float32))
+
     def _apply_state(self, state: ProjectState) -> None:
         if state.settings is not None:
             self.settings = state.settings
@@ -904,6 +1049,7 @@ class SomaDocument:
                 continue
             self.store.update(snapshot)
             self.synth.apply_partial(snapshot)
+        self._invalidate_playback_cache()
 
     def _snapshot_state(
         self,
