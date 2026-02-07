@@ -7,6 +7,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
   const [isPlaying, setIsPlaying] = useState(false)
   const [isProbePlaying, setIsProbePlaying] = useState(false)
   const [mixValue, setMixValue] = useState(55)
+  const [speedValue, setSpeedValue] = useState(100)
   const [playbackPosition, setPlaybackPosition] = useState(0)
   const playbackStartRef = useRef(0)
 
@@ -43,6 +44,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
         mix_ratio: mixValue / 100,
         loop: false,
         start_position_sec: startPosition,
+        speed_ratio: speedValue / 100,
       })
       if (result.status === 'ok') {
         playbackStartRef.current = startPosition
@@ -54,7 +56,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       const message = error instanceof Error ? error.message : 'Unexpected error'
       reportError('Playback', message)
     }
-  }, [analysisState, isPlaying, isProbePlaying, mixValue, playbackPosition, reportError])
+  }, [analysisState, isPlaying, isProbePlaying, mixValue, playbackPosition, reportError, speedValue])
 
   const stop = useCallback(async () => {
     const api = isPywebviewApiAvailable() ? pywebviewApi : null
@@ -140,8 +142,10 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
     isPlaying,
     isProbePlaying,
     mixValue,
+    speedValue,
     playbackPosition,
     setMixValue,
+    setSpeedValue,
     play,
     stop,
     togglePlayStop,

@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 
 from soma.analysis import estimate_cwt_amp_reference, make_spectrogram_stft
-from soma.audio_utils import peak_normalize_buffer
+from soma.audio_utils import peak_normalize_buffer, time_stretch_pitch_preserving
 from soma.models import (
     AnalysisSettings,
     AudioInfo,
@@ -690,7 +690,13 @@ class SomaDocument:
         self._compute_manager.submit_viewport(request_id, params)
         return request_id
 
-    def play(self, mix_ratio: float, loop: bool, start_position_sec: float | None = None) -> None:
+    def play(
+        self,
+        mix_ratio: float,
+        loop: bool,
+        start_position_sec: float | None = None,
+        speed_ratio: float = 1.0,
+    ) -> None:
         if self.audio_info is None:
             return
         if self.is_resynthesizing():
@@ -698,7 +704,10 @@ class SomaDocument:
         if self.player.is_playing():
             self.player.stop(reset_position_sec=None)
             self._playback_mode = None
-        self.player.load(self._mix_buffer(mix_ratio), self.audio_info.sample_rate)
+        clamped_speed = float(np.clip(speed_ratio, 0.125, 8.0))
+        mixed = self._mix_buffer(mix_ratio)
+        stretched = time_stretch_pitch_preserving(mixed, clamped_speed, self.audio_info.sample_rate)
+        self.player.load(peak_normalize_buffer(stretched), self.audio_info.sample_rate)
         self.player.play(loop=loop, start_position_sec=start_position_sec or 0.0)
         self._playback_mode = "normal"
 

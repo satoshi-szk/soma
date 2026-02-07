@@ -79,9 +79,10 @@ class SelectInBoxPayload(PayloadBase):
 
 
 class PlayPayload(PayloadBase):
-    mix_ratio: float = 0.5
+    mix_ratio: float = Field(default=0.5, ge=0.0, le=1.0)
     loop: bool = False
     start_position_sec: float | None = None
+    speed_ratio: float = Field(default=1.0, ge=0.125, le=8.0)
 
 
 class StopPayload(PayloadBase):

@@ -1,6 +1,7 @@
 from soma.api_schema import (
     OpenAudioDataPayload,
     OpenAudioPathPayload,
+    PlayPayload,
     TracePartialPayload,
     UpdateSettingsPayload,
     parse_payload,
@@ -49,3 +50,16 @@ def test_parse_payload_accepts_audio_data() -> None:
     assert error is None
     assert parsed is not None
     assert parsed.name == "example.wav"
+
+
+def test_parse_payload_accepts_play_speed_ratio() -> None:
+    parsed, error = parse_payload(PlayPayload, {"mix_ratio": 0.4, "speed_ratio": 0.125})
+    assert error is None
+    assert parsed is not None
+    assert parsed.speed_ratio == 0.125
+
+
+def test_parse_payload_rejects_play_speed_ratio_out_of_range() -> None:
+    parsed, error = parse_payload(PlayPayload, {"speed_ratio": 8.1})
+    assert parsed is None
+    assert error is not None

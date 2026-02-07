@@ -152,6 +152,7 @@ export const apiSchemas = {
       mix_ratio: z.number().optional(),
       loop: z.boolean().optional(),
       start_position_sec: z.number().optional(),
+      speed_ratio: z.number().optional(),
     }),
     response: z.union([okStatusSchema, errorStatusSchema]),
   },

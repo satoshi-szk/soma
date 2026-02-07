@@ -33,6 +33,7 @@ A GUI application that extracts partials specified by humans on a spectrogram an
 - Playback of input audio files
 - Playback of partials (resynthesis with sine waves)
 - Mix playback of original + resynthesis (one knob)
+- Playback speed control for original + resynthesis (`1/8x` to `8x`, pitch preserved)
 - Per-partial mute / unmute
 
 ## Features to add later
@@ -68,5 +69,6 @@ A GUI application that extracts partials specified by humans on a spectrogram an
 - Allow choosing which MPE CC to assign partial amplitude to at export time.
 - Do not do extra things like auto-muting low amplitudes or auto-splitting partials. Respect user-drawn partials and enforce 1 partial = 1 note.
 - No real-time playback. After each edit, resynthesize sine waves in the background. If the user hits play during resynthesis, wait until background processing completes. Edits during playback take effect only after stopping and playing again.
+- Playback speed must be adjustable from `1/8x` to `8x` while preserving pitch for both original audio and sine-wave resynthesis.
 - Assume 10 to about 10,000 partials.
 - Resynthesis can ignore phase. Smoothly connect partial freq/amplitude, and apply about a 5ms fade-in/out at endpoints.

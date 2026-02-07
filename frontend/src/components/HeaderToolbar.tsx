@@ -7,6 +7,7 @@ export type HeaderToolbarProps = {
   isPlaying: boolean
   isProbePlaying: boolean
   mixValue: number
+  speedValue: number
   playbackTimeLabel: string
   playDisabled: boolean
   onMenuToggle: () => void
@@ -16,6 +17,7 @@ export type HeaderToolbarProps = {
   onProbeToggle: () => void
   onRewind: () => void
   onMixChange: (value: number) => void
+  onSpeedChange: (value: number) => void
   menuRef: React.RefObject<HTMLDivElement | null>
 }
 
@@ -25,6 +27,7 @@ export function HeaderToolbar({
   isPlaying,
   isProbePlaying,
   mixValue,
+  speedValue,
   playbackTimeLabel,
   playDisabled,
   onMenuToggle,
@@ -34,6 +37,7 @@ export function HeaderToolbar({
   onProbeToggle,
   onRewind,
   onMixChange,
+  onSpeedChange,
   menuRef,
 }: HeaderToolbarProps) {
   return (
@@ -132,6 +136,19 @@ export function HeaderToolbar({
             max={100}
             value={mixValue}
             onChange={(event) => onMixChange(Number(event.target.value))}
+          />
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[11px] tracking-normal text-[var(--ink)]">Speed {(speedValue / 100).toFixed(2)}x</span>
+          <input
+            aria-label="Playback speed"
+            className="h-1 w-40 accent-[var(--accent)]"
+            type="range"
+            min={12.5}
+            max={800}
+            step={0.5}
+            value={speedValue}
+            onChange={(event) => onSpeedChange(Number(event.target.value))}
           />
         </div>
         <div className="rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-4 py-2 text-[12px] font-semibold tracking-normal text-[var(--ink)]">
