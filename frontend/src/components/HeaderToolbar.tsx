@@ -7,6 +7,7 @@ export type HeaderToolbarProps = {
   isPlaying: boolean
   isProbePlaying: boolean
   mixValue: number
+  speedPresetIndex: number
   speedValue: number
   playbackTimeLabel: string
   playDisabled: boolean
@@ -27,6 +28,7 @@ export function HeaderToolbar({
   isPlaying,
   isProbePlaying,
   mixValue,
+  speedPresetIndex,
   speedValue,
   playbackTimeLabel,
   playDisabled,
@@ -139,15 +141,15 @@ export function HeaderToolbar({
           />
         </div>
         <div className="flex flex-col">
-          <span className="text-[11px] tracking-normal text-[var(--ink)]">Speed {(speedValue / 100).toFixed(2)}x</span>
+          <span className="text-[11px] tracking-normal text-[var(--ink)]">Speed {formatSpeedLabel(speedValue)}</span>
           <input
             aria-label="Playback speed"
             className="h-1 w-40 accent-[var(--accent)]"
             type="range"
-            min={12.5}
-            max={800}
-            step={0.5}
-            value={speedValue}
+            min={0}
+            max={6}
+            step={1}
+            value={speedPresetIndex}
             onChange={(event) => onSpeedChange(Number(event.target.value))}
           />
         </div>
@@ -206,4 +208,11 @@ function StopIcon() {
       <rect x="3.1" y="3.1" width="7.8" height="7.8" rx="0.9" fill="currentColor" />
     </svg>
   )
+}
+
+function formatSpeedLabel(speed: number): string {
+  if (speed === 0.125) return '1/8x'
+  if (speed === 0.25) return '1/4x'
+  if (speed === 0.5) return '1/2x'
+  return `${speed}x`
 }

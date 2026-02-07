@@ -2,14 +2,17 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { isPywebviewApiAvailable, pywebviewApi } from '../app/pywebviewApi'
 
 type ReportError = (context: string, message: string) => void
+const SPEED_PRESET_RATIOS = [0.125, 0.25, 0.5, 1, 2, 4, 8] as const
+const DEFAULT_SPEED_PRESET_INDEX = 3
 
 export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'analyzing' | 'error') {
   const [isPlaying, setIsPlaying] = useState(false)
   const [isProbePlaying, setIsProbePlaying] = useState(false)
   const [mixValue, setMixValue] = useState(55)
-  const [speedValue, setSpeedValue] = useState(100)
+  const [speedPresetIndex, setSpeedPresetIndex] = useState(DEFAULT_SPEED_PRESET_INDEX)
   const [playbackPosition, setPlaybackPosition] = useState(0)
   const playbackStartRef = useRef(0)
+  const speedValue = SPEED_PRESET_RATIOS[speedPresetIndex]
 
   // 再生位置をポーリングで取得する
   useEffect(() => {
@@ -44,7 +47,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
         mix_ratio: mixValue / 100,
         loop: false,
         start_position_sec: startPosition,
-        speed_ratio: speedValue / 100,
+        speed_ratio: speedValue,
       })
       if (result.status === 'ok') {
         playbackStartRef.current = startPosition
@@ -143,9 +146,10 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
     isProbePlaying,
     mixValue,
     speedValue,
+    speedPresetIndex,
     playbackPosition,
     setMixValue,
-    setSpeedValue,
+    setSpeedPresetIndex,
     play,
     stop,
     togglePlayStop,

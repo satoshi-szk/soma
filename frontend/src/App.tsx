@@ -390,6 +390,7 @@ function App() {
           activeTool={activeTool}
           isPlaying={playback.isPlaying}
           mixValue={playback.mixValue}
+          speedPresetIndex={playback.speedPresetIndex}
           speedValue={playback.speedValue}
           playbackTimeLabel={formatDuration(playback.playbackPosition)}
           isProbePlaying={playback.isProbePlaying}
@@ -400,7 +401,7 @@ function App() {
           onProbeToggle={() => void playback.toggleHarmonicProbe()}
           onRewind={handleRewind}
           onMixChange={playback.setMixValue}
-          onSpeedChange={playback.setSpeedValue}
+          onSpeedChange={playback.setSpeedPresetIndex}
           menuRef={menuRef}
           playDisabled={analysis.analysisState === 'analyzing' || playback.isProbePlaying}
         />
