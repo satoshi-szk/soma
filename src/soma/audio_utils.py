@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import librosa
 import numpy as np
 from scipy.signal import istft, stft
 
@@ -16,7 +17,12 @@ def peak_normalize_buffer(buffer: np.ndarray, target_peak: float = 0.99) -> np.n
     return np.asarray(np.clip(normalized, -1.0, 1.0), dtype=np.float32)
 
 
-def time_stretch_pitch_preserving(buffer: np.ndarray, speed_ratio: float, sample_rate: int) -> np.ndarray:
+def time_stretch_pitch_preserving(
+    buffer: np.ndarray,
+    speed_ratio: float,
+    sample_rate: int,
+    mode: str = "librosa",
+) -> np.ndarray:
     if buffer.size == 0:
         return buffer.astype(np.float32)
 
@@ -25,7 +31,26 @@ def time_stretch_pitch_preserving(buffer: np.ndarray, speed_ratio: float, sample
         return buffer.astype(np.float32)
     if abs(ratio - 1.0) <= 1e-4:
         return buffer.astype(np.float32)
+    if mode == "native":
+        return _time_stretch_native_phase_vocoder(buffer, ratio, sample_rate)
+    if mode == "librosa":
+        return _time_stretch_librosa(buffer, ratio)
+    raise ValueError(f"Unknown time-stretch mode: {mode}")
 
+
+def _time_stretch_librosa(buffer: np.ndarray, ratio: float) -> np.ndarray:
+    mono = np.asarray(buffer, dtype=np.float32)
+    stretched_wave = librosa.effects.time_stretch(y=mono, rate=ratio)
+
+    target_len = max(1, int(np.round(mono.size / ratio)))
+    if stretched_wave.size < target_len:
+        stretched_wave = np.pad(stretched_wave, (0, target_len - stretched_wave.size))
+    elif stretched_wave.size > target_len:
+        stretched_wave = stretched_wave[:target_len]
+    return np.asarray(stretched_wave, dtype=np.float32)
+
+
+def _time_stretch_native_phase_vocoder(buffer: np.ndarray, ratio: float, sample_rate: int) -> np.ndarray:
     mono = np.asarray(buffer, dtype=np.float32)
     n_fft = 2048 if mono.size >= 2048 else max(256, int(2 ** np.floor(np.log2(max(32, mono.size)))))
     hop = max(1, n_fft // 4)

@@ -51,3 +51,21 @@ def test_mix_buffer_peak_normalize_silence_keeps_silence() -> None:
     doc = _make_doc()
     mixed = doc._mix_buffer(1.0)
     assert np.allclose(mixed, 0.0)
+
+
+def test_playback_position_and_start_are_mapped_by_speed_ratio() -> None:
+    doc = _make_doc()
+    captured: dict[str, float] = {}
+
+    def fake_play(*, loop: bool, start_position_sec: float = 0.0) -> None:
+        del loop
+        captured["start_position_sec"] = start_position_sec
+
+    doc.player.play = fake_play  # type: ignore[method-assign]
+    doc.player.is_playing = lambda: False  # type: ignore[method-assign]
+    doc.player.position_sec = lambda: 3.0  # type: ignore[method-assign]
+
+    doc.play(mix_ratio=0.5, loop=False, start_position_sec=2.0, speed_ratio=0.5)
+
+    assert captured["start_position_sec"] == 4.0
+    assert doc.playback_position() == 1.5

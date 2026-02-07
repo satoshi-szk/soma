@@ -153,6 +153,7 @@ export const apiSchemas = {
       loop: z.boolean().optional(),
       start_position_sec: z.number().optional(),
       speed_ratio: z.number().optional(),
+      time_stretch_mode: z.enum(['native', 'librosa']).optional(),
     }),
     response: z.union([okStatusSchema, errorStatusSchema]),
   },

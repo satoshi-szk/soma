@@ -114,6 +114,7 @@ class SomaDocument:
         self._active_snap_trace: list[tuple[float, float]] | None = None
         self._queued_snaps: list[tuple[str, list[tuple[float, float]]]] = []
         self._playback_mode: str | None = None
+        self._playback_speed_ratio = 1.0
 
         # バックグラウンド処理用の compute manager を初期化する。
         self._compute_manager = ComputeManager(
@@ -143,6 +144,7 @@ class SomaDocument:
         self._active_snap_trace = None
         self._queued_snaps = []
         self._playback_mode = None
+        self._playback_speed_ratio = 1.0
 
     def _emit(self, payload: dict[str, Any]) -> None:
         if self._event_sink is None:
@@ -696,6 +698,7 @@ class SomaDocument:
         loop: bool,
         start_position_sec: float | None = None,
         speed_ratio: float = 1.0,
+        time_stretch_mode: str = "librosa",
     ) -> None:
         if self.audio_info is None:
             return
@@ -704,12 +707,20 @@ class SomaDocument:
         if self.player.is_playing():
             self.player.stop(reset_position_sec=None)
             self._playback_mode = None
+            self._playback_speed_ratio = 1.0
         clamped_speed = float(np.clip(speed_ratio, 0.125, 8.0))
         mixed = self._mix_buffer(mix_ratio)
-        stretched = time_stretch_pitch_preserving(mixed, clamped_speed, self.audio_info.sample_rate)
+        stretched = time_stretch_pitch_preserving(
+            mixed,
+            clamped_speed,
+            self.audio_info.sample_rate,
+            mode=time_stretch_mode,
+        )
         self.player.load(peak_normalize_buffer(stretched), self.audio_info.sample_rate)
-        self.player.play(loop=loop, start_position_sec=start_position_sec or 0.0)
+        start_sec = float(start_position_sec or 0.0)
+        self.player.play(loop=loop, start_position_sec=start_sec / clamped_speed)
         self._playback_mode = "normal"
+        self._playback_speed_ratio = clamped_speed
 
     def start_harmonic_probe(self, time_sec: float) -> bool:
         if self.audio_info is None:
@@ -720,6 +731,7 @@ class SomaDocument:
         started = self.player.play_probe(freqs, amps)
         if started:
             self._playback_mode = "probe"
+            self._playback_speed_ratio = 1.0
         return started
 
     def update_harmonic_probe(self, time_sec: float) -> bool:
@@ -735,17 +747,21 @@ class SomaDocument:
         if not stopped:
             self.player.stop(reset_position_sec=None)
         self._playback_mode = None
+        self._playback_speed_ratio = 1.0
 
     def pause(self) -> None:
         self.player.pause()
         self._playback_mode = None
+        self._playback_speed_ratio = 1.0
 
     def stop(self, return_position_sec: float | None = 0.0) -> None:
-        self.player.stop(reset_position_sec=return_position_sec)
+        reset_position = None if return_position_sec is None else return_position_sec / self._playback_speed_ratio
+        self.player.stop(reset_position_sec=reset_position)
         self._playback_mode = None
+        self._playback_speed_ratio = 1.0
 
     def playback_position(self) -> float:
-        return self.player.position_sec()
+        return self.player.position_sec() * self._playback_speed_ratio
 
     def is_playing(self) -> bool:
         return self._playback_mode == "normal" and self.player.is_playing()

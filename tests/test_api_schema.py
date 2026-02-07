@@ -63,3 +63,16 @@ def test_parse_payload_rejects_play_speed_ratio_out_of_range() -> None:
     parsed, error = parse_payload(PlayPayload, {"speed_ratio": 8.1})
     assert parsed is None
     assert error is not None
+
+
+def test_parse_payload_accepts_play_time_stretch_mode() -> None:
+    parsed, error = parse_payload(PlayPayload, {"time_stretch_mode": "native"})
+    assert error is None
+    assert parsed is not None
+    assert parsed.time_stretch_mode == "native"
+
+
+def test_parse_payload_rejects_play_invalid_time_stretch_mode() -> None:
+    parsed, error = parse_payload(PlayPayload, {"time_stretch_mode": "invalid"})
+    assert parsed is None
+    assert error is not None

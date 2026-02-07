@@ -491,6 +491,7 @@ class SomaApi:
                 parsed.loop,
                 parsed.start_position_sec,
                 parsed.speed_ratio,
+                parsed.time_stretch_mode,
             )
             return {"status": "ok"}
         except Exception as exc:  # pragma: no cover - surface errors to UI

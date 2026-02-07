@@ -9,6 +9,7 @@ export type HeaderToolbarProps = {
   mixValue: number
   speedPresetIndex: number
   speedValue: number
+  timeStretchMode: 'native' | 'librosa'
   playbackTimeLabel: string
   playDisabled: boolean
   onMenuToggle: () => void
@@ -19,6 +20,7 @@ export type HeaderToolbarProps = {
   onRewind: () => void
   onMixChange: (value: number) => void
   onSpeedChange: (value: number) => void
+  onTimeStretchModeChange: (mode: 'native' | 'librosa') => void
   menuRef: React.RefObject<HTMLDivElement | null>
 }
 
@@ -30,6 +32,7 @@ export function HeaderToolbar({
   mixValue,
   speedPresetIndex,
   speedValue,
+  timeStretchMode,
   playbackTimeLabel,
   playDisabled,
   onMenuToggle,
@@ -40,6 +43,7 @@ export function HeaderToolbar({
   onRewind,
   onMixChange,
   onSpeedChange,
+  onTimeStretchModeChange,
   menuRef,
 }: HeaderToolbarProps) {
   return (
@@ -152,6 +156,18 @@ export function HeaderToolbar({
             value={speedPresetIndex}
             onChange={(event) => onSpeedChange(Number(event.target.value))}
           />
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[11px] tracking-normal text-[var(--ink)]">Stretch</span>
+          <select
+            aria-label="Time stretch mode"
+            className="rounded-md border border-[var(--panel-border)] bg-[var(--panel)] px-2 py-1 text-[11px] text-[var(--ink)]"
+            value={timeStretchMode}
+            onChange={(event) => onTimeStretchModeChange(event.target.value as 'native' | 'librosa')}
+          >
+            <option value="librosa">Librosa</option>
+            <option value="native">Native</option>
+          </select>
         </div>
         <div className="rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-4 py-2 text-[12px] font-semibold tracking-normal text-[var(--ink)]">
           {playbackTimeLabel}

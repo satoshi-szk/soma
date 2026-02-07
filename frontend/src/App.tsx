@@ -392,6 +392,7 @@ function App() {
           mixValue={playback.mixValue}
           speedPresetIndex={playback.speedPresetIndex}
           speedValue={playback.speedValue}
+          timeStretchMode={playback.timeStretchMode}
           playbackTimeLabel={formatDuration(playback.playbackPosition)}
           isProbePlaying={playback.isProbePlaying}
           onMenuToggle={() => setMenuOpen((prev) => !prev)}
@@ -402,6 +403,7 @@ function App() {
           onRewind={handleRewind}
           onMixChange={playback.setMixValue}
           onSpeedChange={playback.setSpeedPresetIndex}
+          onTimeStretchModeChange={playback.setTimeStretchMode}
           menuRef={menuRef}
           playDisabled={analysis.analysisState === 'analyzing' || playback.isProbePlaying}
         />

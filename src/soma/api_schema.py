@@ -83,6 +83,7 @@ class PlayPayload(PayloadBase):
     loop: bool = False
     start_position_sec: float | None = None
     speed_ratio: float = Field(default=1.0, ge=0.125, le=8.0)
+    time_stretch_mode: str = Field(default="librosa", pattern="^(native|librosa)$")
 
 
 class StopPayload(PayloadBase):

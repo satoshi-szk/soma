@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { isPywebviewApiAvailable, pywebviewApi } from '../app/pywebviewApi'
 
 type ReportError = (context: string, message: string) => void
+type TimeStretchMode = 'native' | 'librosa'
 const SPEED_PRESET_RATIOS = [0.125, 0.25, 0.5, 1, 2, 4, 8] as const
 const DEFAULT_SPEED_PRESET_INDEX = 3
 
@@ -10,6 +11,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
   const [isProbePlaying, setIsProbePlaying] = useState(false)
   const [mixValue, setMixValue] = useState(55)
   const [speedPresetIndex, setSpeedPresetIndex] = useState(DEFAULT_SPEED_PRESET_INDEX)
+  const [timeStretchMode, setTimeStretchMode] = useState<TimeStretchMode>('librosa')
   const [playbackPosition, setPlaybackPosition] = useState(0)
   const playbackStartRef = useRef(0)
   const speedValue = SPEED_PRESET_RATIOS[speedPresetIndex]
@@ -48,6 +50,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
         loop: false,
         start_position_sec: startPosition,
         speed_ratio: speedValue,
+        time_stretch_mode: timeStretchMode,
       })
       if (result.status === 'ok') {
         playbackStartRef.current = startPosition
@@ -59,7 +62,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       const message = error instanceof Error ? error.message : 'Unexpected error'
       reportError('Playback', message)
     }
-  }, [analysisState, isPlaying, isProbePlaying, mixValue, playbackPosition, reportError, speedValue])
+  }, [analysisState, isPlaying, isProbePlaying, mixValue, playbackPosition, reportError, speedValue, timeStretchMode])
 
   const stop = useCallback(async () => {
     const api = isPywebviewApiAvailable() ? pywebviewApi : null
@@ -147,9 +150,11 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
     mixValue,
     speedValue,
     speedPresetIndex,
+    timeStretchMode,
     playbackPosition,
     setMixValue,
     setSpeedPresetIndex,
+    setTimeStretchMode,
     play,
     stop,
     togglePlayStop,
