@@ -121,7 +121,7 @@ export function HeaderToolbar({
           </button>
         </div>
         <div className="flex flex-col">
-          <span className="text-[10px] uppercase tracking-[0.22em] text-[var(--muted)]">
+          <span className="text-[11px] tracking-normal text-[var(--ink)]">
             Original {100 - mixValue}% / Resynth {mixValue}%
           </span>
           <input
@@ -134,18 +134,18 @@ export function HeaderToolbar({
             onChange={(event) => onMixChange(Number(event.target.value))}
           />
         </div>
-        <div className="rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.2em] text-[var(--accent-strong)]">
+        <div className="rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-4 py-2 text-[12px] font-semibold tracking-normal text-[var(--ink)]">
           {playbackTimeLabel}
         </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
-        <div className="grid grid-cols-2 gap-2 rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] p-2 text-[10px] font-semibold uppercase tracking-[0.2em] text-[var(--muted)] lg:grid-cols-4">
+        <div className="grid grid-cols-2 gap-2 rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] p-2 text-[11px] font-semibold tracking-normal text-[var(--ink)] lg:grid-cols-4">
           {TOOL_LIST.map((tool) => (
             <button
               key={tool.id}
               onClick={() => onToolChange(tool.id)}
-              className={`rounded-md px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.2em] ${
+              className={`rounded-md px-3 py-2 text-[11px] font-semibold tracking-normal ${
                 activeTool === tool.id
                   ? 'bg-[var(--accent)] text-white'
                   : 'text-[var(--muted)] hover:bg-[var(--panel-strong)]'

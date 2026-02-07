@@ -1,6 +1,8 @@
 import { useCallback, useMemo } from 'react'
 import type { Partial, SpectrogramPreview } from '../../../app/types'
 
+const AMP_DB_FLOOR = -60
+
 type Params = {
   preview: SpectrogramPreview | null
   freqMin: number
@@ -100,11 +102,14 @@ export function useRulerMetrics({
 
   const ampToLaneY = useCallback(
     (amp: number) => {
-      const normalized = Math.min(1, Math.max(0, amp / maxAmp))
+      const safeAmp = Math.max(amp, 1e-12)
+      const db = 20 * Math.log10(safeAmp / maxAmp)
+      const clampedDb = Math.max(AMP_DB_FLOOR, Math.min(0, db))
+      const normalized = (clampedDb - AMP_DB_FLOOR) / -AMP_DB_FLOOR
       return automationContentHeight - normalized * automationContentHeight
     },
     [automationContentHeight, maxAmp],
   )
 
-  return { pxPerOctave, freqRulerMarks, timeMarks, ampToLaneY }
+  return { pxPerOctave, freqRulerMarks, timeMarks, ampToLaneY, maxAmp }
 }

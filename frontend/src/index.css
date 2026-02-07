@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -10,14 +10,14 @@
   --panel-strong: #1a2432;
   --panel-border: #2a3a4d;
   --ink: #e8eef7;
-  --muted: #98a8be;
+  --muted: #c7d3e6;
   --accent: #2f8ea3;
   --accent-strong: #6fd0f3;
   --accent-warm: #d37b4f;
   --canvas: #0d1520;
   --canvas-glow: #172231;
-  --font-sans: 'Space Grotesk', sans-serif;
-  --font-mono: 'IBM Plex Mono', monospace;
+  --font-sans: 'Roboto Mono', monospace;
+  --font-mono: 'Roboto Mono', monospace;
 }
 
 *,
@@ -36,6 +36,7 @@ body {
   margin: 0;
   min-height: 100vh;
   font-family: var(--font-sans);
+  font-variant-numeric: tabular-nums lining-nums;
   color: var(--ink);
   background-color: var(--bg);
   text-rendering: optimizeLegibility;

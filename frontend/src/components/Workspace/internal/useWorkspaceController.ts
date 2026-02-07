@@ -192,7 +192,8 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
       const oldScaleX = zoomX
       const direction = event.evt.deltaY > 0 ? -1 : 1
       const newScaleX = direction > 0 ? oldScaleX * scaleBy : oldScaleX / scaleBy
-      const clampedX = Math.min(ZOOM_X_MAX_PX_PER_SEC, Math.max(ZOOM_X_MIN_PX_PER_SEC, newScaleX))
+      const minZoomX = Math.max(ZOOM_X_MIN_PX_PER_SEC, stageSize.width / Math.max(duration, 1e-6))
+      const clampedX = Math.min(ZOOM_X_MAX_PX_PER_SEC, Math.max(minZoomX, newScaleX))
 
       const oldTimeScale = (duration * oldScaleX) / preview.width
       const newTimeScale = (duration * clampedX) / preview.width
@@ -203,7 +204,7 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
       }
       onZoomXChange(clampedX, newPan)
     },
-    [preview, pan, onPanChange, zoomX, duration, onZoomXChange]
+    [preview, pan, onPanChange, zoomX, duration, onZoomXChange, stageSize.width]
   )
 
   const handleStageMouseDown = useCallback(
@@ -356,7 +357,7 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
       .join(' ')
   }, [tracePath, preview, pan, contentOffset, timeToXValue, freqToYValue, scale])
 
-  const { pxPerOctave, freqRulerMarks, timeMarks, ampToLaneY } = useRulerMetrics({
+  const { pxPerOctave, freqRulerMarks, timeMarks, ampToLaneY, maxAmp } = useRulerMetrics({
     preview,
     freqMin,
     freqMax,
@@ -385,7 +386,7 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
           id: partial.id,
           x,
           y,
-          text: formatNoteWithCents(sample.freq),
+          text: `${formatNoteWithCents(sample.freq)} | ${formatAmpDb(sample.amp, maxAmp)}`,
         }
       })
       .filter((item): item is { id: string; x: number; y: number; text: string } => item !== null)
@@ -397,6 +398,7 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
     playbackPosition,
     scale,
     partials,
+    maxAmp,
     freqToYValue,
     rulerHeight,
     spectrogramAreaHeight,
@@ -516,4 +518,14 @@ const samplePartialAtTime = (partial: Partial, timeSec: number): { freq: number;
   }
   const tail = points[points.length - 1]
   return { freq: tail.freq, amp: tail.amp }
+}
+
+const formatAmpDb = (amp: number, maxAmp: number): string => {
+  const floorDb = -60
+  if (!Number.isFinite(amp) || amp <= 0 || !Number.isFinite(maxAmp) || maxAmp <= 0) {
+    return `${floorDb.toFixed(1)}dB`
+  }
+  const db = 20 * Math.log10(Math.max(amp, 1e-12) / maxAmp)
+  const clamped = Math.max(floorDb, Math.min(0, db))
+  return `${clamped.toFixed(1)}dB`
 }

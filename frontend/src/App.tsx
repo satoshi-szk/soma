@@ -405,14 +405,14 @@ function App() {
 
         <main className="flex h-full flex-1 min-h-0 flex-col gap-2">
           <section className="panel flex flex-1 min-h-0 flex-col rounded-none px-2 py-2">
-            <div className="flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.22em] text-[var(--muted)]">
+            <div className="flex items-center justify-between gap-3 text-[11px] tracking-normal text-[var(--ink)]">
               <span className="flex min-w-0 items-center gap-3">
-                <span>Workspace</span>
-                <span className="min-w-0 truncate font-mono text-[10px] normal-case tracking-normal text-[var(--muted)]">
+                <span className="font-semibold">Workspace</span>
+                <span className="min-w-0 truncate font-mono text-[11px] normal-case tracking-normal text-[var(--muted)]">
                   {audioInfoLabel}
                 </span>
               </span>
-              <span className="font-mono text-[10px]">{timeScaleLabel}</span>
+              <span className="font-mono text-[11px] text-[var(--ink)]">{timeScaleLabel}</span>
             </div>
             <div className="mt-1 flex-1 min-h-0 h-full">
               <Workspace
