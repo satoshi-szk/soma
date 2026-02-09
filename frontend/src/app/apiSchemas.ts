@@ -73,6 +73,7 @@ const statusResponseSchema = z.object({
   status: z.literal('ok'),
   is_playing: z.boolean(),
   is_probe_playing: z.boolean(),
+  is_preparing_playback: z.boolean(),
   is_resynthesizing: z.boolean(),
   position: z.number(),
 })
@@ -152,6 +153,8 @@ export const apiSchemas = {
       mix_ratio: z.number().optional(),
       loop: z.boolean().optional(),
       start_position_sec: z.number().optional(),
+      speed_ratio: z.number().optional(),
+      time_stretch_mode: z.enum(['native', 'librosa']).optional(),
     }),
     response: z.union([okStatusSchema, errorStatusSchema]),
   },

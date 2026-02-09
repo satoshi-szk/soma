@@ -486,7 +486,13 @@ class SomaApi:
             parsed = _validated_payload(PlayPayload, payload, "play")
             if isinstance(parsed, dict):
                 return parsed
-            self._doc.play(parsed.mix_ratio, parsed.loop, parsed.start_position_sec)
+            self._doc.play(
+                parsed.mix_ratio,
+                parsed.loop,
+                parsed.start_position_sec,
+                parsed.speed_ratio,
+                parsed.time_stretch_mode,
+            )
             return {"status": "ok"}
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("play failed")
@@ -584,6 +590,7 @@ class SomaApi:
             "status": "ok",
             "is_playing": self._doc.is_playing(),
             "is_probe_playing": self._doc.is_probe_playing(),
+            "is_preparing_playback": self._doc.is_preparing_playback(),
             "is_resynthesizing": self._doc.is_resynthesizing(),
             "position": self._doc.playback_position(),
         }

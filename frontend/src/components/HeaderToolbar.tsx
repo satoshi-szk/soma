@@ -5,10 +5,15 @@ export type HeaderToolbarProps = {
   menuOpen: boolean
   activeTool: ToolId
   isPlaying: boolean
+  isPreparingPlayback: boolean
   isProbePlaying: boolean
   mixValue: number
+  speedPresetIndex: number
+  speedValue: number
+  timeStretchMode: 'native' | 'librosa'
   playbackTimeLabel: string
   playDisabled: boolean
+  controlsDisabled: boolean
   onMenuToggle: () => void
   onMenuAction: (label: string) => void
   onToolChange: (tool: ToolId) => void
@@ -16,6 +21,8 @@ export type HeaderToolbarProps = {
   onProbeToggle: () => void
   onRewind: () => void
   onMixChange: (value: number) => void
+  onSpeedChange: (value: number) => void
+  onTimeStretchModeChange: (mode: 'native' | 'librosa') => void
   menuRef: React.RefObject<HTMLDivElement | null>
 }
 
@@ -23,10 +30,15 @@ export function HeaderToolbar({
   menuOpen,
   activeTool,
   isPlaying,
+  isPreparingPlayback,
   isProbePlaying,
   mixValue,
+  speedPresetIndex,
+  speedValue,
+  timeStretchMode,
   playbackTimeLabel,
   playDisabled,
+  controlsDisabled,
   onMenuToggle,
   onMenuAction,
   onToolChange,
@@ -34,6 +46,8 @@ export function HeaderToolbar({
   onProbeToggle,
   onRewind,
   onMixChange,
+  onSpeedChange,
+  onTimeStretchModeChange,
   menuRef,
 }: HeaderToolbarProps) {
   return (
@@ -109,11 +123,11 @@ export function HeaderToolbar({
             className={`rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${
               isProbePlaying
                 ? 'bg-[var(--accent)] text-white'
-                : isPlaying
+                : isPlaying || isPreparingPlayback
                   ? 'bg-[var(--panel-strong)] text-[var(--muted)]'
                   : 'border border-[var(--panel-border)] text-[var(--muted)]'
             }`}
-            disabled={isPlaying}
+            disabled={isPlaying || isPreparingPlayback}
             aria-label="Harmonic Probe"
             title="Harmonic Probe (H)"
           >
@@ -130,12 +144,41 @@ export function HeaderToolbar({
             type="range"
             min={0}
             max={100}
+            step={10}
             value={mixValue}
+            disabled={controlsDisabled}
             onChange={(event) => onMixChange(Number(event.target.value))}
           />
         </div>
+        <div className="flex flex-col">
+          <span className="text-[11px] tracking-normal text-[var(--ink)]">Speed {formatSpeedLabel(speedValue)}</span>
+          <input
+            aria-label="Playback speed"
+            className="h-1 w-40 accent-[var(--accent)]"
+            type="range"
+            min={0}
+            max={6}
+            step={1}
+            value={speedPresetIndex}
+            disabled={controlsDisabled}
+            onChange={(event) => onSpeedChange(Number(event.target.value))}
+          />
+        </div>
+        <div className="flex flex-col">
+          <span className="text-[11px] tracking-normal text-[var(--ink)]">Stretch</span>
+          <select
+            aria-label="Time stretch mode"
+            className="rounded-md border border-[var(--panel-border)] bg-[var(--panel)] px-2 py-1 text-[11px] text-[var(--ink)]"
+            value={timeStretchMode}
+            disabled={controlsDisabled}
+            onChange={(event) => onTimeStretchModeChange(event.target.value as 'native' | 'librosa')}
+          >
+            <option value="librosa">Librosa</option>
+            <option value="native">Native</option>
+          </select>
+        </div>
         <div className="rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-4 py-2 text-[12px] font-semibold tracking-normal text-[var(--ink)]">
-          {playbackTimeLabel}
+          {isPreparingPlayback ? 'Preparing playback...' : playbackTimeLabel}
         </div>
       </div>
 
@@ -189,4 +232,11 @@ function StopIcon() {
       <rect x="3.1" y="3.1" width="7.8" height="7.8" rx="0.9" fill="currentColor" />
     </svg>
   )
+}
+
+function formatSpeedLabel(speed: number): string {
+  if (speed === 0.125) return '1/8x'
+  if (speed === 0.25) return '1/4x'
+  if (speed === 0.5) return '1/2x'
+  return `${speed}x`
 }
