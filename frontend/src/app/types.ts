@@ -22,6 +22,10 @@ export type AudioInfo = {
   truncated: boolean
 }
 
+export type PlaybackSettings = {
+  master_volume: number
+}
+
 export type SpectrogramPreview = {
   width: number
   height: number

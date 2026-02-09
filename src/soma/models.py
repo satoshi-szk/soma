@@ -54,6 +54,14 @@ class AnalysisSettings:
 
 
 @dataclass(frozen=True)
+class PlaybackSettings:
+    master_volume: float = 1.0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
 class PartialPoint:
     time: float
     freq: float

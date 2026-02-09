@@ -7,7 +7,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from soma.models import AnalysisSettings, Partial, PartialPoint, ProjectMeta, SourceInfo, generate_bright_color
+from soma.models import (
+    AnalysisSettings,
+    Partial,
+    PartialPoint,
+    PlaybackSettings,
+    ProjectMeta,
+    SourceInfo,
+    generate_bright_color,
+)
 
 
 def compute_md5(path: Path) -> str:
@@ -21,6 +29,7 @@ def compute_md5(path: Path) -> str:
 def build_project_payload(
     source: SourceInfo,
     settings: AnalysisSettings,
+    playback_settings: PlaybackSettings,
     partials: list[Partial],
     created_at: str | None = None,
 ) -> dict[str, Any]:
@@ -29,6 +38,7 @@ def build_project_payload(
         "meta": meta.to_dict(),
         "source": source.to_dict(),
         "analysis_settings": settings.to_dict(),
+        "playback_settings": playback_settings.to_dict(),
         "data": {"partials": [partial.to_dict() for partial in partials]},
     }
 
@@ -70,6 +80,13 @@ def parse_source(data: dict[str, Any]) -> SourceInfo | None:
         duration_sec=float(source.get("duration_sec", 0.0)),
         md5_hash=str(source.get("md5_hash", "")),
     )
+
+
+def parse_playback_settings(data: dict[str, Any]) -> PlaybackSettings:
+    settings = data.get("playback_settings", {})
+    master_volume = float(settings.get("master_volume", 1.0)) if isinstance(settings, dict) else 1.0
+    master_volume = min(1.0, max(0.0, master_volume))
+    return PlaybackSettings(master_volume=master_volume)
 
 
 def parse_partials(data: dict[str, Any]) -> list[Partial]:

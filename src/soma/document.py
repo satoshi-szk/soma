@@ -19,6 +19,7 @@ from soma.models import (
     AudioInfo,
     Partial,
     PartialPoint,
+    PlaybackSettings,
     SourceInfo,
     SpectrogramPreview,
     generate_bright_color,
@@ -29,6 +30,7 @@ from soma.persistence import (
     compute_md5,
     load_project,
     parse_partials,
+    parse_playback_settings,
     parse_settings,
     parse_source,
 )
@@ -121,6 +123,10 @@ class SomaDocument:
         self._playback_content_revision = 0
         self._playback_cache_key: tuple[int, float, float, str] | None = None
         self._playback_cache_buffer: np.ndarray | None = None
+        self._master_volume = 1.0
+        self.player.set_master_volume(self._master_volume)
+        self._last_mix_ratio = 0.55
+        self._last_time_stretch_mode = "librosa"
 
         # バックグラウンド処理用の compute manager を初期化する。
         self._compute_manager = ComputeManager(
@@ -155,6 +161,7 @@ class SomaDocument:
         self._pending_playback_position_sec = 0.0
         self._playback_prepare_request_id += 1
         self._invalidate_playback_cache()
+        self.set_master_volume(1.0)
 
     def _emit(self, payload: dict[str, Any]) -> None:
         if self._event_sink is None:
@@ -722,6 +729,8 @@ class SomaDocument:
             return
         if self.is_resynthesizing():
             return
+        self._last_mix_ratio = float(np.clip(mix_ratio, 0.0, 1.0))
+        self._last_time_stretch_mode = time_stretch_mode
         self._cancel_playback_prepare()
         if self.player.is_playing():
             self.player.stop(reset_position_sec=None)
@@ -733,11 +742,11 @@ class SomaDocument:
         self._playback_mode = "normal"
         self._playback_speed_ratio = clamped_speed
         if abs(clamped_speed - 1.0) <= 1e-4:
-            mixed = self._mix_buffer(mix_ratio)
+            mixed = self._mix_buffer(self._last_mix_ratio)
             self.player.load(peak_normalize_buffer(mixed), self.audio_info.sample_rate)
             self.player.play(loop=loop, start_position_sec=start_sec)
             return
-        cache_key = self._playback_cache_lookup_key(mix_ratio, clamped_speed, time_stretch_mode)
+        cache_key = self._playback_cache_lookup_key(self._last_mix_ratio, clamped_speed, time_stretch_mode)
         cached = self._lookup_playback_cache(cache_key)
         if cached is not None:
             self.player.load(cached, self.audio_info.sample_rate)
@@ -751,7 +760,9 @@ class SomaDocument:
 
         def _worker() -> None:
             try:
-                prepared = self._build_speed_adjusted_buffer(mix_ratio, clamped_speed, sample_rate, time_stretch_mode)
+                prepared = self._build_speed_adjusted_buffer(
+                    self._last_mix_ratio, clamped_speed, sample_rate, time_stretch_mode
+                )
                 with self._lock:
                     if request_id != self._playback_prepare_request_id:
                         return
@@ -811,6 +822,38 @@ class SomaDocument:
         self.player.stop(reset_position_sec=reset_position)
         self._playback_mode = None
         self._playback_speed_ratio = 1.0
+
+    def set_master_volume(self, master_volume: float) -> float:
+        clamped = float(np.clip(master_volume, 0.0, 1.0))
+        self._master_volume = clamped
+        self.player.set_master_volume(clamped)
+        return clamped
+
+    def master_volume(self) -> float:
+        return self._master_volume
+
+    def update_mix_ratio(self, mix_ratio: float) -> bool:
+        if self.audio_info is None:
+            return False
+        if self._playback_mode != "normal":
+            return False
+        if not self.player.is_playing():
+            return False
+        clamped_mix = float(np.clip(mix_ratio, 0.0, 1.0))
+        self._last_mix_ratio = clamped_mix
+        position_sec = self.playback_position()
+        speed_ratio = self._playback_speed_ratio
+        time_stretch_mode = self._last_time_stretch_mode
+        sample_rate = self.audio_info.sample_rate
+        if abs(speed_ratio - 1.0) <= 1e-4:
+            updated = self._mix_buffer(clamped_mix)
+            self.player.update_buffer(updated, start_position_sec=position_sec)
+            return True
+        updated = self._build_speed_adjusted_buffer(clamped_mix, speed_ratio, sample_rate, time_stretch_mode)
+        self.player.update_buffer(updated, start_position_sec=position_sec / speed_ratio)
+        cache_key = self._playback_cache_lookup_key(clamped_mix, speed_ratio, time_stretch_mode)
+        self._store_playback_cache(cache_key, updated)
+        return True
 
     def playback_position(self) -> float:
         with self._lock:
@@ -906,7 +949,12 @@ class SomaDocument:
             raise ValueError("No audio loaded")
         path = _ensure_soma_extension(path)
         source_info = self._prepare_source_info_for_save(path)
-        payload = build_project_payload(source_info, self.settings, self.store.all())
+        payload = build_project_payload(
+            source_info,
+            self.settings,
+            PlaybackSettings(master_volume=self._master_volume),
+            self.store.all(),
+        )
         from soma.persistence import save_project
 
         save_project(path, payload)
@@ -953,15 +1001,17 @@ class SomaDocument:
         data = load_project(path)
         source = parse_source(data)
         settings = parse_settings(data)
+        playback_settings = parse_playback_settings(data)
         partials = parse_partials(data)
         self.settings = settings
+        self.set_master_volume(playback_settings.master_volume)
         self.store = PartialStore()
         for partial in partials:
             self.store.add(partial)
         self.project_path = path
         self.source_info = source
         self.undo_manager.clear()
-        return {"source": source, "settings": settings, "partials": partials}
+        return {"source": source, "settings": settings, "playback_settings": playback_settings, "partials": partials}
 
     def _mix_buffer(self, mix_ratio: float) -> np.ndarray:
         mix_ratio = float(np.clip(mix_ratio, 0.0, 1.0))

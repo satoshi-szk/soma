@@ -124,6 +124,7 @@ class AudioPlayer:
         self._probe_stop_after_fade = False
         self._probe_gain = 1.0
         self._probe_prev_gain = 1.0
+        self._master_gain = 1.0
 
     def load(self, buffer: np.ndarray, sample_rate: int) -> None:
         with self._lock:
@@ -131,6 +132,37 @@ class AudioPlayer:
             self._sample_rate = sample_rate
             self._position = 0
             self._mode = None
+
+    def update_buffer(self, buffer: np.ndarray, start_position_sec: float | None = None) -> None:
+        # 再生中のバッファ差し替え時に短いクロスフェードを入れて、クリックノイズを抑える。
+        with self._lock:
+            new_buffer = buffer.astype(np.float32)
+            if start_position_sec is not None:
+                next_position = self._seconds_to_sample_for_size(start_position_sec, new_buffer.size)
+            else:
+                next_position = min(self._position, new_buffer.size)
+
+            if self._playing and self._mode == "buffer" and self._buffer is not None:
+                old_buffer = self._buffer
+                old_position = min(self._position, old_buffer.size)
+                fade_samples = max(1, int(self._sample_rate * 0.015))
+                max_old = max(0, old_buffer.size - old_position)
+                max_new = max(0, new_buffer.size - next_position)
+                fade_samples = min(fade_samples, max_old, max_new)
+                if fade_samples > 0:
+                    old_head = old_buffer[old_position : old_position + fade_samples].astype(np.float64)
+                    new_head = new_buffer[next_position : next_position + fade_samples].astype(np.float64)
+                    ramp = np.linspace(0.0, 1.0, fade_samples, dtype=np.float64)
+                    blended = (old_head * (1.0 - ramp) + new_head * ramp).astype(np.float32)
+                    new_buffer = new_buffer.copy()
+                    new_buffer[next_position : next_position + fade_samples] = blended
+
+            self._buffer = new_buffer
+            self._position = next_position
+
+    def set_master_volume(self, gain: float) -> None:
+        with self._lock:
+            self._master_gain = float(np.clip(gain, 0.0, 1.0))
 
     def play(self, loop: bool = False, start_position_sec: float = 0.0) -> None:
         with self._lock:
@@ -224,7 +256,12 @@ class AudioPlayer:
     def _seconds_to_sample(self, seconds: float) -> int:
         if self._buffer is None:
             return 0
-        clamped = float(np.clip(seconds, 0.0, self._buffer.size / float(self._sample_rate)))
+        return self._seconds_to_sample_for_size(seconds, self._buffer.size)
+
+    def _seconds_to_sample_for_size(self, seconds: float, size: int) -> int:
+        if size <= 0:
+            return 0
+        clamped = float(np.clip(seconds, 0.0, size / float(self._sample_rate)))
         return int(clamped * self._sample_rate)
 
     def _callback(self, outdata: np.ndarray, frames: int, time: object, status: object) -> None:
@@ -271,6 +308,7 @@ class AudioPlayer:
                     sample[head:] = tail
 
                 outdata[:, 0] = sample.astype(np.float32)
+                outdata[:, 0] *= self._master_gain
                 if (
                     self._probe_stop_after_fade
                     and self._probe_crossfade_remaining == 0
@@ -308,9 +346,11 @@ class AudioPlayer:
                 else:
                     outdata[available:, 0] = 0
                     self._position = buffer.size
+                    outdata[:, 0] *= self._master_gain
                     self._playing = False
                     self._mode = None
                     raise sd.CallbackStop
+            outdata[:, 0] *= self._master_gain
 
     def _begin_probe_transition(self, freqs: np.ndarray, amps: np.ndarray, stop_after_fade: bool) -> None:
         self._probe_prev_freqs = self._probe_freqs

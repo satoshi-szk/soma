@@ -12,6 +12,9 @@ const analysisSettingsSchema = z.object({
   brightness: z.number(),
   contrast: z.number(),
 })
+const playbackSettingsSchema = z.object({
+  master_volume: z.number(),
+})
 
 const audioInfoSchema = z.object({
   path: z.string(),
@@ -54,6 +57,7 @@ const loadResponseSchema = z.union([
     audio: audioInfoSchema,
     preview: spectrogramPreviewSchema.nullable(),
     settings: analysisSettingsSchema,
+    playback_settings: playbackSettingsSchema,
     partials: z.array(partialSchema),
   }),
   cancelledStatusSchema,
@@ -76,6 +80,7 @@ const statusResponseSchema = z.object({
   is_preparing_playback: z.boolean(),
   is_resynthesizing: z.boolean(),
   position: z.number(),
+  master_volume: z.number(),
 })
 
 const playbackStateResponseSchema = z.object({
@@ -101,7 +106,9 @@ export const apiSchemas = {
     payload: z.object({ name: z.string(), data_base64: z.string() }),
     response: loadResponseSchema,
   },
-  new_project: { response: z.union([okStatusSchema, errorStatusSchema]) },
+  new_project: {
+    response: z.union([okStatusSchema.extend({ playback_settings: playbackSettingsSchema }), errorStatusSchema]),
+  },
   open_project: { response: loadResponseSchema },
   save_project: { response: z.union([okStatusSchema.extend({ path: z.string().optional() }), errorStatusSchema]) },
   save_project_as: { response: z.union([okStatusSchema.extend({ path: z.string() }), errorStatusSchema]) },
@@ -170,6 +177,14 @@ export const apiSchemas = {
   pause: { response: z.union([okStatusSchema, errorStatusSchema]) },
   stop: {
     payload: z.object({ return_position_sec: z.number().optional() }),
+    response: z.union([okStatusSchema, errorStatusSchema]),
+  },
+  set_master_volume: {
+    payload: z.object({ master_volume: z.number() }),
+    response: z.union([okStatusSchema.extend({ master_volume: z.number() }), errorStatusSchema]),
+  },
+  update_playback_mix: {
+    payload: z.object({ mix_ratio: z.number() }),
     response: z.union([okStatusSchema, errorStatusSchema]),
   },
   export_mpe: {
