@@ -84,9 +84,34 @@ def parse_source(data: dict[str, Any]) -> SourceInfo | None:
 
 def parse_playback_settings(data: dict[str, Any]) -> PlaybackSettings:
     settings = data.get("playback_settings", {})
-    master_volume = float(settings.get("master_volume", 1.0)) if isinstance(settings, dict) else 1.0
-    master_volume = min(1.0, max(0.0, master_volume))
-    return PlaybackSettings(master_volume=master_volume)
+    if not isinstance(settings, dict):
+        return PlaybackSettings()
+    master_volume = float(settings.get("master_volume", 1.0))
+    output_mode = str(settings.get("output_mode", "audio"))
+    mix_ratio = float(settings.get("mix_ratio", 0.55))
+    speed_ratio = float(settings.get("speed_ratio", 1.0))
+    time_stretch_mode = str(settings.get("time_stretch_mode", "librosa"))
+    midi_mode = str(settings.get("midi_mode", "mpe"))
+    midi_output_name = str(settings.get("midi_output_name", ""))
+    midi_pitch_bend_range = int(settings.get("midi_pitch_bend_range", 48))
+    midi_amplitude_mapping = str(settings.get("midi_amplitude_mapping", "cc74"))
+    midi_amplitude_curve = str(settings.get("midi_amplitude_curve", "linear"))
+    midi_bpm = float(settings.get("midi_bpm", 120.0))
+    return PlaybackSettings(
+        master_volume=min(1.0, max(0.0, master_volume)),
+        output_mode="midi" if output_mode == "midi" else "audio",
+        mix_ratio=min(1.0, max(0.0, mix_ratio)),
+        speed_ratio=min(8.0, max(0.125, speed_ratio)),
+        time_stretch_mode="native" if time_stretch_mode == "native" else "librosa",
+        midi_mode=midi_mode if midi_mode in {"mpe", "multitrack", "mono"} else "mpe",
+        midi_output_name=midi_output_name,
+        midi_pitch_bend_range=max(1, midi_pitch_bend_range),
+        midi_amplitude_mapping=(
+            midi_amplitude_mapping if midi_amplitude_mapping in {"pressure", "cc74", "cc1", "velocity"} else "cc74"
+        ),
+        midi_amplitude_curve="db" if midi_amplitude_curve == "db" else "linear",
+        midi_bpm=max(1.0, midi_bpm),
+    )
 
 
 def parse_partials(data: dict[str, Any]) -> list[Partial]:

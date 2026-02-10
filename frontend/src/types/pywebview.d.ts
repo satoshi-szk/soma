@@ -33,6 +33,8 @@ declare global {
         stop: (payload?: unknown) => Promise<unknown>
         set_master_volume: (payload: unknown) => Promise<unknown>
         update_playback_mix: (payload: unknown) => Promise<unknown>
+        list_midi_outputs: () => Promise<unknown>
+        update_playback_settings: (payload: unknown) => Promise<unknown>
         playback_state: () => Promise<unknown>
         export_mpe: (payload: unknown) => Promise<unknown>
         export_multitrack_midi: (payload: unknown) => Promise<unknown>

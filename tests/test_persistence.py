@@ -21,7 +21,19 @@ def test_save_and_load_project(tmp_path: Path) -> None:
         md5_hash="abc",
     )
     settings = AnalysisSettings(freq_min=30.0, freq_max=18000.0)
-    playback_settings = PlaybackSettings(master_volume=0.35)
+    playback_settings = PlaybackSettings(
+        master_volume=0.35,
+        output_mode="midi",
+        mix_ratio=0.42,
+        speed_ratio=2.0,
+        time_stretch_mode="native",
+        midi_mode="multitrack",
+        midi_output_name="IAC Driver Bus 1",
+        midi_pitch_bend_range=24,
+        midi_amplitude_mapping="cc1",
+        midi_amplitude_curve="db",
+        midi_bpm=96.0,
+    )
     partials = [
         Partial(
             id="p1",
@@ -44,5 +56,15 @@ def test_save_and_load_project(tmp_path: Path) -> None:
     assert loaded_source.file_path == source.file_path
     assert loaded_settings.freq_min == 30.0
     assert loaded_playback_settings.master_volume == 0.35
+    assert loaded_playback_settings.output_mode == "midi"
+    assert loaded_playback_settings.mix_ratio == 0.42
+    assert loaded_playback_settings.speed_ratio == 2.0
+    assert loaded_playback_settings.time_stretch_mode == "native"
+    assert loaded_playback_settings.midi_mode == "multitrack"
+    assert loaded_playback_settings.midi_output_name == "IAC Driver Bus 1"
+    assert loaded_playback_settings.midi_pitch_bend_range == 24
+    assert loaded_playback_settings.midi_amplitude_mapping == "cc1"
+    assert loaded_playback_settings.midi_amplitude_curve == "db"
+    assert loaded_playback_settings.midi_bpm == 96.0
     assert len(loaded_partials) == 1
     assert loaded_partials[0].id == "p1"

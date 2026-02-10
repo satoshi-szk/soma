@@ -8,7 +8,9 @@ export type HeaderToolbarProps = {
   isPlaying: boolean
   isPreparingPlayback: boolean
   isProbePlaying: boolean
+  probeDisabled: boolean
   masterVolume: number
+  playbackMode: 'audio' | 'midi'
   playbackTimeLabel: string
   playDisabled: boolean
   onMenuToggle: () => void
@@ -18,6 +20,7 @@ export type HeaderToolbarProps = {
   onProbeToggle: () => void
   onRewind: () => void
   onMasterVolumeChange: (value: number) => void
+  onPlaybackModeChange: (mode: 'audio' | 'midi') => void
   onPlaybackSettingsOpen: () => void
   menuRef: React.RefObject<HTMLDivElement | null>
 }
@@ -28,7 +31,9 @@ export function HeaderToolbar({
   isPlaying,
   isPreparingPlayback,
   isProbePlaying,
+  probeDisabled,
   masterVolume,
+  playbackMode,
   playbackTimeLabel,
   playDisabled,
   onMenuToggle,
@@ -38,6 +43,7 @@ export function HeaderToolbar({
   onProbeToggle,
   onRewind,
   onMasterVolumeChange,
+  onPlaybackModeChange,
   onPlaybackSettingsOpen,
   menuRef,
 }: HeaderToolbarProps) {
@@ -114,11 +120,11 @@ export function HeaderToolbar({
             className={`rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${
               isProbePlaying
                 ? 'bg-[var(--accent)] text-white'
-                : isPlaying || isPreparingPlayback
+              : isPlaying || isPreparingPlayback
                   ? 'bg-[var(--panel-strong)] text-[var(--muted)]'
                   : 'border border-[var(--panel-border)] text-[var(--muted)]'
             }`}
-            disabled={isPlaying || isPreparingPlayback}
+            disabled={isPlaying || isPreparingPlayback || probeDisabled}
             aria-label="Harmonic Probe"
             title="Harmonic Probe (H)"
           >
@@ -140,6 +146,28 @@ export function HeaderToolbar({
             value={masterVolume}
             onChange={(event) => onMasterVolumeChange(Number(event.target.value))}
           />
+        </div>
+        <div className="grid grid-cols-2 gap-1 rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] p-1">
+          <button
+            type="button"
+            className={`rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${
+              playbackMode === 'audio' ? 'bg-[var(--accent)] text-white' : 'text-[var(--muted)]'
+            }`}
+            onClick={() => onPlaybackModeChange('audio')}
+            title="Audio playback mode"
+          >
+            Audio
+          </button>
+          <button
+            type="button"
+            className={`rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.14em] ${
+              playbackMode === 'midi' ? 'bg-[var(--accent)] text-white' : 'text-[var(--muted)]'
+            }`}
+            onClick={() => onPlaybackModeChange('midi')}
+            title="MIDI playback mode"
+          >
+            MIDI
+          </button>
         </div>
         <button
           type="button"

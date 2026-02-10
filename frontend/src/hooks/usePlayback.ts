@@ -3,18 +3,44 @@ import { isPywebviewApiAvailable, pywebviewApi } from '../app/pywebviewApi'
 
 type ReportError = (context: string, message: string) => void
 type TimeStretchMode = 'native' | 'librosa'
+type PlaybackMode = 'audio' | 'midi'
+type MidiMode = 'mpe' | 'multitrack' | 'mono'
+type MidiAmplitudeMapping = 'velocity' | 'pressure' | 'cc74' | 'cc1'
+type MidiAmplitudeCurve = 'linear' | 'db'
+
 const SPEED_PRESET_RATIOS = [0.125, 0.25, 0.5, 1, 2, 4, 8] as const
 const DEFAULT_SPEED_PRESET_INDEX = 3
+
+function closestSpeedPresetIndex(value: number): number {
+  let bestIndex = DEFAULT_SPEED_PRESET_INDEX
+  let bestDiff = Number.POSITIVE_INFINITY
+  SPEED_PRESET_RATIOS.forEach((ratio, index) => {
+    const diff = Math.abs(ratio - value)
+    if (diff < bestDiff) {
+      bestDiff = diff
+      bestIndex = index
+    }
+  })
+  return bestIndex
+}
 
 export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'analyzing' | 'error') {
   const [isPlaying, setIsPlaying] = useState(false)
   const [isProbePlaying, setIsProbePlaying] = useState(false)
   const [isPreparingPlayback, setIsPreparingPlayback] = useState(false)
+  const [playbackMode, setPlaybackModeState] = useState<PlaybackMode>('audio')
   const [mixValue, setMixValue] = useState(55)
   const [masterVolume, setMasterVolumeState] = useState(100)
-  const [speedPresetIndex, setSpeedPresetIndex] = useState(DEFAULT_SPEED_PRESET_INDEX)
-  const [timeStretchMode, setTimeStretchMode] = useState<TimeStretchMode>('librosa')
+  const [speedPresetIndex, setSpeedPresetIndexState] = useState(DEFAULT_SPEED_PRESET_INDEX)
+  const [timeStretchMode, setTimeStretchModeState] = useState<TimeStretchMode>('librosa')
   const [playbackPosition, setPlaybackPosition] = useState(0)
+  const [midiMode, setMidiMode] = useState<MidiMode>('mpe')
+  const [midiOutputName, setMidiOutputName] = useState('')
+  const [midiPitchBendRange, setMidiPitchBendRange] = useState('48')
+  const [midiAmplitudeMapping, setMidiAmplitudeMapping] = useState<MidiAmplitudeMapping>('cc74')
+  const [midiAmplitudeCurve, setMidiAmplitudeCurve] = useState<MidiAmplitudeCurve>('linear')
+  const [midiBpm, setMidiBpm] = useState('120')
+  const [midiOutputs, setMidiOutputs] = useState<string[]>([])
   const playbackStartRef = useRef(0)
   const wasNormalPlayingRef = useRef(false)
   const speedValue = SPEED_PRESET_RATIOS[speedPresetIndex]
@@ -33,13 +59,22 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
     setIsProbePlaying(result.is_probe_playing)
     setIsPreparingPlayback(result.is_preparing_playback)
     setMasterVolumeState(Math.round(Math.max(0, Math.min(1, result.master_volume)) * 100))
+    setPlaybackModeState(result.playback_settings.output_mode)
+    setMixValue(Math.round(Math.max(0, Math.min(1, result.playback_settings.mix_ratio)) * 100))
+    setSpeedPresetIndexState(closestSpeedPresetIndex(result.playback_settings.speed_ratio))
+    setTimeStretchModeState(result.playback_settings.time_stretch_mode)
+    setMidiMode(result.playback_settings.midi_mode)
+    setMidiOutputName(result.playback_settings.midi_output_name)
+    setMidiPitchBendRange(String(result.playback_settings.midi_pitch_bend_range))
+    setMidiAmplitudeMapping(result.playback_settings.midi_amplitude_mapping)
+    setMidiAmplitudeCurve(result.playback_settings.midi_amplitude_curve)
+    setMidiBpm(String(result.playback_settings.midi_bpm))
     if (endedNaturally) {
       setPlaybackPosition(playbackStartRef.current)
     }
     wasNormalPlayingRef.current = result.is_playing
   }, [])
 
-  // 再生位置をポーリングで取得する
   useEffect(() => {
     if (!isPlaying && !isProbePlaying && !isPreparingPlayback) return
     const interval = window.setInterval(async () => {
@@ -54,6 +89,68 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
     }, 0)
     return () => window.clearTimeout(timer)
   }, [syncStatus])
+
+  const refreshMidiOutputs = useCallback(async () => {
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
+    if (!api?.list_midi_outputs) return
+    try {
+      const result = await api.list_midi_outputs()
+      if (result.status === 'ok') {
+        setMidiOutputs(result.outputs)
+      }
+    } catch {
+      // 無視: UIで都度エラーを出さない
+    }
+  }, [])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void refreshMidiOutputs()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [refreshMidiOutputs])
+
+  const updatePlaybackSettings = useCallback(
+    async (payload: {
+      output_mode?: PlaybackMode
+      mix_ratio?: number
+      speed_ratio?: number
+      time_stretch_mode?: TimeStretchMode
+      midi_mode?: MidiMode
+      midi_output_name?: string
+      midi_pitch_bend_range?: number
+      midi_amplitude_mapping?: MidiAmplitudeMapping
+      midi_amplitude_curve?: MidiAmplitudeCurve
+      midi_bpm?: number
+    }) => {
+      const api = isPywebviewApiAvailable() ? pywebviewApi : null
+      if (!api?.update_playback_settings) {
+        reportError('Playback Settings', 'API not available')
+        return
+      }
+      try {
+        const result = await api.update_playback_settings(payload)
+        if (result.status === 'ok') {
+          setPlaybackModeState(result.playback_settings.output_mode)
+          setMixValue(Math.round(Math.max(0, Math.min(1, result.playback_settings.mix_ratio)) * 100))
+          setSpeedPresetIndexState(closestSpeedPresetIndex(result.playback_settings.speed_ratio))
+          setTimeStretchModeState(result.playback_settings.time_stretch_mode)
+          setMidiMode(result.playback_settings.midi_mode)
+          setMidiOutputName(result.playback_settings.midi_output_name)
+          setMidiPitchBendRange(String(result.playback_settings.midi_pitch_bend_range))
+          setMidiAmplitudeMapping(result.playback_settings.midi_amplitude_mapping)
+          setMidiAmplitudeCurve(result.playback_settings.midi_amplitude_curve)
+          setMidiBpm(String(result.playback_settings.midi_bpm))
+        } else {
+          reportError('Playback Settings', result.message ?? 'Failed to update playback settings')
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unexpected error'
+        reportError('Playback Settings', message)
+      }
+    },
+    [reportError],
+  )
 
   const play = useCallback(async () => {
     if (analysisState === 'analyzing') return
@@ -77,10 +174,10 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       if (result.status === 'ok') {
         playbackStartRef.current = startPosition
         wasNormalPlayingRef.current = speedValue === 1
-        if (speedValue === 1) {
-          setIsPlaying(true)
-        } else {
+        if (playbackMode === 'audio' && speedValue !== 1) {
           setIsPreparingPlayback(true)
+        } else {
+          setIsPlaying(true)
         }
       } else if (result.status === 'error') {
         reportError('Playback', result.message ?? 'Failed to play')
@@ -95,6 +192,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
     isPreparingPlayback,
     isProbePlaying,
     mixValue,
+    playbackMode,
     playbackPosition,
     reportError,
     speedValue,
@@ -155,6 +253,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
 
   const toggleHarmonicProbe = useCallback(async () => {
     if (analysisState === 'analyzing') return
+    if (playbackMode === 'midi') return
     if (isPlaying) return
     if (isPreparingPlayback) return
     const api = isPywebviewApiAvailable() ? pywebviewApi : null
@@ -182,7 +281,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       const message = error instanceof Error ? error.message : 'Unexpected error'
       reportError('Harmonic Probe', message)
     }
-  }, [analysisState, isPlaying, isPreparingPlayback, isProbePlaying, playbackPosition, reportError])
+  }, [analysisState, isPlaying, isPreparingPlayback, isProbePlaying, playbackMode, playbackPosition, reportError])
 
   const setMasterVolume = useCallback(
     async (value: number) => {
@@ -212,7 +311,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
     async (value: number) => {
       const next = Math.max(0, Math.min(100, Math.round(value)))
       setMixValue(next)
-      if (!isPlaying || isProbePlaying || isPreparingPlayback) return
+      if (!isPlaying || isProbePlaying || isPreparingPlayback || playbackMode === 'midi') return
       const api = isPywebviewApiAvailable() ? pywebviewApi : null
       if (!api?.update_playback_mix) {
         reportError('Playback Mix', 'API not available')
@@ -228,30 +327,163 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
         reportError('Playback Mix', message)
       }
     },
-    [isPlaying, isProbePlaying, isPreparingPlayback, reportError],
+    [isPlaying, isProbePlaying, isPreparingPlayback, playbackMode, reportError],
   )
 
-  const applyPlaybackSettings = useCallback((masterVolumeRatio: number) => {
-    const clamped = Math.max(0, Math.min(1, masterVolumeRatio))
-    setMasterVolumeState(Math.round(clamped * 100))
+  const commitMixValue = useCallback(
+    (value: number) => {
+      const next = Math.max(0, Math.min(100, Math.round(value)))
+      void updatePlaybackSettings({ mix_ratio: next / 100 })
+    },
+    [updatePlaybackSettings],
+  )
+
+  const setSpeedPresetIndex = useCallback((index: number) => {
+    const next = Math.max(0, Math.min(SPEED_PRESET_RATIOS.length - 1, Math.round(index)))
+    setSpeedPresetIndexState(next)
   }, [])
+
+  const commitSpeedPresetIndex = useCallback(
+    (index: number) => {
+      const next = Math.max(0, Math.min(SPEED_PRESET_RATIOS.length - 1, Math.round(index)))
+      void updatePlaybackSettings({ speed_ratio: SPEED_PRESET_RATIOS[next] })
+    },
+    [updatePlaybackSettings],
+  )
+
+  const setTimeStretchMode = useCallback(
+    (mode: TimeStretchMode) => {
+      setTimeStretchModeState(mode)
+      void updatePlaybackSettings({ time_stretch_mode: mode })
+    },
+    [updatePlaybackSettings],
+  )
+
+  const setPlaybackMode = useCallback(
+    (mode: PlaybackMode) => {
+      setPlaybackModeState(mode)
+      void updatePlaybackSettings({ output_mode: mode })
+    },
+    [updatePlaybackSettings],
+  )
+
+  const setMidiPlaybackMode = useCallback(
+    (mode: MidiMode) => {
+      setMidiMode(mode)
+      void updatePlaybackSettings({ midi_mode: mode })
+    },
+    [updatePlaybackSettings],
+  )
+
+  const setMidiOutput = useCallback(
+    (outputName: string) => {
+      setMidiOutputName(outputName)
+      void updatePlaybackSettings({ midi_output_name: outputName })
+    },
+    [updatePlaybackSettings],
+  )
+
+  const setMidiPitchBend = useCallback(
+    (value: string) => {
+      setMidiPitchBendRange(value)
+      const parsed = Number(value)
+      if (Number.isFinite(parsed) && parsed > 0) {
+        void updatePlaybackSettings({ midi_pitch_bend_range: Math.round(parsed) })
+      }
+    },
+    [updatePlaybackSettings],
+  )
+
+  const setMidiAmplitudeMappingSetting = useCallback(
+    (value: MidiAmplitudeMapping) => {
+      setMidiAmplitudeMapping(value)
+      void updatePlaybackSettings({ midi_amplitude_mapping: value })
+    },
+    [updatePlaybackSettings],
+  )
+
+  const setMidiAmplitudeCurveSetting = useCallback(
+    (value: MidiAmplitudeCurve) => {
+      setMidiAmplitudeCurve(value)
+      void updatePlaybackSettings({ midi_amplitude_curve: value })
+    },
+    [updatePlaybackSettings],
+  )
+
+  const setMidiBpmSetting = useCallback(
+    (value: string) => {
+      setMidiBpm(value)
+      const parsed = Number(value)
+      if (Number.isFinite(parsed) && parsed > 0) {
+        void updatePlaybackSettings({ midi_bpm: parsed })
+      }
+    },
+    [updatePlaybackSettings],
+  )
+
+  const applyPlaybackSettings = useCallback(
+    (settings: {
+      master_volume: number
+      output_mode: PlaybackMode
+      mix_ratio: number
+      speed_ratio: number
+      time_stretch_mode: TimeStretchMode
+      midi_mode: MidiMode
+      midi_output_name: string
+      midi_pitch_bend_range: number
+      midi_amplitude_mapping: MidiAmplitudeMapping
+      midi_amplitude_curve: MidiAmplitudeCurve
+      midi_bpm: number
+    }) => {
+      setMasterVolumeState(Math.round(Math.max(0, Math.min(1, settings.master_volume)) * 100))
+      setPlaybackModeState(settings.output_mode)
+      setMixValue(Math.round(Math.max(0, Math.min(1, settings.mix_ratio)) * 100))
+      setSpeedPresetIndexState(closestSpeedPresetIndex(settings.speed_ratio))
+      setTimeStretchModeState(settings.time_stretch_mode)
+      setMidiMode(settings.midi_mode)
+      setMidiOutputName(settings.midi_output_name)
+      setMidiPitchBendRange(String(settings.midi_pitch_bend_range))
+      setMidiAmplitudeMapping(settings.midi_amplitude_mapping)
+      setMidiAmplitudeCurve(settings.midi_amplitude_curve)
+      setMidiBpm(String(settings.midi_bpm))
+    },
+    [],
+  )
 
   return {
     isPlaying,
     isProbePlaying,
     isPreparingPlayback,
+    playbackMode,
     mixValue,
     masterVolume,
     speedValue,
     speedPresetIndex,
     timeStretchMode,
     playbackPosition,
+    midiMode,
+    midiOutputName,
+    midiPitchBendRange,
+    midiAmplitudeMapping,
+    midiAmplitudeCurve,
+    midiBpm,
+    midiOutputs,
     setMixValue: setMixValueRealtime,
+    commitMixValue,
     setMasterVolume,
+    setPlaybackMode,
+    setSpeedPresetIndex,
+    commitSpeedPresetIndex,
+    setTimeStretchMode,
+    setMidiPlaybackMode,
+    setMidiOutput,
+    setMidiPitchBend,
+    setMidiAmplitudeMapping: setMidiAmplitudeMappingSetting,
+    setMidiAmplitudeCurve: setMidiAmplitudeCurveSetting,
+    setMidiBpm: setMidiBpmSetting,
+    refreshMidiOutputs,
     applyPlaybackSettings,
     syncStatus,
-    setSpeedPresetIndex,
-    setTimeStretchMode,
     play,
     stop,
     togglePlayStop,

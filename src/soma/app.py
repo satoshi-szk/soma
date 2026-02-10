@@ -39,6 +39,7 @@ from soma.api_schema import (
     TracePartialPayload,
     UpdatePartialPayload,
     UpdatePlaybackMixPayload,
+    UpdatePlaybackSettingsPayload,
     UpdateSettingsPayload,
     parse_payload,
 )
@@ -57,7 +58,7 @@ from soma.exporter import (
     render_cv_voice_buffers,
 )
 from soma.logging_utils import configure_logging, get_session_log_dir
-from soma.models import AnalysisSettings, PartialPoint, SpectrogramPreview
+from soma.models import AnalysisSettings, PartialPoint, PlaybackSettings, SpectrogramPreview
 from soma.preview_cache import PreviewCacheConfig, build_preview_payload
 
 logger = logging.getLogger(__name__)
@@ -148,6 +149,9 @@ class SomaApi:
         self._last_audio_path: str | None = None
         self._frontend_log_path = get_session_log_dir("soma") / "frontend.log"
 
+    def _playback_settings_payload(self) -> dict[str, Any]:
+        return self._doc.playback_settings().to_dict()
+
     def health(self) -> dict[str, str]:
         return {"status": "ok"}
 
@@ -184,7 +188,7 @@ class SomaApi:
             "audio": info.to_dict(),
             "preview": None,
             "settings": self._doc.settings.to_dict(),
-            "playback_settings": {"master_volume": self._doc.master_volume()},
+            "playback_settings": self._playback_settings_payload(),
             "partials": [partial.to_dict() for partial in self._doc.store.all()],
         }
 
@@ -219,7 +223,7 @@ class SomaApi:
             "audio": info.to_dict(),
             "preview": None,
             "settings": self._doc.settings.to_dict(),
-            "playback_settings": {"master_volume": self._doc.master_volume()},
+            "playback_settings": self._playback_settings_payload(),
             "partials": [partial.to_dict() for partial in self._doc.store.all()],
         }
 
@@ -262,13 +266,13 @@ class SomaApi:
             "audio": info.to_dict(),
             "preview": None,
             "settings": self._doc.settings.to_dict(),
-            "playback_settings": {"master_volume": self._doc.master_volume()},
+            "playback_settings": self._playback_settings_payload(),
             "partials": [partial.to_dict() for partial in self._doc.store.all()],
         }
 
     def new_project(self) -> dict[str, Any]:
         self._doc.new_project()
-        return {"status": "ok", "playback_settings": {"master_volume": self._doc.master_volume()}}
+        return {"status": "ok", "playback_settings": self._playback_settings_payload()}
 
     def open_project(self) -> dict[str, Any]:
         window = webview.windows[0] if webview.windows else None
@@ -316,7 +320,7 @@ class SomaApi:
             "audio": info.to_dict(),
             "preview": None,
             "settings": self._doc.settings.to_dict(),
-            "playback_settings": {"master_volume": self._doc.master_volume()},
+            "playback_settings": self._playback_settings_payload(),
             "partials": [partial.to_dict() for partial in self._doc.store.all()],
         }
 
@@ -582,6 +586,51 @@ class SomaApi:
             logger.exception("update_playback_mix failed")
             return {"status": "error", "message": str(exc)}
 
+    def list_midi_outputs(self) -> dict[str, Any]:
+        return {"status": "ok", "outputs": self._doc.midi_outputs()}
+
+    def update_playback_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            parsed = _validated_payload(UpdatePlaybackSettingsPayload, payload, "update_playback_settings")
+            if isinstance(parsed, dict):
+                return parsed
+            current = self._doc.playback_settings()
+            updated = self._doc.update_playback_settings(
+                PlaybackSettings(
+                    master_volume=current.master_volume,
+                    output_mode=parsed.output_mode if parsed.output_mode is not None else current.output_mode,
+                    mix_ratio=parsed.mix_ratio if parsed.mix_ratio is not None else current.mix_ratio,
+                    speed_ratio=parsed.speed_ratio if parsed.speed_ratio is not None else current.speed_ratio,
+                    time_stretch_mode=(
+                        parsed.time_stretch_mode if parsed.time_stretch_mode is not None else current.time_stretch_mode
+                    ),
+                    midi_mode=parsed.midi_mode if parsed.midi_mode is not None else current.midi_mode,
+                    midi_output_name=(
+                        parsed.midi_output_name if parsed.midi_output_name is not None else current.midi_output_name
+                    ),
+                    midi_pitch_bend_range=(
+                        parsed.midi_pitch_bend_range
+                        if parsed.midi_pitch_bend_range is not None
+                        else current.midi_pitch_bend_range
+                    ),
+                    midi_amplitude_mapping=(
+                        parsed.midi_amplitude_mapping
+                        if parsed.midi_amplitude_mapping is not None
+                        else current.midi_amplitude_mapping
+                    ),
+                    midi_amplitude_curve=(
+                        parsed.midi_amplitude_curve
+                        if parsed.midi_amplitude_curve is not None
+                        else current.midi_amplitude_curve
+                    ),
+                    midi_bpm=parsed.midi_bpm if parsed.midi_bpm is not None else current.midi_bpm,
+                )
+            )
+            return {"status": "ok", "playback_settings": updated.to_dict()}
+        except Exception as exc:  # pragma: no cover
+            logger.exception("update_playback_settings failed")
+            return {"status": "error", "message": str(exc)}
+
     def playback_state(self) -> dict[str, Any]:
         return {"status": "ok", "position": self._doc.playback_position()}
 
@@ -624,6 +673,7 @@ class SomaApi:
             "is_resynthesizing": self._doc.is_resynthesizing(),
             "position": self._doc.playback_position(),
             "master_volume": self._doc.master_volume(),
+            "playback_settings": self._playback_settings_payload(),
         }
 
     def export_mpe(self, payload: dict[str, Any]) -> dict[str, Any]:

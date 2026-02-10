@@ -56,6 +56,16 @@ class AnalysisSettings:
 @dataclass(frozen=True)
 class PlaybackSettings:
     master_volume: float = 1.0
+    output_mode: str = "audio"  # audio | midi
+    mix_ratio: float = 0.55
+    speed_ratio: float = 1.0
+    time_stretch_mode: str = "librosa"  # native | librosa
+    midi_mode: str = "mpe"  # mpe | multitrack | mono
+    midi_output_name: str = ""
+    midi_pitch_bend_range: int = 48
+    midi_amplitude_mapping: str = "cc74"
+    midi_amplitude_curve: str = "linear"
+    midi_bpm: float = 120.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

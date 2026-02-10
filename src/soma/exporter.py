@@ -104,6 +104,27 @@ def export_monophonic_midi(
     return [path]
 
 
+def build_midi_for_playback(
+    partials: Iterable[Partial],
+    mode: str,
+    settings: MidiExportSettings,
+) -> MidiFile:
+    partial_list = [p for p in partials if p.points and not p.is_muted]
+    if not partial_list:
+        raise ValueError("No playable partials.")
+    if mode == "mpe":
+        allocations = _allocate_voices(partial_list, max_voices=15)
+        if len(allocations) > 1:
+            raise ValueError("Too many overlapping voices for realtime MPE playback (limit: 15).")
+        return _build_mpe_file(allocations[0], MpeExportSettings(**settings.__dict__))
+    if mode == "multitrack":
+        allocations = _allocate_voices(partial_list, max_voices=None)
+        return _build_multitrack_file(allocations[0], MultiTrackExportSettings(**settings.__dict__))
+    if mode == "mono":
+        return _build_monophonic_file(partial_list, MonophonicExportSettings(**settings.__dict__))
+    raise ValueError(f"Unsupported MIDI playback mode: {mode}")
+
+
 def export_audio(
     output_path: Path,
     audio_buffer: np.ndarray,
