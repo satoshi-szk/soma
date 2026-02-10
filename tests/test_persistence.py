@@ -1,10 +1,11 @@
 from pathlib import Path
 
-from soma.models import AnalysisSettings, Partial, PartialPoint, SourceInfo
+from soma.models import AnalysisSettings, Partial, PartialPoint, PlaybackSettings, SourceInfo
 from soma.persistence import (
     build_project_payload,
     load_project,
     parse_partials,
+    parse_playback_settings,
     parse_settings,
     parse_source,
     save_project,
@@ -20,6 +21,7 @@ def test_save_and_load_project(tmp_path: Path) -> None:
         md5_hash="abc",
     )
     settings = AnalysisSettings(freq_min=30.0, freq_max=18000.0)
+    playback_settings = PlaybackSettings(master_volume=0.35)
     partials = [
         Partial(
             id="p1",
@@ -29,16 +31,18 @@ def test_save_and_load_project(tmp_path: Path) -> None:
             ],
         )
     ]
-    payload = build_project_payload(source, settings, partials, created_at="2024-01-01T00:00:00Z")
+    payload = build_project_payload(source, settings, playback_settings, partials, created_at="2024-01-01T00:00:00Z")
     save_project(path, payload)
 
     loaded = load_project(path)
     loaded_settings = parse_settings(loaded)
     loaded_source = parse_source(loaded)
+    loaded_playback_settings = parse_playback_settings(loaded)
     loaded_partials = parse_partials(loaded)
 
     assert loaded_source is not None
     assert loaded_source.file_path == source.file_path
     assert loaded_settings.freq_min == 30.0
+    assert loaded_playback_settings.master_volume == 0.35
     assert len(loaded_partials) == 1
     assert loaded_partials[0].id == "p1"

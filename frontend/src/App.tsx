@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AnalysisSettingsModal } from './components/modals/AnalysisSettingsModal'
 import { ExportModal } from './components/modals/ExportModal'
+import { PlaybackSettingsSidebar } from './components/modals/PlaybackSettingsSidebar'
 import { HeaderToolbar } from './components/HeaderToolbar'
 import { Workspace } from './components/Workspace'
 import { StatusBar } from './components/StatusBar'
@@ -27,6 +28,7 @@ function App() {
   })
   const [showAnalysisModal, setShowAnalysisModal] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
+  const [showPlaybackSettings, setShowPlaybackSettings] = useState(false)
   const [exportTab, setExportTab] = useState<'mpe' | 'multitrack' | 'mono' | 'audio' | 'cv'>('mpe')
   const [mpePitchBendRange, setMpePitchBendRange] = useState('48')
   const [multitrackPitchBendRange, setMultitrackPitchBendRange] = useState('48')
@@ -99,6 +101,7 @@ function App() {
       if (success) {
         partialsHook.setPartials([])
         partialsHook.setSelection([])
+        await playback.syncStatus()
         setStatusNote('New project ready')
       }
       return
@@ -107,6 +110,7 @@ function App() {
       const result = await analysis.openProject()
       if (result) {
         partialsHook.setPartials(result.partials)
+        playback.applyPlaybackSettings(result.playbackSettings.master_volume)
         setStatusNote('Project opened')
       }
       return
@@ -158,6 +162,7 @@ function App() {
     const result = await analysis.openAudio()
     if (result) {
       partialsHook.setPartials(result.partials)
+      playback.applyPlaybackSettings(result.playbackSettings.master_volume)
       setStatusNote('Audio loaded')
     }
   }
@@ -168,6 +173,7 @@ function App() {
     const result = await analysis.openAudioPath(path)
     if (result) {
       partialsHook.setPartials(result.partials)
+      playback.applyPlaybackSettings(result.playbackSettings.master_volume)
       setStatusNote('Audio loaded')
     }
   }
@@ -178,6 +184,7 @@ function App() {
     const result = await analysis.openAudioFile(file)
     if (result) {
       partialsHook.setPartials(result.partials)
+      playback.applyPlaybackSettings(result.playbackSettings.master_volume)
       setStatusNote('Audio loaded')
     }
   }
@@ -337,6 +344,10 @@ function App() {
     void playback.togglePlayStop()
   }
 
+  const handlePlaybackSettingsToggle = () => {
+    setShowPlaybackSettings((prev) => !prev)
+  }
+
   const statusLabel =
     analysis.analysisState === 'analyzing'
       ? 'Analyzing'
@@ -384,16 +395,13 @@ function App() {
 
   return (
     <div className={`page ${ready ? 'is-ready' : ''} h-screen`}>
-      <div className="mx-auto flex h-full w-full max-w-none flex-col gap-2 px-2 pb-2 pt-2">
+      <div className="relative mx-auto flex h-full w-full max-w-none flex-col gap-2 px-2 pb-2 pt-2">
         <HeaderToolbar
           menuOpen={menuOpen}
           activeTool={activeTool}
           isPlaying={playback.isPlaying}
           isPreparingPlayback={playback.isPreparingPlayback}
-          mixValue={playback.mixValue}
-          speedPresetIndex={playback.speedPresetIndex}
-          speedValue={playback.speedValue}
-          timeStretchMode={playback.timeStretchMode}
+          masterVolume={playback.masterVolume}
           playbackTimeLabel={formatDuration(playback.playbackPosition)}
           isProbePlaying={playback.isProbePlaying}
           onMenuToggle={() => setMenuOpen((prev) => !prev)}
@@ -402,16 +410,19 @@ function App() {
           onPlayStop={handlePlayStop}
           onProbeToggle={() => void playback.toggleHarmonicProbe()}
           onRewind={handleRewind}
-          onMixChange={playback.setMixValue}
-          onSpeedChange={playback.setSpeedPresetIndex}
-          onTimeStretchModeChange={playback.setTimeStretchMode}
+          onMasterVolumeChange={(value) => void playback.setMasterVolume(value)}
+          onPlaybackSettingsOpen={handlePlaybackSettingsToggle}
           menuRef={menuRef}
           playDisabled={analysis.analysisState === 'analyzing' || playback.isProbePlaying || playback.isPreparingPlayback}
-          controlsDisabled={playback.isPlaying || playback.isPreparingPlayback}
         />
 
-        <main className="flex h-full flex-1 min-h-0 flex-col gap-2">
-          <section className="panel flex flex-1 min-h-0 flex-col rounded-none px-2 py-2">
+        <div
+          className={`grid h-full flex-1 min-h-0 gap-2 ${
+            showPlaybackSettings ? 'grid-cols-[minmax(0,1fr)_320px]' : 'grid-cols-[minmax(0,1fr)]'
+          }`}
+        >
+          <main className="flex flex-1 min-h-0 flex-col gap-2">
+            <section className="panel flex flex-1 min-h-0 flex-col rounded-none px-2 py-2">
             <div className="flex items-center justify-between gap-3 text-[11px] tracking-normal text-[var(--ink)]">
               <span className="flex min-w-0 items-center gap-3">
                 <span className="font-semibold">Workspace</span>
@@ -459,8 +470,22 @@ function App() {
                 spectrogramDim={spectrogramDim}
               />
             </div>
-          </section>
-        </main>
+            </section>
+          </main>
+          {showPlaybackSettings ? (
+            <PlaybackSettingsSidebar
+              mixValue={playback.mixValue}
+              speedPresetIndex={playback.speedPresetIndex}
+              speedValue={playback.speedValue}
+              timeStretchMode={playback.timeStretchMode}
+              controlsDisabled={playback.isPlaying || playback.isPreparingPlayback}
+              onClose={() => setShowPlaybackSettings(false)}
+              onMixChange={(value) => void playback.setMixValue(value)}
+              onSpeedChange={playback.setSpeedPresetIndex}
+              onTimeStretchModeChange={playback.setTimeStretchMode}
+            />
+          ) : null}
+        </div>
 
         <StatusBar
           statusLabel={statusLabel}

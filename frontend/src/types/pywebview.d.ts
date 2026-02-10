@@ -30,7 +30,9 @@ declare global {
         update_harmonic_probe: (payload: unknown) => Promise<unknown>
         stop_harmonic_probe: () => Promise<unknown>
         pause: () => Promise<unknown>
-        stop: () => Promise<unknown>
+        stop: (payload?: unknown) => Promise<unknown>
+        set_master_volume: (payload: unknown) => Promise<unknown>
+        update_playback_mix: (payload: unknown) => Promise<unknown>
         playback_state: () => Promise<unknown>
         export_mpe: (payload: unknown) => Promise<unknown>
         export_multitrack_midi: (payload: unknown) => Promise<unknown>

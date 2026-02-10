@@ -26,6 +26,7 @@ from soma.api_schema import (
     ExportMultiTrackMidiPayload,
     HarmonicProbePayload,
     HitTestPayload,
+    MasterVolumePayload,
     MergePartialsPayload,
     OpenAudioDataPayload,
     OpenAudioPathPayload,
@@ -37,6 +38,7 @@ from soma.api_schema import (
     ToggleMutePayload,
     TracePartialPayload,
     UpdatePartialPayload,
+    UpdatePlaybackMixPayload,
     UpdateSettingsPayload,
     parse_payload,
 )
@@ -182,6 +184,7 @@ class SomaApi:
             "audio": info.to_dict(),
             "preview": None,
             "settings": self._doc.settings.to_dict(),
+            "playback_settings": {"master_volume": self._doc.master_volume()},
             "partials": [partial.to_dict() for partial in self._doc.store.all()],
         }
 
@@ -216,6 +219,7 @@ class SomaApi:
             "audio": info.to_dict(),
             "preview": None,
             "settings": self._doc.settings.to_dict(),
+            "playback_settings": {"master_volume": self._doc.master_volume()},
             "partials": [partial.to_dict() for partial in self._doc.store.all()],
         }
 
@@ -258,12 +262,13 @@ class SomaApi:
             "audio": info.to_dict(),
             "preview": None,
             "settings": self._doc.settings.to_dict(),
+            "playback_settings": {"master_volume": self._doc.master_volume()},
             "partials": [partial.to_dict() for partial in self._doc.store.all()],
         }
 
     def new_project(self) -> dict[str, Any]:
         self._doc.new_project()
-        return {"status": "ok"}
+        return {"status": "ok", "playback_settings": {"master_volume": self._doc.master_volume()}}
 
     def open_project(self) -> dict[str, Any]:
         window = webview.windows[0] if webview.windows else None
@@ -311,6 +316,7 @@ class SomaApi:
             "audio": info.to_dict(),
             "preview": None,
             "settings": self._doc.settings.to_dict(),
+            "playback_settings": {"master_volume": self._doc.master_volume()},
             "partials": [partial.to_dict() for partial in self._doc.store.all()],
         }
 
@@ -552,6 +558,30 @@ class SomaApi:
             logger.exception("stop failed")
             return {"status": "error", "message": str(exc)}
 
+    def set_master_volume(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            parsed = _validated_payload(MasterVolumePayload, payload, "set_master_volume")
+            if isinstance(parsed, dict):
+                return parsed
+            master_volume = self._doc.set_master_volume(parsed.master_volume)
+            return {"status": "ok", "master_volume": master_volume}
+        except Exception as exc:  # pragma: no cover - surface errors to UI
+            logger.exception("set_master_volume failed")
+            return {"status": "error", "message": str(exc)}
+
+    def update_playback_mix(self, payload: dict[str, Any]) -> dict[str, Any]:
+        try:
+            parsed = _validated_payload(UpdatePlaybackMixPayload, payload, "update_playback_mix")
+            if isinstance(parsed, dict):
+                return parsed
+            updated = self._doc.update_mix_ratio(parsed.mix_ratio)
+            if not updated:
+                return {"status": "error", "message": "Playback mix update is not available now."}
+            return {"status": "ok"}
+        except Exception as exc:  # pragma: no cover - surface errors to UI
+            logger.exception("update_playback_mix failed")
+            return {"status": "error", "message": str(exc)}
+
     def playback_state(self) -> dict[str, Any]:
         return {"status": "ok", "position": self._doc.playback_position()}
 
@@ -593,6 +623,7 @@ class SomaApi:
             "is_preparing_playback": self._doc.is_preparing_playback(),
             "is_resynthesizing": self._doc.is_resynthesizing(),
             "position": self._doc.playback_position(),
+            "master_volume": self._doc.master_volume(),
         }
 
     def export_mpe(self, payload: dict[str, Any]) -> dict[str, Any]:

@@ -11,30 +11,49 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
   const [isProbePlaying, setIsProbePlaying] = useState(false)
   const [isPreparingPlayback, setIsPreparingPlayback] = useState(false)
   const [mixValue, setMixValue] = useState(55)
+  const [masterVolume, setMasterVolumeState] = useState(100)
   const [speedPresetIndex, setSpeedPresetIndex] = useState(DEFAULT_SPEED_PRESET_INDEX)
   const [timeStretchMode, setTimeStretchMode] = useState<TimeStretchMode>('librosa')
   const [playbackPosition, setPlaybackPosition] = useState(0)
   const playbackStartRef = useRef(0)
+  const wasNormalPlayingRef = useRef(false)
   const speedValue = SPEED_PRESET_RATIOS[speedPresetIndex]
+
+  const syncStatus = useCallback(async () => {
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
+    if (!api?.status) return
+    const result = await api.status()
+    if (result?.status !== 'ok') return
+    const wasPlaying = wasNormalPlayingRef.current
+    const endedNaturally = wasPlaying && !result.is_playing && !result.is_probe_playing && !result.is_preparing_playback
+    if (typeof result.position === 'number' && (result.is_playing || result.is_preparing_playback)) {
+      setPlaybackPosition(result.position)
+    }
+    setIsPlaying(result.is_playing)
+    setIsProbePlaying(result.is_probe_playing)
+    setIsPreparingPlayback(result.is_preparing_playback)
+    setMasterVolumeState(Math.round(Math.max(0, Math.min(1, result.master_volume)) * 100))
+    if (endedNaturally) {
+      setPlaybackPosition(playbackStartRef.current)
+    }
+    wasNormalPlayingRef.current = result.is_playing
+  }, [])
 
   // 再生位置をポーリングで取得する
   useEffect(() => {
     if (!isPlaying && !isProbePlaying && !isPreparingPlayback) return
     const interval = window.setInterval(async () => {
-      const api = isPywebviewApiAvailable() ? pywebviewApi : null
-      if (!api) return
-      const result = await api.status()
-      if (result?.status === 'ok') {
-        if (typeof result.position === 'number' && (result.is_playing || result.is_preparing_playback)) {
-          setPlaybackPosition(result.position)
-        }
-        setIsPlaying(result.is_playing)
-        setIsProbePlaying(result.is_probe_playing)
-        setIsPreparingPlayback(result.is_preparing_playback)
-      }
+      await syncStatus()
     }, 300)
     return () => window.clearInterval(interval)
-  }, [isPlaying, isProbePlaying, isPreparingPlayback])
+  }, [isPlaying, isProbePlaying, isPreparingPlayback, syncStatus])
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      void syncStatus()
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [syncStatus])
 
   const play = useCallback(async () => {
     if (analysisState === 'analyzing') return
@@ -57,6 +76,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       })
       if (result.status === 'ok') {
         playbackStartRef.current = startPosition
+        wasNormalPlayingRef.current = speedValue === 1
         if (speedValue === 1) {
           setIsPlaying(true)
         } else {
@@ -93,6 +113,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       if (result.status === 'ok') {
         setIsPlaying(false)
         setIsPreparingPlayback(false)
+        wasNormalPlayingRef.current = false
         setPlaybackPosition(returnPosition)
       } else if (result.status === 'error') {
         reportError('Stop', result.message ?? 'Failed to stop')
@@ -163,16 +184,72 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
     }
   }, [analysisState, isPlaying, isPreparingPlayback, isProbePlaying, playbackPosition, reportError])
 
+  const setMasterVolume = useCallback(
+    async (value: number) => {
+      const next = Math.max(0, Math.min(100, Math.round(value)))
+      setMasterVolumeState(next)
+      const api = isPywebviewApiAvailable() ? pywebviewApi : null
+      if (!api?.set_master_volume) {
+        reportError('Master Volume', 'API not available')
+        return
+      }
+      try {
+        const result = await api.set_master_volume({ master_volume: next / 100 })
+        if (result.status === 'ok') {
+          setMasterVolumeState(Math.round(Math.max(0, Math.min(1, result.master_volume)) * 100))
+        } else if (result.status === 'error') {
+          reportError('Master Volume', result.message ?? 'Failed to update master volume')
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unexpected error'
+        reportError('Master Volume', message)
+      }
+    },
+    [reportError],
+  )
+
+  const setMixValueRealtime = useCallback(
+    async (value: number) => {
+      const next = Math.max(0, Math.min(100, Math.round(value)))
+      setMixValue(next)
+      if (!isPlaying || isProbePlaying || isPreparingPlayback) return
+      const api = isPywebviewApiAvailable() ? pywebviewApi : null
+      if (!api?.update_playback_mix) {
+        reportError('Playback Mix', 'API not available')
+        return
+      }
+      try {
+        const result = await api.update_playback_mix({ mix_ratio: next / 100 })
+        if (result.status === 'error') {
+          reportError('Playback Mix', result.message ?? 'Failed to update playback mix')
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unexpected error'
+        reportError('Playback Mix', message)
+      }
+    },
+    [isPlaying, isProbePlaying, isPreparingPlayback, reportError],
+  )
+
+  const applyPlaybackSettings = useCallback((masterVolumeRatio: number) => {
+    const clamped = Math.max(0, Math.min(1, masterVolumeRatio))
+    setMasterVolumeState(Math.round(clamped * 100))
+  }, [])
+
   return {
     isPlaying,
     isProbePlaying,
     isPreparingPlayback,
     mixValue,
+    masterVolume,
     speedValue,
     speedPresetIndex,
     timeStretchMode,
     playbackPosition,
-    setMixValue,
+    setMixValue: setMixValueRealtime,
+    setMasterVolume,
+    applyPlaybackSettings,
+    syncStatus,
     setSpeedPresetIndex,
     setTimeStretchMode,
     play,

@@ -114,7 +114,6 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
   // preview ソースが変わったらスロットル状態をクリアする
   useLayoutEffect(() => {
     if (currentPreviewId !== lastPreviewId.current) {
-      console.log('[useViewport] Preview source changed, clearing throttle state')
       lastPreviewId.current = currentPreviewId
       lastRequestedParams.current = null
 
@@ -401,7 +400,6 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
           state.lastApplied = Date.now()
           void applyPreview(state.pending, state.pendingQuality, state.pendingToken)
         } else if (state.pending) {
-          console.log('[useViewport] Discarding pending preview due to source change')
           state.pending = null
         }
       }, throttleMs - elapsed)

@@ -3,7 +3,7 @@ import { isPywebviewApiAvailable, pywebviewApi } from '../app/pywebviewApi'
 import { DEFAULT_SETTINGS } from '../app/constants'
 import { ensurePreviewData } from '../app/previewData'
 import { toPartial } from '../app/utils'
-import type { AnalysisSettings, AudioInfo, SpectrogramPreview, Partial } from '../app/types'
+import type { AnalysisSettings, AudioInfo, SpectrogramPreview, Partial, PlaybackSettings } from '../app/types'
 
 type ReportError = (context: string, message: string) => void
 
@@ -11,6 +11,7 @@ type AnalysisResult = {
   audio: AudioInfo
   preview: SpectrogramPreview | null
   settings: AnalysisSettings
+  playbackSettings: PlaybackSettings
   partials: Partial[]
 }
 
@@ -124,6 +125,7 @@ export function useAnalysis(reportError: ReportError) {
           audio: result.audio,
           preview: result.preview ?? null,
           settings: result.settings,
+          playbackSettings: result.playback_settings,
           partials: result.partials.map(toPartial),
         }
       } else if (result.status === 'cancelled') {
@@ -172,6 +174,7 @@ export function useAnalysis(reportError: ReportError) {
             audio: result.audio,
             preview: result.preview ?? null,
             settings: result.settings,
+            playbackSettings: result.playback_settings,
             partials: result.partials.map(toPartial),
           }
         } else if (result.status === 'cancelled') {
@@ -235,6 +238,7 @@ export function useAnalysis(reportError: ReportError) {
             audio: result.audio,
             preview: result.preview ?? null,
             settings: result.settings,
+            playbackSettings: result.playback_settings,
             partials: result.partials.map(toPartial),
           }
         } else if (result.status === 'cancelled') {
@@ -286,6 +290,7 @@ export function useAnalysis(reportError: ReportError) {
           audio: result.audio,
           preview: result.preview ?? null,
           settings: result.settings,
+          playbackSettings: result.playback_settings,
           partials: result.partials.map(toPartial),
         }
       } else if (result?.status === 'cancelled') {

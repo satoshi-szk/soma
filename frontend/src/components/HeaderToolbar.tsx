@@ -1,5 +1,6 @@
 import type { ToolId } from '../app/types'
 import { MENU_SECTIONS, TOOL_KEYS, TOOL_LIST } from '../app/constants'
+import { MdSettings } from 'react-icons/md'
 
 export type HeaderToolbarProps = {
   menuOpen: boolean
@@ -7,22 +8,17 @@ export type HeaderToolbarProps = {
   isPlaying: boolean
   isPreparingPlayback: boolean
   isProbePlaying: boolean
-  mixValue: number
-  speedPresetIndex: number
-  speedValue: number
-  timeStretchMode: 'native' | 'librosa'
+  masterVolume: number
   playbackTimeLabel: string
   playDisabled: boolean
-  controlsDisabled: boolean
   onMenuToggle: () => void
   onMenuAction: (label: string) => void
   onToolChange: (tool: ToolId) => void
   onPlayStop: () => void
   onProbeToggle: () => void
   onRewind: () => void
-  onMixChange: (value: number) => void
-  onSpeedChange: (value: number) => void
-  onTimeStretchModeChange: (mode: 'native' | 'librosa') => void
+  onMasterVolumeChange: (value: number) => void
+  onPlaybackSettingsOpen: () => void
   menuRef: React.RefObject<HTMLDivElement | null>
 }
 
@@ -32,22 +28,17 @@ export function HeaderToolbar({
   isPlaying,
   isPreparingPlayback,
   isProbePlaying,
-  mixValue,
-  speedPresetIndex,
-  speedValue,
-  timeStretchMode,
+  masterVolume,
   playbackTimeLabel,
   playDisabled,
-  controlsDisabled,
   onMenuToggle,
   onMenuAction,
   onToolChange,
   onPlayStop,
   onProbeToggle,
   onRewind,
-  onMixChange,
-  onSpeedChange,
-  onTimeStretchModeChange,
+  onMasterVolumeChange,
+  onPlaybackSettingsOpen,
   menuRef,
 }: HeaderToolbarProps) {
   return (
@@ -134,52 +125,31 @@ export function HeaderToolbar({
             Probe
           </button>
         </div>
+        <div className="rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-4 py-2 text-[12px] font-semibold tracking-normal text-[var(--ink)]">
+          {isPreparingPlayback ? 'Preparing playback...' : playbackTimeLabel}
+        </div>
         <div className="flex flex-col">
-          <span className="text-[11px] tracking-normal text-[var(--ink)]">
-            Original {100 - mixValue}% / Resynth {mixValue}%
-          </span>
+          <span className="text-[11px] tracking-normal text-[var(--ink)]">Master {masterVolume}%</span>
           <input
-            aria-label="Original and resynth mix"
+            aria-label="Master volume"
             className="h-1 w-40 accent-[var(--accent)]"
             type="range"
             min={0}
             max={100}
-            step={10}
-            value={mixValue}
-            disabled={controlsDisabled}
-            onChange={(event) => onMixChange(Number(event.target.value))}
-          />
-        </div>
-        <div className="flex flex-col">
-          <span className="text-[11px] tracking-normal text-[var(--ink)]">Speed {formatSpeedLabel(speedValue)}</span>
-          <input
-            aria-label="Playback speed"
-            className="h-1 w-40 accent-[var(--accent)]"
-            type="range"
-            min={0}
-            max={6}
             step={1}
-            value={speedPresetIndex}
-            disabled={controlsDisabled}
-            onChange={(event) => onSpeedChange(Number(event.target.value))}
+            value={masterVolume}
+            onChange={(event) => onMasterVolumeChange(Number(event.target.value))}
           />
         </div>
-        <div className="flex flex-col">
-          <span className="text-[11px] tracking-normal text-[var(--ink)]">Stretch</span>
-          <select
-            aria-label="Time stretch mode"
-            className="rounded-md border border-[var(--panel-border)] bg-[var(--panel)] px-2 py-1 text-[11px] text-[var(--ink)]"
-            value={timeStretchMode}
-            disabled={controlsDisabled}
-            onChange={(event) => onTimeStretchModeChange(event.target.value as 'native' | 'librosa')}
-          >
-            <option value="librosa">Librosa</option>
-            <option value="native">Native</option>
-          </select>
-        </div>
-        <div className="rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-4 py-2 text-[12px] font-semibold tracking-normal text-[var(--ink)]">
-          {isPreparingPlayback ? 'Preparing playback...' : playbackTimeLabel}
-        </div>
+        <button
+          type="button"
+          className="flex h-11 w-11 items-center justify-center rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] text-[var(--ink)]"
+          onClick={onPlaybackSettingsOpen}
+          aria-label="Playback settings"
+          title="Playback settings"
+        >
+          <MdSettings size={24} />
+        </button>
       </div>
 
       <div className="flex flex-wrap items-center gap-2">
@@ -232,11 +202,4 @@ function StopIcon() {
       <rect x="3.1" y="3.1" width="7.8" height="7.8" rx="0.9" fill="currentColor" />
     </svg>
   )
-}
-
-function formatSpeedLabel(speed: number): string {
-  if (speed === 0.125) return '1/8x'
-  if (speed === 0.25) return '1/4x'
-  if (speed === 0.5) return '1/2x'
-  return `${speed}x`
 }

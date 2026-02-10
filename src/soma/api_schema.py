@@ -94,6 +94,14 @@ class HarmonicProbePayload(PayloadBase):
     time_sec: float
 
 
+class MasterVolumePayload(PayloadBase):
+    master_volume: float = Field(ge=0.0, le=1.0)
+
+
+class UpdatePlaybackMixPayload(PayloadBase):
+    mix_ratio: float = Field(ge=0.0, le=1.0)
+
+
 class ExportMpePayload(PayloadBase):
     pitch_bend_range: int = 48
     amplitude_mapping: str = "velocity"
