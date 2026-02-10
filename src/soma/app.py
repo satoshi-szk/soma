@@ -31,6 +31,7 @@ from soma.api_schema import (
     MergePartialsPayload,
     OpenAudioDataPayload,
     OpenAudioPathPayload,
+    OpenProjectPathPayload,
     PayloadBase,
     PlayPayload,
     RequestViewportPreviewPayload,
@@ -61,6 +62,7 @@ from soma.exporter import (
 from soma.logging_utils import configure_logging, get_session_log_dir
 from soma.models import AnalysisSettings, PartialPoint, PlaybackSettings, SpectrogramPreview
 from soma.preview_cache import PreviewCacheConfig, build_preview_payload
+from soma.recent_projects import RecentProjectStore, default_recent_projects_path
 
 logger = logging.getLogger(__name__)
 _frontend_log_lock = threading.Lock()
@@ -150,9 +152,56 @@ class SomaApi:
         self._doc = SomaDocument(event_sink=_dispatch_frontend_event)
         self._last_audio_path: str | None = None
         self._frontend_log_path = get_session_log_dir("soma") / "frontend.log"
+        self._recent_projects = RecentProjectStore(default_recent_projects_path(), limit=10)
 
     def _playback_settings_payload(self) -> dict[str, Any]:
         return self._doc.playback_settings().to_dict()
+
+    def _remember_recent_project(self, path: Path | None) -> None:
+        if path is None:
+            return
+        try:
+            self._recent_projects.add(path)
+        except Exception:
+            logger.exception("failed to remember recent project: %s", path)
+
+    def _project_load_response(self, info: Any) -> dict[str, Any]:
+        return {
+            "status": "processing",
+            "audio": info.to_dict(),
+            "preview": None,
+            "settings": self._doc.settings.to_dict(),
+            "playback_settings": self._playback_settings_payload(),
+            "partials": [partial.to_dict() for partial in self._doc.store.all()],
+        }
+
+    def _open_project_from_path(self, path: Path) -> dict[str, Any]:
+        try:
+            data = self._doc.load_project(path)
+        except Exception as exc:  # pragma: no cover
+            logger.exception("open_project load failed")
+            return {"status": "error", "message": str(exc)}
+
+        source = data.get("source")
+        if source is None:
+            return {"status": "error", "message": "Source audio not found in project."}
+        audio_path = Path(source.file_path)
+        if not audio_path.is_absolute():
+            audio_path = (path.parent / audio_path).resolve()
+
+        if not audio_path.exists():
+            return {"status": "error", "message": f"Audio file missing: {audio_path}"}
+
+        try:
+            info = self._doc.load_audio(audio_path, max_duration_sec=None)
+        except Exception as exc:  # pragma: no cover
+            logger.exception("open_project audio load failed")
+            return {"status": "error", "message": str(exc)}
+
+        self._doc.rebuild_resynth()
+        self._doc.start_preview_async()
+        self._remember_recent_project(path)
+        return self._project_load_response(info)
 
     def health(self) -> dict[str, str]:
         return {"status": "ok"}
@@ -276,6 +325,19 @@ class SomaApi:
         self._doc.new_project()
         return {"status": "ok", "playback_settings": self._playback_settings_payload()}
 
+    def list_recent_projects(self) -> dict[str, Any]:
+        rows = self._recent_projects.list()
+        projects = [
+            {
+                "path": row["path"],
+                "name": Path(row["path"]).name,
+                "last_opened_at": row["last_opened_at"],
+                "exists": Path(row["path"]).exists(),
+            }
+            for row in rows
+        ]
+        return {"status": "ok", "projects": projects}
+
     def open_project(self) -> dict[str, Any]:
         window = webview.windows[0] if webview.windows else None
         if window is None:
@@ -292,39 +354,18 @@ class SomaApi:
         selection = _normalize_dialog_result(result)
         if selection is None:
             return {"status": "cancelled"}
-        path = Path(selection)
-        try:
-            data = self._doc.load_project(path)
-        except Exception as exc:  # pragma: no cover
-            logger.exception("open_project load failed")
-            return {"status": "error", "message": str(exc)}
+        return self._open_project_from_path(Path(selection))
 
-        source = data.get("source")
-        if source is None:
-            return {"status": "error", "message": "Source audio not found in project."}
-        audio_path = Path(source.file_path)
-        if not audio_path.is_absolute():
-            audio_path = (path.parent / audio_path).resolve()
-
-        if not audio_path.exists():
-            return {"status": "error", "message": f"Audio file missing: {audio_path}"}
-
-        try:
-            info = self._doc.load_audio(audio_path, max_duration_sec=None)
-        except Exception as exc:  # pragma: no cover
-            logger.exception("open_project audio load failed")
-            return {"status": "error", "message": str(exc)}
-
-        self._doc.rebuild_resynth()
-        self._doc.start_preview_async()
-        return {
-            "status": "processing",
-            "audio": info.to_dict(),
-            "preview": None,
-            "settings": self._doc.settings.to_dict(),
-            "playback_settings": self._playback_settings_payload(),
-            "partials": [partial.to_dict() for partial in self._doc.store.all()],
-        }
+    def open_project_path(self, payload: dict[str, Any]) -> dict[str, Any]:
+        parsed = _validated_payload(OpenProjectPathPayload, payload, "open_project_path")
+        if isinstance(parsed, dict):
+            return parsed
+        path = Path(parsed.path).expanduser()
+        if not path.is_absolute():
+            path = path.resolve()
+        if not path.exists() or not path.is_file():
+            return {"status": "error", "message": "Project file not found."}
+        return self._open_project_from_path(path)
 
     def save_project(self) -> dict[str, Any]:
         if self._doc.project_path is None:
@@ -334,6 +375,7 @@ class SomaApi:
         except Exception as exc:  # pragma: no cover
             logger.exception("save_project failed")
             return {"status": "error", "message": str(exc)}
+        self._remember_recent_project(self._doc.project_path)
         return {"status": "ok", "path": str(self._doc.project_path)}
 
     def save_project_as(self) -> dict[str, Any]:
@@ -356,6 +398,7 @@ class SomaApi:
         except Exception as exc:  # pragma: no cover
             logger.exception("save_project_as failed")
             return {"status": "error", "message": str(exc)}
+        self._remember_recent_project(self._doc.project_path)
         return {"status": "ok", "path": str(self._doc.project_path)}
 
     def reveal_audio_in_explorer(self) -> dict[str, Any]:

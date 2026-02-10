@@ -159,6 +159,10 @@ class OpenAudioDataPayload(PayloadBase):
     data_base64: str
 
 
+class OpenProjectPathPayload(PayloadBase):
+    path: str
+
+
 class RequestViewportPreviewPayload(PayloadBase):
     time_start: float
     time_end: float

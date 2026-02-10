@@ -5,7 +5,7 @@ import { PlaybackSettingsSidebar } from './components/modals/PlaybackSettingsSid
 import { HeaderToolbar } from './components/HeaderToolbar'
 import { Workspace } from './components/Workspace'
 import { StatusBar } from './components/StatusBar'
-import type { AnalysisSettings, ToolId } from './app/types'
+import type { AnalysisSettings, Partial, PlaybackSettings, RecentProjectEntry, ToolId } from './app/types'
 import { formatDuration, formatNoteWithCents } from './app/utils'
 import { isPywebviewApiAvailable, pywebviewApi } from './app/pywebviewApi'
 import { useApiStatus } from './hooks/useApiStatus'
@@ -30,6 +30,10 @@ function App() {
   const [showAnalysisModal, setShowAnalysisModal] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
   const [showPlaybackSettings, setShowPlaybackSettings] = useState(false)
+  const [showStartupOverlay, setShowStartupOverlay] = useState(true)
+  const [startupBusy, setStartupBusy] = useState(false)
+  const [recentProjects, setRecentProjects] = useState<RecentProjectEntry[]>([])
+  const [recentLoaded, setRecentLoaded] = useState(false)
   const [exportTab, setExportTab] = useState<'mpe' | 'multitrack' | 'mono' | 'audio' | 'cv'>('mpe')
   const [mpePitchBendRange, setMpePitchBendRange] = useState('48')
   const [multitrackPitchBendRange, setMultitrackPitchBendRange] = useState('12')
@@ -64,6 +68,12 @@ function App() {
   const partialsHook = usePartials(reportError)
   const playback = usePlayback(reportError, analysis.analysisState)
   const viewport = useViewport(analysis.preview, reportError)
+  const { listRecentProjects, newProject, openProject, openProjectPath, saveProject, saveProjectAs } = analysis
+
+  type LoadedProjectResult = {
+    playbackSettings: PlaybackSettings
+    partials: Partial[]
+  } | null
 
   useKeyboardShortcuts({
     onToolChange: setActiveTool,
@@ -74,7 +84,7 @@ function App() {
     },
     onProbeToggle: playback.toggleHarmonicProbe,
     onSave: async () => {
-      const success = await analysis.saveProject()
+      const success = await saveProject()
       if (success) setStatusNote('Project saved')
     },
   })
@@ -97,38 +107,93 @@ function App() {
     }
   }, [menuOpen])
 
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const projects = await listRecentProjects()
+      if (!cancelled) {
+        setRecentProjects(projects)
+        setRecentLoaded(true)
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [listRecentProjects])
+
+  const applyLoadedProject = useCallback(
+    (result: LoadedProjectResult) => {
+      if (!result) return false
+      partialsHook.setPartials(result.partials)
+      playback.applyPlaybackSettings(result.playbackSettings)
+      setPlaybackError(null)
+      return true
+    },
+    [partialsHook, playback]
+  )
+
+  const loadRecentProjects = useCallback(async () => {
+    const projects = await listRecentProjects()
+    setRecentProjects(projects)
+    setRecentLoaded(true)
+  }, [listRecentProjects])
+
+  const handleCreateNewProject = useCallback(async (): Promise<boolean> => {
+    const success = await newProject()
+    if (success) {
+      partialsHook.setPartials([])
+      partialsHook.setSelection([])
+      await playback.syncStatus()
+      setPlaybackError(null)
+      setStatusNote('New project ready')
+      void loadRecentProjects()
+      return true
+    }
+    return false
+  }, [newProject, partialsHook, playback, loadRecentProjects])
+
+  const handleOpenProjectDialog = useCallback(async (): Promise<boolean> => {
+    const result = await openProject()
+    if (applyLoadedProject(result)) {
+      setStatusNote('Project opened')
+      void loadRecentProjects()
+      return true
+    }
+    return false
+  }, [openProject, applyLoadedProject, loadRecentProjects])
+
+  const handleOpenProjectPath = useCallback(
+    async (path: string): Promise<boolean> => {
+      const result = await openProjectPath(path)
+      if (applyLoadedProject(result)) {
+        setStatusNote('Project opened')
+        void loadRecentProjects()
+        return true
+      }
+      return false
+    },
+    [openProjectPath, applyLoadedProject, loadRecentProjects]
+  )
+
   const handleMenuAction = async (label: string) => {
     setMenuOpen(false)
     setStatusNote(null)
 
     if (label === 'New Project') {
-      const success = await analysis.newProject()
-      if (success) {
-        partialsHook.setPartials([])
-        partialsHook.setSelection([])
-        await playback.syncStatus()
-        setPlaybackError(null)
-        setStatusNote('New project ready')
-      }
+      await handleCreateNewProject()
       return
     }
     if (label === 'Open Project...') {
-      const result = await analysis.openProject()
-      if (result) {
-        partialsHook.setPartials(result.partials)
-        playback.applyPlaybackSettings(result.playbackSettings)
-        setPlaybackError(null)
-        setStatusNote('Project opened')
-      }
+      await handleOpenProjectDialog()
       return
     }
     if (label === 'Save Project') {
-      const success = await analysis.saveProject()
+      const success = await saveProject()
       if (success) setStatusNote('Project saved')
       return
     }
     if (label === 'Save As...') {
-      const success = await analysis.saveProjectAs()
+      const success = await saveProjectAs()
       if (success) setStatusNote('Project saved')
       return
     }
@@ -197,6 +262,42 @@ function App() {
       playback.applyPlaybackSettings(result.playbackSettings)
       setPlaybackError(null)
       setStatusNote('Audio loaded')
+    }
+  }
+
+  const handleStartupNewProject = async () => {
+    if (startupBusy) return
+    setStartupBusy(true)
+    setStatusNote(null)
+    try {
+      const success = await handleCreateNewProject()
+      if (success) setShowStartupOverlay(false)
+    } finally {
+      setStartupBusy(false)
+    }
+  }
+
+  const handleStartupOpenProject = async () => {
+    if (startupBusy) return
+    setStartupBusy(true)
+    setStatusNote(null)
+    try {
+      const success = await handleOpenProjectDialog()
+      if (success) setShowStartupOverlay(false)
+    } finally {
+      setStartupBusy(false)
+    }
+  }
+
+  const handleStartupOpenRecent = async (path: string) => {
+    if (startupBusy) return
+    setStartupBusy(true)
+    setStatusNote(null)
+    try {
+      const success = await handleOpenProjectPath(path)
+      if (success) setShowStartupOverlay(false)
+    } finally {
+      setStartupBusy(false)
     }
   }
 
@@ -575,6 +676,61 @@ function App() {
           onOpenPlaybackSettings={handleOpenMidiSettings}
         />
       </div>
+
+      {showStartupOverlay ? (
+        <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/55 p-4">
+          <section className="w-full max-w-2xl rounded-md border border-[var(--panel-border)] bg-[var(--panel)] p-5 shadow-2xl">
+            <div className="mb-4">
+              <h2 className="text-lg font-semibold text-[var(--ink)]">Start Project</h2>
+              <p className="mt-1 text-xs text-[var(--muted)]">Choose what you want to do.</p>
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <button
+                type="button"
+                className="rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-4 py-3 text-left text-sm font-semibold text-[var(--ink)] disabled:opacity-60"
+                onClick={() => void handleStartupNewProject()}
+                disabled={startupBusy}
+              >
+                New Project
+              </button>
+              <button
+                type="button"
+                className="rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-4 py-3 text-left text-sm font-semibold text-[var(--ink)] disabled:opacity-60"
+                onClick={() => void handleStartupOpenProject()}
+                disabled={startupBusy}
+              >
+                Open Project...
+              </button>
+            </div>
+
+            <div className="mt-4 rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] p-3">
+              <div className="mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-[var(--muted)]">Recent Projects</div>
+              {!recentLoaded ? (
+                <div className="text-xs text-[var(--muted)]">Loading...</div>
+              ) : recentProjects.length === 0 ? (
+                <div className="text-xs text-[var(--muted)]">No recent projects.</div>
+              ) : (
+                <div className="flex max-h-52 flex-col gap-1 overflow-y-auto">
+                  {recentProjects.map((project) => (
+                    <button
+                      key={project.path}
+                      type="button"
+                      className="rounded-md px-2 py-2 text-left hover:bg-[var(--panel)] disabled:cursor-not-allowed disabled:opacity-50"
+                      onClick={() => void handleStartupOpenRecent(project.path)}
+                      disabled={startupBusy || !project.exists}
+                      title={project.exists ? project.path : `Missing: ${project.path}`}
+                    >
+                      <div className="truncate text-sm text-[var(--ink)]">{project.name}</div>
+                      <div className="truncate font-mono text-[10px] text-[var(--muted)]">{project.path}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </section>
+        </div>
+      ) : null}
 
       {showAnalysisModal ? (
         <AnalysisSettingsModal

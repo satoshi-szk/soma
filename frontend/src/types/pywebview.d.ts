@@ -11,7 +11,9 @@ declare global {
         open_audio_path: (payload: unknown) => Promise<unknown>
         open_audio_data: (payload: unknown) => Promise<unknown>
         new_project: () => Promise<unknown>
+        list_recent_projects: () => Promise<unknown>
         open_project: () => Promise<unknown>
+        open_project_path: (payload: unknown) => Promise<unknown>
         save_project: () => Promise<unknown>
         save_project_as: () => Promise<unknown>
         reveal_audio_in_explorer: () => Promise<unknown>

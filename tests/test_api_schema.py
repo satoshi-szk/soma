@@ -2,6 +2,7 @@ from soma.api_schema import (
     ExportMpePayload,
     OpenAudioDataPayload,
     OpenAudioPathPayload,
+    OpenProjectPathPayload,
     PlayPayload,
     TracePartialPayload,
     UpdateSettingsPayload,
@@ -51,6 +52,13 @@ def test_parse_payload_accepts_audio_data() -> None:
     assert error is None
     assert parsed is not None
     assert parsed.name == "example.wav"
+
+
+def test_parse_payload_accepts_project_path() -> None:
+    parsed, error = parse_payload(OpenProjectPathPayload, {"path": "/tmp/example.soma"})
+    assert error is None
+    assert parsed is not None
+    assert parsed.path == "/tmp/example.soma"
 
 
 def test_parse_payload_accepts_play_speed_ratio() -> None:

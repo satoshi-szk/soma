@@ -22,6 +22,13 @@ export type AudioInfo = {
   truncated: boolean
 }
 
+export type RecentProjectEntry = {
+  path: string
+  name: string
+  last_opened_at: string
+  exists: boolean
+}
+
 export type PlaybackSettings = {
   master_volume: number
   output_mode: 'audio' | 'midi'

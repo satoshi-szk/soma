@@ -36,6 +36,13 @@ const audioInfoSchema = z.object({
   truncated: z.boolean(),
 })
 
+const recentProjectSchema = z.object({
+  path: z.string(),
+  name: z.string(),
+  last_opened_at: z.string(),
+  exists: z.boolean(),
+})
+
 const spectrogramPreviewSchema = z.object({
   width: z.number(),
   height: z.number(),
@@ -121,7 +128,11 @@ export const apiSchemas = {
   new_project: {
     response: z.union([okStatusSchema.extend({ playback_settings: playbackSettingsSchema }), errorStatusSchema]),
   },
+  list_recent_projects: {
+    response: z.union([okStatusSchema.extend({ projects: z.array(recentProjectSchema) }), errorStatusSchema]),
+  },
   open_project: { response: loadResponseSchema },
+  open_project_path: { payload: z.object({ path: z.string() }), response: loadResponseSchema },
   save_project: { response: z.union([okStatusSchema.extend({ path: z.string().optional() }), errorStatusSchema]) },
   save_project_as: { response: z.union([okStatusSchema.extend({ path: z.string() }), errorStatusSchema]) },
   reveal_audio_in_explorer: { response: z.union([okStatusSchema, errorStatusSchema]) },

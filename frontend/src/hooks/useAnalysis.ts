@@ -3,7 +3,7 @@ import { isPywebviewApiAvailable, pywebviewApi } from '../app/pywebviewApi'
 import { DEFAULT_SETTINGS } from '../app/constants'
 import { ensurePreviewData } from '../app/previewData'
 import { toPartial } from '../app/utils'
-import type { AnalysisSettings, AudioInfo, SpectrogramPreview, Partial, PlaybackSettings } from '../app/types'
+import type { AnalysisSettings, AudioInfo, SpectrogramPreview, Partial, PlaybackSettings, RecentProjectEntry } from '../app/types'
 
 type ReportError = (context: string, message: string) => void
 
@@ -337,6 +337,27 @@ export function useAnalysis(reportError: ReportError) {
     return false
   }, [reportError])
 
+  const listRecentProjects = useCallback(async (): Promise<RecentProjectEntry[]> => {
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
+    if (!api?.list_recent_projects) {
+      reportError('Recent Projects', 'API not available')
+      return []
+    }
+    try {
+      const result = await api.list_recent_projects()
+      if (result?.status === 'ok') {
+        return result.projects
+      }
+      if (result?.status === 'error') {
+        reportError('Recent Projects', result.message ?? 'Failed to load recent projects.')
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unexpected error'
+      reportError('Recent Projects', message)
+    }
+    return []
+  }, [reportError])
+
   const saveProject = useCallback(async (): Promise<boolean> => {
     const api = isPywebviewApiAvailable() ? pywebviewApi : null
     if (!api?.save_project) {
@@ -357,6 +378,51 @@ export function useAnalysis(reportError: ReportError) {
     }
     return false
   }, [reportError])
+
+  const openProjectPath = useCallback(
+    async (path: string): Promise<AnalysisResult | null> => {
+      const api = isPywebviewApiAvailable() ? pywebviewApi : null
+      if (!api?.open_project_path) {
+        reportError('Open Project', 'API not available')
+        return null
+      }
+      setAnalysisState('analyzing')
+      setAnalysisError(null)
+      await flushUi()
+      try {
+        const result = await api.open_project_path({ path })
+        if (result?.status === 'ok' || result?.status === 'processing') {
+          setAudioInfo(result.audio)
+          setPreview(result.preview ?? null)
+          setSettings(result.settings)
+          setAnalysisState(result.status === 'processing' ? 'analyzing' : 'idle')
+          return {
+            audio: result.audio,
+            preview: result.preview ?? null,
+            settings: result.settings,
+            playbackSettings: result.playback_settings,
+            partials: result.partials.map(toPartial),
+          }
+        } else if (result?.status === 'cancelled') {
+          setAnalysisState('idle')
+          return null
+        } else if (result?.status === 'error') {
+          setAnalysisState('error')
+          setAnalysisError(result.message ?? 'Failed to open project.')
+          reportError('Open Project', result.message ?? 'Failed to open project.')
+          return null
+        }
+        return null
+      } catch (error) {
+        setAnalysisState('error')
+        const message = error instanceof Error ? error.message : 'Failed to open project.'
+        setAnalysisError(message)
+        reportError('Open Project', message)
+        return null
+      }
+    },
+    [reportError, flushUi]
+  )
 
   const saveProjectAs = useCallback(async (): Promise<boolean> => {
     const api = isPywebviewApiAvailable() ? pywebviewApi : null
@@ -420,7 +486,9 @@ export function useAnalysis(reportError: ReportError) {
     openAudioPath,
     openAudioFile,
     openProject,
+    openProjectPath,
     newProject,
+    listRecentProjects,
     saveProject,
     saveProjectAs,
     applySettings,
