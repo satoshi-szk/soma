@@ -28,12 +28,12 @@ class MpeExportSettings(MidiExportSettings):
 
 @dataclass(frozen=True)
 class MultiTrackExportSettings(MidiExportSettings):
-    pass
+    pitch_bend_range: int = 12
 
 
 @dataclass(frozen=True)
 class MonophonicExportSettings(MidiExportSettings):
-    pass
+    pitch_bend_range: int = 12
 
 
 @dataclass(frozen=True)

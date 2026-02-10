@@ -171,3 +171,37 @@ def test_update_mix_ratio_does_not_seek_backwards(monkeypatch) -> None:  # type:
     assert updated is True
     assert captured["size"] == 32
     assert captured["start_position_sec"] is None
+
+
+def test_update_mix_ratio_reuses_stretched_original_cache(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    doc = _make_doc(duration_sec=2.0)
+    partial = Partial(
+        id="p1",
+        points=[
+            PartialPoint(time=0.0, freq=440.0, amp=0.5),
+            PartialPoint(time=2.0, freq=440.0, amp=0.5),
+        ],
+    )
+    doc.store.add(partial)
+    doc.synth.apply_partial(partial)
+    doc._playback_mode = "normal"
+    doc._playback_speed_ratio = 2.0
+    doc._last_time_stretch_mode = "native"
+    doc.player.is_playing = lambda: True  # type: ignore[method-assign]
+    doc.player.update_buffer = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+
+    calls = {"stretch": 0}
+
+    def fake_stretch(buffer: np.ndarray, speed_ratio: float, sample_rate: int, mode: str = "librosa") -> np.ndarray:
+        del speed_ratio, sample_rate, mode
+        calls["stretch"] += 1
+        return buffer
+
+    monkeypatch.setattr(document_module, "time_stretch_pitch_preserving", fake_stretch)
+
+    updated_first = doc.update_mix_ratio(0.4)
+    updated_second = doc.update_mix_ratio(0.7)
+
+    assert updated_first is True
+    assert updated_second is True
+    assert calls["stretch"] == 1
