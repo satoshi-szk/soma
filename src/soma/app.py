@@ -5,6 +5,7 @@ import json
 import logging
 import multiprocessing
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -355,6 +356,19 @@ class SomaApi:
             logger.exception("save_project_as failed")
             return {"status": "error", "message": str(exc)}
         return {"status": "ok", "path": str(self._doc.project_path)}
+
+    def reveal_audio_in_explorer(self) -> dict[str, Any]:
+        if self._doc.audio_info is None:
+            return {"status": "error", "message": "No audio loaded."}
+        path = Path(self._doc.audio_info.path).expanduser()
+        if not path.exists():
+            return {"status": "error", "message": "Audio file not found."}
+        try:
+            _reveal_in_file_explorer(path)
+        except Exception as exc:  # pragma: no cover
+            logger.exception("reveal_audio_in_explorer failed")
+            return {"status": "error", "message": str(exc)}
+        return {"status": "ok"}
 
     def update_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         parsed = _validated_payload(UpdateSettingsPayload, payload, "update_settings")
@@ -812,6 +826,18 @@ def _normalize_dialog_result(result: Any) -> str | None:
     if isinstance(result, str):
         return result
     return None
+
+
+def _reveal_in_file_explorer(path: Path) -> None:
+    resolved = path.expanduser().resolve()
+    if sys.platform == "darwin":
+        subprocess.run(["open", "-R", str(resolved)], check=True)
+        return
+    if sys.platform.startswith("win"):
+        subprocess.run(["explorer", "/select,", str(resolved)], check=True)
+        return
+    target = resolved.parent if resolved.is_file() else resolved
+    subprocess.run(["xdg-open", str(target)], check=True)
 
 
 def _wrap_api_methods() -> None:

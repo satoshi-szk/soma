@@ -32,8 +32,8 @@ function App() {
   const [showPlaybackSettings, setShowPlaybackSettings] = useState(false)
   const [exportTab, setExportTab] = useState<'mpe' | 'multitrack' | 'mono' | 'audio' | 'cv'>('mpe')
   const [mpePitchBendRange, setMpePitchBendRange] = useState('48')
-  const [multitrackPitchBendRange, setMultitrackPitchBendRange] = useState('48')
-  const [monoPitchBendRange, setMonoPitchBendRange] = useState('48')
+  const [multitrackPitchBendRange, setMultitrackPitchBendRange] = useState('12')
+  const [monoPitchBendRange, setMonoPitchBendRange] = useState('12')
   const [mpeAmpMapping, setMpeAmpMapping] = useState('cc74')
   const [multitrackAmpMapping, setMultitrackAmpMapping] = useState('cc74')
   const [monoAmpMapping, setMonoAmpMapping] = useState('cc74')
@@ -195,6 +195,21 @@ function App() {
       playback.applyPlaybackSettings(result.playbackSettings)
       setPlaybackError(null)
       setStatusNote('Audio loaded')
+    }
+  }
+
+  const handleRevealAudioInExplorer = async () => {
+    if (!analysis.audioInfo) return
+    try {
+      const result = await pywebviewApi.reveal_audio_in_explorer()
+      if (result.status === 'error') {
+        reportError('File Explorer', result.message ?? 'Failed to reveal audio file')
+        return
+      }
+      setStatusNote('Opened in file explorer')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unexpected error'
+      reportError('File Explorer', message)
     }
   }
 
@@ -443,10 +458,28 @@ function App() {
             <section className="panel flex flex-1 min-h-0 flex-col rounded-none px-2 py-2">
             <div className="flex items-center justify-between gap-3 text-[11px] tracking-normal text-[var(--ink)]">
               <span className="flex min-w-0 items-center gap-3">
-                <span className="font-semibold">Workspace</span>
-                <span className="min-w-0 truncate font-mono text-[11px] normal-case tracking-normal text-[var(--muted)]">
+                <button
+                  type="button"
+                  className={`border-0 bg-transparent p-0 text-left font-semibold ${
+                    analysis.audioInfo ? 'cursor-pointer hover:underline' : ''
+                  }`}
+                  onClick={() => void handleRevealAudioInExplorer()}
+                  disabled={!analysis.audioInfo}
+                  title={analysis.audioInfo ? 'Show in Finder / File Explorer' : undefined}
+                >
+                  Workspace
+                </button>
+                <button
+                  type="button"
+                  className={`min-w-0 truncate border-0 bg-transparent p-0 text-left font-mono text-[11px] normal-case tracking-normal ${
+                    analysis.audioInfo ? 'text-[var(--muted)] hover:underline cursor-pointer' : 'text-[var(--muted)]'
+                  }`}
+                  onClick={() => void handleRevealAudioInExplorer()}
+                  disabled={!analysis.audioInfo}
+                  title={analysis.audioInfo ? 'Show in Finder / File Explorer' : undefined}
+                >
                   {audioInfoLabel}
-                </span>
+                </button>
               </span>
               <span className="font-mono text-[11px] text-[var(--ink)]">{timeScaleLabel}</span>
             </div>

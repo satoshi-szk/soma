@@ -127,6 +127,10 @@ class SomaDocument:
         self._playback_content_revision = 0
         self._playback_cache_key: tuple[int, float, float, str] | None = None
         self._playback_cache_buffer: np.ndarray | None = None
+        self._stretched_original_cache_key: tuple[int, float, str] | None = None
+        self._stretched_original_cache_buffer: np.ndarray | None = None
+        self._time_scaled_resynth_cache_key: tuple[int, float, int] | None = None
+        self._time_scaled_resynth_cache_buffer: np.ndarray | None = None
         self._master_volume = 1.0
         self.player.set_master_volume(self._master_volume)
         self._last_mix_ratio = 0.55
@@ -974,6 +978,10 @@ class SomaDocument:
             self._playback_content_revision += 1
             self._playback_cache_key = None
             self._playback_cache_buffer = None
+            self._stretched_original_cache_key = None
+            self._stretched_original_cache_buffer = None
+            self._time_scaled_resynth_cache_key = None
+            self._time_scaled_resynth_cache_buffer = None
 
     def _playback_cache_lookup_key(
         self, mix_ratio: float, speed_ratio: float, mode: str
@@ -1131,16 +1139,70 @@ class SomaDocument:
         sample_rate: int,
         time_stretch_mode: str,
     ) -> np.ndarray:
-        if mix_ratio >= 1.0 - 1e-6:
-            return self._render_resynth_time_scaled(speed_ratio, sample_rate)
-        mixed = self._mix_buffer(mix_ratio)
+        clamped_mix = float(np.clip(mix_ratio, 0.0, 1.0))
+        if clamped_mix >= 1.0 - 1e-6:
+            return self._render_resynth_time_scaled_cached(speed_ratio, sample_rate)
+        if self.audio_data is None:
+            return self._render_resynth_time_scaled_cached(speed_ratio, sample_rate)
+        if clamped_mix <= 1e-6:
+            return self._render_original_time_stretched_cached(speed_ratio, sample_rate, time_stretch_mode)
+        original = self._render_original_time_stretched_cached(speed_ratio, sample_rate, time_stretch_mode)
+        resynth = self._render_resynth_time_scaled_cached(speed_ratio, sample_rate)
+        length = max(original.shape[0], resynth.shape[0])
+        original_matched = self._match_length(original, length)
+        resynth_matched = self._match_length(resynth, length)
+        mixed = (1.0 - clamped_mix) * original_matched + clamped_mix * resynth_matched
+        return peak_normalize_buffer(mixed)
+
+    def _render_original_time_stretched_cached(
+        self,
+        speed_ratio: float,
+        sample_rate: int,
+        time_stretch_mode: str,
+    ) -> np.ndarray:
+        source = self.audio_data
+        if source is None:
+            return np.zeros(1, dtype=np.float32)
+        key = self._playback_stretch_component_key(speed_ratio, time_stretch_mode)
+        with self._lock:
+            if self._stretched_original_cache_key == key and self._stretched_original_cache_buffer is not None:
+                return self._stretched_original_cache_buffer
         stretched = time_stretch_pitch_preserving(
-            mixed,
+            peak_normalize_buffer(source.astype(np.float32)),
             speed_ratio,
             sample_rate,
             mode=time_stretch_mode,
         )
-        return peak_normalize_buffer(stretched)
+        normalized = peak_normalize_buffer(stretched)
+        with self._lock:
+            if key[0] != self._playback_content_revision:
+                return normalized
+            self._stretched_original_cache_key = key
+            self._stretched_original_cache_buffer = normalized.astype(np.float32, copy=False)
+        return normalized
+
+    def _render_resynth_time_scaled_cached(self, speed_ratio: float, sample_rate: int) -> np.ndarray:
+        key = self._playback_resynth_component_key(speed_ratio, sample_rate)
+        with self._lock:
+            if self._time_scaled_resynth_cache_key == key and self._time_scaled_resynth_cache_buffer is not None:
+                return self._time_scaled_resynth_cache_buffer
+        rendered = self._render_resynth_time_scaled(speed_ratio, sample_rate)
+        with self._lock:
+            if key[0] != self._playback_content_revision:
+                return rendered
+            self._time_scaled_resynth_cache_key = key
+            self._time_scaled_resynth_cache_buffer = rendered.astype(np.float32, copy=False)
+        return rendered
+
+    def _playback_stretch_component_key(self, speed_ratio: float, mode: str) -> tuple[int, float, str]:
+        with self._lock:
+            revision = self._playback_content_revision
+        return (revision, round(float(speed_ratio), 6), mode)
+
+    def _playback_resynth_component_key(self, speed_ratio: float, sample_rate: int) -> tuple[int, float, int]:
+        with self._lock:
+            revision = self._playback_content_revision
+        return (revision, round(float(speed_ratio), 6), int(sample_rate))
 
     def _render_resynth_time_scaled(self, speed_ratio: float, sample_rate: int) -> np.ndarray:
         if self.audio_info is None:

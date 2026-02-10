@@ -40,6 +40,7 @@ export const pywebviewApi = {
   open_project: () => callApi('open_project'),
   save_project: () => callApi('save_project'),
   save_project_as: () => callApi('save_project_as'),
+  reveal_audio_in_explorer: () => callApi('reveal_audio_in_explorer'),
   update_settings: (payload: PayloadFor<'update_settings'>) => callApi('update_settings', payload),
   trace_partial: (payload: PayloadFor<'trace_partial'>) => callApi('trace_partial', payload),
   erase_partial: (payload: PayloadFor<'erase_partial'>) => callApi('erase_partial', payload),

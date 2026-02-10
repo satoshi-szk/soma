@@ -123,14 +123,14 @@ class ExportMpePayload(PayloadBase):
 
 
 class ExportMultiTrackMidiPayload(PayloadBase):
-    pitch_bend_range: int = 48
+    pitch_bend_range: int = 12
     amplitude_mapping: str = "velocity"
     amplitude_curve: str = "linear"
     bpm: float = 120.0
 
 
 class ExportMonophonicMidiPayload(PayloadBase):
-    pitch_bend_range: int = 48
+    pitch_bend_range: int = 12
     amplitude_mapping: str = "velocity"
     amplitude_curve: str = "linear"
     bpm: float = 120.0

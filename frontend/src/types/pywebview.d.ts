@@ -14,6 +14,7 @@ declare global {
         open_project: () => Promise<unknown>
         save_project: () => Promise<unknown>
         save_project_as: () => Promise<unknown>
+        reveal_audio_in_explorer: () => Promise<unknown>
         update_settings: (payload: unknown) => Promise<unknown>
         trace_partial: (payload: unknown) => Promise<unknown>
         erase_partial: (payload: unknown) => Promise<unknown>

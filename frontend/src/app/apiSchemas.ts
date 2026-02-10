@@ -123,6 +123,7 @@ export const apiSchemas = {
   open_project: { response: loadResponseSchema },
   save_project: { response: z.union([okStatusSchema.extend({ path: z.string().optional() }), errorStatusSchema]) },
   save_project_as: { response: z.union([okStatusSchema.extend({ path: z.string() }), errorStatusSchema]) },
+  reveal_audio_in_explorer: { response: z.union([okStatusSchema, errorStatusSchema]) },
   update_settings: { payload: analysisSettingsSchema, response: updateSettingsResponseSchema },
   trace_partial: {
     payload: z.object({ trace: z.array(z.tuple([z.number(), z.number()])) }),
