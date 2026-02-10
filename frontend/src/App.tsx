@@ -41,6 +41,7 @@ function App() {
   const [multitrackAmpCurve, setMultitrackAmpCurve] = useState('linear')
   const [monoAmpCurve, setMonoAmpCurve] = useState('linear')
   const [cvAmpCurve, setCvAmpCurve] = useState('linear')
+  const [exportMidiCcUpdateRateHz, setExportMidiCcUpdateRateHz] = useState(400)
   const [exportSampleRate, setExportSampleRate] = useState('44100')
   const [exportBitDepth, setExportBitDepth] = useState('16')
   const [exportCvBaseFreq, setExportCvBaseFreq] = useState('440')
@@ -136,6 +137,7 @@ function App() {
       return
     }
     if (label === 'Export...') {
+      setExportMidiCcUpdateRateHz(playback.midiCcUpdateRateHz)
       setShowExportModal(true)
       return
     }
@@ -304,6 +306,7 @@ function App() {
           pitch_bend_range: pitchBendRange.value,
           amplitude_mapping: currentAmpMapping,
           amplitude_curve: currentAmpCurve,
+          cc_update_rate_hz: exportMidiCcUpdateRateHz,
         })
         if (result.status === 'ok') {
           setStatusNote(`Exported ${result.paths.length} MIDI file(s).`)
@@ -315,6 +318,7 @@ function App() {
           pitch_bend_range: pitchBendRange.value,
           amplitude_mapping: currentAmpMapping,
           amplitude_curve: currentAmpCurve,
+          cc_update_rate_hz: exportMidiCcUpdateRateHz,
         })
         if (result.status === 'ok') {
           setStatusNote(`Exported ${result.paths.length} MIDI file(s).`)
@@ -326,6 +330,7 @@ function App() {
           pitch_bend_range: pitchBendRange.value,
           amplitude_mapping: currentAmpMapping,
           amplitude_curve: currentAmpCurve,
+          cc_update_rate_hz: exportMidiCcUpdateRateHz,
         })
         if (result.status === 'ok') {
           setStatusNote(`Exported ${result.paths.length} MIDI file(s).`)
@@ -536,6 +541,7 @@ function App() {
               midiPitchBendRange={playback.midiPitchBendRange}
               midiAmplitudeMapping={playback.midiAmplitudeMapping}
               midiAmplitudeCurve={playback.midiAmplitudeCurve}
+              midiCcUpdateRateHz={playback.midiCcUpdateRateHz}
               midiBpm={playback.midiBpm}
               controlsDisabled={playback.isPlaying || playback.isPreparingPlayback}
               onClose={() => setShowPlaybackSettings(false)}
@@ -551,6 +557,7 @@ function App() {
               onMidiPitchBendRangeChange={playback.setMidiPitchBend}
               onMidiAmplitudeMappingChange={playback.setMidiAmplitudeMapping}
               onMidiAmplitudeCurveChange={playback.setMidiAmplitudeCurve}
+              onMidiCcUpdateRateChange={playback.setMidiCcUpdateRate}
               onMidiBpmChange={playback.setMidiBpm}
             />
           ) : null}
@@ -587,6 +594,7 @@ function App() {
           amplitudeCurve={
             exportTab === 'mpe' ? mpeAmpCurve : exportTab === 'multitrack' ? multitrackAmpCurve : exportTab === 'mono' ? monoAmpCurve : cvAmpCurve
           }
+          midiCcUpdateRateHz={exportMidiCcUpdateRateHz}
           exportSampleRate={exportSampleRate}
           exportBitDepth={exportBitDepth}
           exportCvBaseFreq={exportCvBaseFreq}
@@ -622,6 +630,7 @@ function App() {
               setCvAmpCurve(value)
             }
           }}
+          onMidiCcUpdateRateChange={setExportMidiCcUpdateRateHz}
           onSampleRateChange={setExportSampleRate}
           onBitDepthChange={setExportBitDepth}
           onCvBaseFreqChange={setExportCvBaseFreq}

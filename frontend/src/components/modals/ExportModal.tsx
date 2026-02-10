@@ -3,6 +3,7 @@ export type ExportModalProps = {
   pitchBendRange: string
   amplitudeMapping: string
   amplitudeCurve: string
+  midiCcUpdateRateHz: number
   exportSampleRate: string
   exportBitDepth: string
   exportCvBaseFreq: string
@@ -12,6 +13,7 @@ export type ExportModalProps = {
   onPitchBendChange: (value: string) => void
   onAmplitudeMappingChange: (value: string) => void
   onAmplitudeCurveChange: (value: string) => void
+  onMidiCcUpdateRateChange: (value: number) => void
   onSampleRateChange: (value: string) => void
   onBitDepthChange: (value: string) => void
   onCvBaseFreqChange: (value: string) => void
@@ -26,6 +28,7 @@ export function ExportModal({
   pitchBendRange,
   amplitudeMapping,
   amplitudeCurve,
+  midiCcUpdateRateHz,
   exportSampleRate,
   exportBitDepth,
   exportCvBaseFreq,
@@ -35,6 +38,7 @@ export function ExportModal({
   onPitchBendChange,
   onAmplitudeMappingChange,
   onAmplitudeCurveChange,
+  onMidiCcUpdateRateChange,
   onSampleRateChange,
   onBitDepthChange,
   onCvBaseFreqChange,
@@ -99,6 +103,16 @@ export function ExportModal({
               <select value={amplitudeCurve} onChange={(event) => onAmplitudeCurveChange(event.target.value)}>
                 <option value="linear">Linear</option>
                 <option value="db">dB</option>
+              </select>
+            </label>
+            <label>
+              CC Update Rate
+              <select value={midiCcUpdateRateHz} onChange={(event) => onMidiCcUpdateRateChange(Number(event.target.value))}>
+                <option value={50}>50 Hz</option>
+                <option value={100}>100 Hz</option>
+                <option value={200}>200 Hz</option>
+                <option value={400}>400 Hz</option>
+                <option value={800}>800 Hz</option>
               </select>
             </label>
           </div>

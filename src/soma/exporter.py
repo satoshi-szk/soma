@@ -9,7 +9,7 @@ from mido import Message, MetaMessage, MidiFile, MidiTrack, bpm2tempo, second2ti
 from scipy.io import wavfile
 
 from soma.audio_utils import peak_normalize_buffer
-from soma.models import Partial
+from soma.models import Partial, PartialPoint
 
 
 @dataclass(frozen=True)
@@ -17,6 +17,7 @@ class MidiExportSettings:
     pitch_bend_range: int = 48
     amplitude_mapping: str = "velocity"  # velocity | pressure | cc74 | cc1 のいずれか
     amplitude_curve: str = "linear"  # linear | db のいずれか
+    cc_update_rate_hz: int = 0  # 0 はポイント時刻のみ。正値で線形補間サンプリングを有効化。
     bpm: float = 120.0
     ticks_per_beat: int = 960
 
@@ -377,43 +378,44 @@ def _partial_timed_events(
     points = sorted(partial.points, key=lambda p: p.time)
     if not points:
         return []
+    sampled_points = _resample_partial_points(points, settings.cc_update_rate_hz)
     events: list[TimedEvent] = []
-    current_note = _freq_to_midi(points[0].freq)
-    velocity = _amp_to_velocity(_normalize_amp(points[0].amp, amp_min, amp_max, settings.amplitude_curve))
+    current_note = _freq_to_midi(sampled_points[0][1])
+    velocity = _amp_to_velocity(_normalize_amp(sampled_points[0][2], amp_min, amp_max, settings.amplitude_curve))
     events.append(
         TimedEvent(
-            time=points[0].time,
+            time=sampled_points[0][0],
             order=_message_order("note_on"),
             message=Message("note_on", note=current_note, velocity=velocity, channel=channel),
             partial_id=partial.id,
         )
     )
 
-    for point in points:
-        if _needs_retrigger(point.freq, current_note, settings.pitch_bend_range):
+    for time_sec, freq, amp in sampled_points:
+        if _needs_retrigger(freq, current_note, settings.pitch_bend_range):
             events.append(
                 TimedEvent(
-                    time=point.time,
+                    time=time_sec,
                     order=_message_order("note_off"),
                     message=Message("note_off", note=current_note, velocity=0, channel=channel),
                     partial_id=partial.id,
                 )
             )
-            current_note = _freq_to_midi(point.freq)
-            velocity = _amp_to_velocity(_normalize_amp(point.amp, amp_min, amp_max, settings.amplitude_curve))
+            current_note = _freq_to_midi(freq)
+            velocity = _amp_to_velocity(_normalize_amp(amp, amp_min, amp_max, settings.amplitude_curve))
             events.append(
                 TimedEvent(
-                    time=point.time,
+                    time=time_sec,
                     order=_message_order("note_on"),
                     message=Message("note_on", note=current_note, velocity=velocity, channel=channel),
                     partial_id=partial.id,
                 )
             )
-        pitch_bend = _freq_to_pitch_bend(point.freq, current_note, settings.pitch_bend_range)
-        normalized_amp = _normalize_amp(point.amp, amp_min, amp_max, settings.amplitude_curve)
+        pitch_bend = _freq_to_pitch_bend(freq, current_note, settings.pitch_bend_range)
+        normalized_amp = _normalize_amp(amp, amp_min, amp_max, settings.amplitude_curve)
         events.append(
             TimedEvent(
-                time=point.time,
+                time=time_sec,
                 order=_message_order("pitchwheel"),
                 message=Message("pitchwheel", pitch=pitch_bend, channel=channel),
                 partial_id=partial.id,
@@ -422,7 +424,7 @@ def _partial_timed_events(
         if settings.amplitude_mapping == "pressure":
             events.append(
                 TimedEvent(
-                    time=point.time,
+                    time=time_sec,
                     order=_message_order("aftertouch"),
                     message=Message("aftertouch", value=_amp_to_cc(normalized_amp), channel=channel),
                     partial_id=partial.id,
@@ -431,7 +433,7 @@ def _partial_timed_events(
         elif settings.amplitude_mapping == "cc74":
             events.append(
                 TimedEvent(
-                    time=point.time,
+                    time=time_sec,
                     order=_message_order("control_change"),
                     message=Message("control_change", control=74, value=_amp_to_cc(normalized_amp), channel=channel),
                     partial_id=partial.id,
@@ -440,7 +442,7 @@ def _partial_timed_events(
         elif settings.amplitude_mapping == "cc1":
             events.append(
                 TimedEvent(
-                    time=point.time,
+                    time=time_sec,
                     order=_message_order("control_change"),
                     message=Message("control_change", control=1, value=_amp_to_cc(normalized_amp), channel=channel),
                     partial_id=partial.id,
@@ -448,13 +450,59 @@ def _partial_timed_events(
             )
     events.append(
         TimedEvent(
-            time=points[-1].time,
+            time=sampled_points[-1][0],
             order=_message_order("note_off"),
             message=Message("note_off", note=current_note, velocity=0, channel=channel),
             partial_id=partial.id,
         )
     )
     return events
+
+
+def _resample_partial_points(
+    points: list[PartialPoint],
+    update_rate_hz: int,
+) -> list[tuple[float, float, float]]:
+    if update_rate_hz <= 0 or len(points) < 2:
+        return [(float(point.time), float(point.freq), float(point.amp)) for point in points]
+
+    rate = float(update_rate_hz)
+    sampled: list[tuple[float, float, float]] = [(float(points[0].time), float(points[0].freq), float(points[0].amp))]
+
+    for index in range(len(points) - 1):
+        start = points[index]
+        end = points[index + 1]
+        start_time = float(start.time)
+        end_time = float(end.time)
+        start_freq = float(start.freq)
+        end_freq = float(end.freq)
+        start_amp = float(start.amp)
+        end_amp = float(end.amp)
+        dt = end_time - start_time
+
+        if dt <= 0.0:
+            if end_time > sampled[-1][0]:
+                sampled.append((end_time, end_freq, end_amp))
+            else:
+                sampled[-1] = (end_time, end_freq, end_amp)
+            continue
+
+        midpoint_count = int(np.floor(dt * rate))
+        for step in range(1, midpoint_count + 1):
+            time_sec = start_time + (step / rate)
+            if time_sec >= end_time:
+                break
+            ratio = (time_sec - start_time) / dt
+            freq = start_freq + (end_freq - start_freq) * ratio
+            amp = start_amp + (end_amp - start_amp) * ratio
+            sampled.append((time_sec, freq, amp))
+
+        if end_time > sampled[-1][0]:
+            sampled.append((end_time, end_freq, end_amp))
+        else:
+            sampled[-1] = (end_time, end_freq, end_amp)
+
+    return sampled
 
 
 def _allocate_voices(partials: list[Partial], max_voices: int | None) -> list[list[list[Partial]]]:

@@ -17,6 +17,8 @@ from soma.models import (
     generate_bright_color,
 )
 
+_MIDI_CC_UPDATE_RATE_OPTIONS_HZ = (50, 100, 200, 400, 800)
+
 
 def compute_md5(path: Path) -> str:
     digest = hashlib.md5()
@@ -96,6 +98,8 @@ def parse_playback_settings(data: dict[str, Any]) -> PlaybackSettings:
     midi_pitch_bend_range = int(settings.get("midi_pitch_bend_range", 48))
     midi_amplitude_mapping = str(settings.get("midi_amplitude_mapping", "cc74"))
     midi_amplitude_curve = str(settings.get("midi_amplitude_curve", "linear"))
+    midi_cc_update_rate_hz = int(settings.get("midi_cc_update_rate_hz", 400))
+    midi_cc_update_rate_hz = min(_MIDI_CC_UPDATE_RATE_OPTIONS_HZ, key=lambda rate: abs(rate - midi_cc_update_rate_hz))
     midi_bpm = float(settings.get("midi_bpm", 120.0))
     return PlaybackSettings(
         master_volume=min(1.0, max(0.0, master_volume)),
@@ -110,6 +114,7 @@ def parse_playback_settings(data: dict[str, Any]) -> PlaybackSettings:
             midi_amplitude_mapping if midi_amplitude_mapping in {"pressure", "cc74", "cc1", "velocity"} else "cc74"
         ),
         midi_amplitude_curve="db" if midi_amplitude_curve == "db" else "linear",
+        midi_cc_update_rate_hz=midi_cc_update_rate_hz,
         midi_bpm=max(1.0, midi_bpm),
     )
 

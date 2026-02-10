@@ -65,6 +65,7 @@ class PlaybackSettings:
     midi_pitch_bend_range: int = 48
     midi_amplitude_mapping: str = "cc74"
     midi_amplitude_curve: str = "linear"
+    midi_cc_update_rate_hz: int = 400
     midi_bpm: float = 120.0
 
     def to_dict(self) -> dict[str, Any]:

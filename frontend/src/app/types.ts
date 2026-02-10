@@ -33,6 +33,7 @@ export type PlaybackSettings = {
   midi_pitch_bend_range: number
   midi_amplitude_mapping: 'velocity' | 'pressure' | 'cc74' | 'cc1'
   midi_amplitude_curve: 'linear' | 'db'
+  midi_cc_update_rate_hz: number
   midi_bpm: number
 }
 

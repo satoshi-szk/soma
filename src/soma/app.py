@@ -67,6 +67,7 @@ _frontend_log_lock = threading.Lock()
 _frontend_event_lock = threading.Lock()
 _preview_cache: PreviewCacheConfig | None = None
 _preview_cache_server: PreviewCacheServer | None = None
+_MIDI_CC_UPDATE_RATE_OPTIONS_HZ = (50, 100, 200, 400, 800)
 
 
 def _dispatch_frontend_event(payload: dict[str, Any]) -> None:
@@ -639,6 +640,11 @@ class SomaApi:
                         if parsed.midi_amplitude_curve is not None
                         else current.midi_amplitude_curve
                     ),
+                    midi_cc_update_rate_hz=(
+                        parsed.midi_cc_update_rate_hz
+                        if parsed.midi_cc_update_rate_hz is not None
+                        else current.midi_cc_update_rate_hz
+                    ),
                     midi_bpm=parsed.midi_bpm if parsed.midi_bpm is not None else current.midi_bpm,
                 )
             )
@@ -711,10 +717,14 @@ class SomaApi:
         parsed = _validated_payload(ExportMpePayload, payload, "export_mpe")
         if isinstance(parsed, dict):
             return parsed
+        base_cc_rate = self._doc.playback_settings().midi_cc_update_rate_hz
+        requested_cc_rate = parsed.cc_update_rate_hz if parsed.cc_update_rate_hz is not None else base_cc_rate
+        cc_rate = min(_MIDI_CC_UPDATE_RATE_OPTIONS_HZ, key=lambda rate: abs(rate - int(requested_cc_rate)))
         settings = MpeExportSettings(
             pitch_bend_range=parsed.pitch_bend_range,
             amplitude_mapping=parsed.amplitude_mapping,
             amplitude_curve=parsed.amplitude_curve,
+            cc_update_rate_hz=cc_rate,
             bpm=parsed.bpm,
         )
         paths = export_mpe(self._doc.store.all(), Path(selection), settings)
@@ -739,10 +749,14 @@ class SomaApi:
         parsed = _validated_payload(ExportMultiTrackMidiPayload, payload, "export_multitrack_midi")
         if isinstance(parsed, dict):
             return parsed
+        base_cc_rate = self._doc.playback_settings().midi_cc_update_rate_hz
+        requested_cc_rate = parsed.cc_update_rate_hz if parsed.cc_update_rate_hz is not None else base_cc_rate
+        cc_rate = min(_MIDI_CC_UPDATE_RATE_OPTIONS_HZ, key=lambda rate: abs(rate - int(requested_cc_rate)))
         settings = MultiTrackExportSettings(
             pitch_bend_range=parsed.pitch_bend_range,
             amplitude_mapping=parsed.amplitude_mapping,
             amplitude_curve=parsed.amplitude_curve,
+            cc_update_rate_hz=cc_rate,
             bpm=parsed.bpm,
         )
         paths = export_multitrack_midi(self._doc.store.all(), Path(selection), settings)
@@ -767,10 +781,14 @@ class SomaApi:
         parsed = _validated_payload(ExportMonophonicMidiPayload, payload, "export_monophonic_midi")
         if isinstance(parsed, dict):
             return parsed
+        base_cc_rate = self._doc.playback_settings().midi_cc_update_rate_hz
+        requested_cc_rate = parsed.cc_update_rate_hz if parsed.cc_update_rate_hz is not None else base_cc_rate
+        cc_rate = min(_MIDI_CC_UPDATE_RATE_OPTIONS_HZ, key=lambda rate: abs(rate - int(requested_cc_rate)))
         settings = MonophonicExportSettings(
             pitch_bend_range=parsed.pitch_bend_range,
             amplitude_mapping=parsed.amplitude_mapping,
             amplitude_curve=parsed.amplitude_curve,
+            cc_update_rate_hz=cc_rate,
             bpm=parsed.bpm,
         )
         paths = export_monophonic_midi(self._doc.store.all(), Path(selection), settings)

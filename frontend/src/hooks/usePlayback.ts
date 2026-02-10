@@ -7,6 +7,8 @@ type PlaybackMode = 'audio' | 'midi'
 type MidiMode = 'mpe' | 'multitrack' | 'mono'
 type MidiAmplitudeMapping = 'velocity' | 'pressure' | 'cc74' | 'cc1'
 type MidiAmplitudeCurve = 'linear' | 'db'
+type MidiCcUpdateRateHz = 50 | 100 | 200 | 400 | 800
+const MIDI_CC_UPDATE_RATE_OPTIONS: MidiCcUpdateRateHz[] = [50, 100, 200, 400, 800]
 
 const SPEED_PRESET_RATIOS = [0.125, 0.25, 0.5, 1, 2, 4, 8] as const
 const DEFAULT_SPEED_PRESET_INDEX = 3
@@ -24,6 +26,19 @@ function closestSpeedPresetIndex(value: number): number {
   return bestIndex
 }
 
+function normalizeMidiCcUpdateRateHz(value: number): MidiCcUpdateRateHz {
+  let best = MIDI_CC_UPDATE_RATE_OPTIONS[0]
+  let bestDiff = Number.POSITIVE_INFINITY
+  for (const option of MIDI_CC_UPDATE_RATE_OPTIONS) {
+    const diff = Math.abs(option - value)
+    if (diff < bestDiff) {
+      best = option
+      bestDiff = diff
+    }
+  }
+  return best
+}
+
 export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'analyzing' | 'error') {
   const [isPlaying, setIsPlaying] = useState(false)
   const [isProbePlaying, setIsProbePlaying] = useState(false)
@@ -39,6 +54,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
   const [midiPitchBendRange, setMidiPitchBendRange] = useState('48')
   const [midiAmplitudeMapping, setMidiAmplitudeMapping] = useState<MidiAmplitudeMapping>('cc74')
   const [midiAmplitudeCurve, setMidiAmplitudeCurve] = useState<MidiAmplitudeCurve>('linear')
+  const [midiCcUpdateRateHz, setMidiCcUpdateRateHz] = useState<MidiCcUpdateRateHz>(400)
   const [midiBpm, setMidiBpm] = useState('120')
   const [midiOutputs, setMidiOutputs] = useState<string[]>([])
   const playbackStartRef = useRef(0)
@@ -111,6 +127,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
     setMidiPitchBendRange(String(result.playback_settings.midi_pitch_bend_range))
     setMidiAmplitudeMapping(result.playback_settings.midi_amplitude_mapping)
     setMidiAmplitudeCurve(result.playback_settings.midi_amplitude_curve)
+    setMidiCcUpdateRateHz(normalizeMidiCcUpdateRateHz(result.playback_settings.midi_cc_update_rate_hz))
     setMidiBpm(String(result.playback_settings.midi_bpm))
     if (endedNaturally) {
       setPlaybackPosition(playbackStartRef.current)
@@ -176,6 +193,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       midi_pitch_bend_range?: number
       midi_amplitude_mapping?: MidiAmplitudeMapping
       midi_amplitude_curve?: MidiAmplitudeCurve
+      midi_cc_update_rate_hz?: MidiCcUpdateRateHz
       midi_bpm?: number
     }) => {
       const api = isPywebviewApiAvailable() ? pywebviewApi : null
@@ -195,6 +213,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
           setMidiPitchBendRange(String(result.playback_settings.midi_pitch_bend_range))
           setMidiAmplitudeMapping(result.playback_settings.midi_amplitude_mapping)
           setMidiAmplitudeCurve(result.playback_settings.midi_amplitude_curve)
+          setMidiCcUpdateRateHz(normalizeMidiCcUpdateRateHz(result.playback_settings.midi_cc_update_rate_hz))
           setMidiBpm(String(result.playback_settings.midi_bpm))
         } else {
           reportError('Playback Settings', result.message ?? 'Failed to update playback settings')
@@ -463,6 +482,14 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
     [updatePlaybackSettings],
   )
 
+  const setMidiCcUpdateRateSetting = useCallback(
+    (value: MidiCcUpdateRateHz) => {
+      setMidiCcUpdateRateHz(value)
+      void updatePlaybackSettings({ midi_cc_update_rate_hz: value })
+    },
+    [updatePlaybackSettings],
+  )
+
   const setMidiBpmSetting = useCallback(
     (value: string) => {
       setMidiBpm(value)
@@ -486,6 +513,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       midi_pitch_bend_range: number
       midi_amplitude_mapping: MidiAmplitudeMapping
       midi_amplitude_curve: MidiAmplitudeCurve
+      midi_cc_update_rate_hz: number
       midi_bpm: number
     }) => {
       setMasterVolumeState(Math.round(Math.max(0, Math.min(1, settings.master_volume)) * 100))
@@ -498,6 +526,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       setMidiPitchBendRange(String(settings.midi_pitch_bend_range))
       setMidiAmplitudeMapping(settings.midi_amplitude_mapping)
       setMidiAmplitudeCurve(settings.midi_amplitude_curve)
+      setMidiCcUpdateRateHz(normalizeMidiCcUpdateRateHz(settings.midi_cc_update_rate_hz))
       setMidiBpm(String(settings.midi_bpm))
     },
     [],
@@ -519,6 +548,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
     midiPitchBendRange,
     midiAmplitudeMapping,
     midiAmplitudeCurve,
+    midiCcUpdateRateHz,
     midiBpm,
     midiOutputs,
     setMixValue: setMixValueRealtime,
@@ -533,6 +563,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
     setMidiPitchBend,
     setMidiAmplitudeMapping: setMidiAmplitudeMappingSetting,
     setMidiAmplitudeCurve: setMidiAmplitudeCurveSetting,
+    setMidiCcUpdateRate: setMidiCcUpdateRateSetting,
     setMidiBpm: setMidiBpmSetting,
     refreshMidiOutputs,
     applyPlaybackSettings,

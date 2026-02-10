@@ -1,4 +1,5 @@
 from soma.api_schema import (
+    ExportMpePayload,
     OpenAudioDataPayload,
     OpenAudioPathPayload,
     PlayPayload,
@@ -76,3 +77,10 @@ def test_parse_payload_rejects_play_invalid_time_stretch_mode() -> None:
     parsed, error = parse_payload(PlayPayload, {"time_stretch_mode": "invalid"})
     assert parsed is None
     assert error is not None
+
+
+def test_parse_payload_accepts_export_mpe_cc_update_rate() -> None:
+    parsed, error = parse_payload(ExportMpePayload, {"cc_update_rate_hz": 400})
+    assert error is None
+    assert parsed is not None
+    assert parsed.cc_update_rate_hz == 400
