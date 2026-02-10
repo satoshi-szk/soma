@@ -83,9 +83,10 @@ def test_update_harmonic_probe_allows_silent_position() -> None:
     doc._playback_mode = "probe"
     captured: dict[str, list[float]] = {}
 
-    def fake_update_probe(freqs: np.ndarray, amps: np.ndarray) -> bool:
+    def fake_update_probe(freqs: np.ndarray, amps: np.ndarray, voice_ids: list[str] | None = None) -> bool:
         captured["freqs"] = freqs.tolist()
         captured["amps"] = amps.tolist()
+        captured["voice_ids"] = [] if voice_ids is None else voice_ids
         return True
 
     doc.player.update_probe = fake_update_probe  # type: ignore[method-assign]
@@ -94,6 +95,7 @@ def test_update_harmonic_probe_allows_silent_position() -> None:
     assert ok is True
     assert captured["freqs"] == []
     assert captured["amps"] == []
+    assert captured["voice_ids"] == []
 
 
 def test_start_harmonic_probe_allows_silent_position() -> None:
@@ -108,9 +110,10 @@ def test_start_harmonic_probe_allows_silent_position() -> None:
     doc.store.add(partial)
     captured: dict[str, list[float]] = {}
 
-    def fake_play_probe(freqs: np.ndarray, amps: np.ndarray) -> bool:
+    def fake_play_probe(freqs: np.ndarray, amps: np.ndarray, voice_ids: list[str] | None = None) -> bool:
         captured["freqs"] = freqs.tolist()
         captured["amps"] = amps.tolist()
+        captured["voice_ids"] = [] if voice_ids is None else voice_ids
         return True
 
     doc.player.play_probe = fake_play_probe  # type: ignore[method-assign]
@@ -120,6 +123,7 @@ def test_start_harmonic_probe_allows_silent_position() -> None:
     assert doc._playback_mode == "probe"
     assert captured["freqs"] == []
     assert captured["amps"] == []
+    assert captured["voice_ids"] == []
 
 
 def test_start_harmonic_probe_uses_midi_output_when_playback_mode_is_midi() -> None:
@@ -142,12 +146,18 @@ def test_start_harmonic_probe_uses_midi_output_when_playback_mode_is_midi() -> N
         freqs: list[float],
         amps: list[float],
         pitch_bend_range: int,
+        midi_mode: str,
+        amplitude_mapping: str,
+        amplitude_curve: str,
     ) -> bool:
         captured["output_name"] = output_name
         captured["partial_ids"] = partial_ids
         captured["freqs"] = freqs
         captured["amps"] = amps
         captured["pitch_bend_range"] = pitch_bend_range
+        captured["midi_mode"] = midi_mode
+        captured["amplitude_mapping"] = amplitude_mapping
+        captured["amplitude_curve"] = amplitude_curve
         return True
 
     doc.midi_player.start_probe = fake_start_probe  # type: ignore[method-assign]
@@ -160,6 +170,9 @@ def test_start_harmonic_probe_uses_midi_output_when_playback_mode_is_midi() -> N
     assert captured["freqs"] == [440.0]
     assert captured["amps"] == [0.5]
     assert captured["pitch_bend_range"] == 48
+    assert captured["midi_mode"] == "mpe"
+    assert captured["amplitude_mapping"] == "cc74"
+    assert captured["amplitude_curve"] == "linear"
 
 
 def test_update_harmonic_probe_uses_midi_output_when_playback_mode_is_midi() -> None:
@@ -176,10 +189,20 @@ def test_update_harmonic_probe_uses_midi_output_when_playback_mode_is_midi() -> 
     doc.store.add(partial)
     captured: dict[str, list[float]] = {}
 
-    def fake_update_probe(partial_ids: list[str], freqs: list[float], amps: list[float]) -> bool:
+    def fake_update_probe(
+        partial_ids: list[str],
+        freqs: list[float],
+        amps: list[float],
+        midi_mode: str,
+        amplitude_mapping: str,
+        amplitude_curve: str,
+    ) -> bool:
         captured["partial_ids"] = partial_ids
         captured["freqs"] = freqs
         captured["amps"] = amps
+        captured["midi_mode"] = midi_mode
+        captured["amplitude_mapping"] = amplitude_mapping
+        captured["amplitude_curve"] = amplitude_curve
         return True
 
     doc.midi_player.update_probe = fake_update_probe  # type: ignore[method-assign]
@@ -189,3 +212,6 @@ def test_update_harmonic_probe_uses_midi_output_when_playback_mode_is_midi() -> 
     assert captured["partial_ids"] == ["p1"]
     assert captured["freqs"] == [330.0]
     assert captured["amps"] == [0.5]
+    assert captured["midi_mode"] == "mpe"
+    assert captured["amplitude_mapping"] == "cc74"
+    assert captured["amplitude_curve"] == "linear"

@@ -10,6 +10,7 @@ import sounddevice as sd
 from soma.models import Partial
 
 _PROBE_CROSSFADE_SEC = 0.02
+_PROBE_SMOOTHING_SEC = 0.005
 
 
 @dataclass
@@ -116,9 +117,14 @@ class AudioPlayer:
         self._probe_freqs = np.array([], dtype=np.float64)
         self._probe_amps = np.array([], dtype=np.float64)
         self._probe_phases = np.array([], dtype=np.float64)
+        self._probe_voice_ids: list[str] = []
+        self._probe_runtime_freqs = np.array([], dtype=np.float64)
+        self._probe_runtime_amps = np.array([], dtype=np.float64)
         self._probe_prev_freqs = np.array([], dtype=np.float64)
         self._probe_prev_amps = np.array([], dtype=np.float64)
         self._probe_prev_phases = np.array([], dtype=np.float64)
+        self._probe_prev_runtime_freqs = np.array([], dtype=np.float64)
+        self._probe_prev_runtime_amps = np.array([], dtype=np.float64)
         self._probe_crossfade_total = 0
         self._probe_crossfade_remaining = 0
         self._probe_stop_after_fade = False
@@ -180,18 +186,23 @@ class AudioPlayer:
             )
             self._stream.start()
 
-    def play_probe(self, freqs: np.ndarray, amps: np.ndarray) -> bool:
+    def play_probe(self, freqs: np.ndarray, amps: np.ndarray, voice_ids: list[str] | None = None) -> bool:
         with self._lock:
             if self._playing:
                 return False
             self._probe_freqs = np.array([], dtype=np.float64)
             self._probe_amps = np.array([], dtype=np.float64)
             self._probe_phases = np.array([], dtype=np.float64)
+            self._probe_voice_ids = []
+            self._probe_runtime_freqs = np.array([], dtype=np.float64)
+            self._probe_runtime_amps = np.array([], dtype=np.float64)
             self._probe_prev_freqs = np.array([], dtype=np.float64)
             self._probe_prev_amps = np.array([], dtype=np.float64)
             self._probe_prev_phases = np.array([], dtype=np.float64)
+            self._probe_prev_runtime_freqs = np.array([], dtype=np.float64)
+            self._probe_prev_runtime_amps = np.array([], dtype=np.float64)
             self._probe_prev_gain = 1.0
-            self._begin_probe_transition(freqs, amps, stop_after_fade=False)
+            self._begin_probe_transition(freqs, amps, voice_ids=voice_ids, stop_after_fade=False)
             self._mode = "probe"
             self._playing = True
             self._stream = sd.OutputStream(
@@ -203,11 +214,21 @@ class AudioPlayer:
             self._stream.start()
         return True
 
-    def update_probe(self, freqs: np.ndarray, amps: np.ndarray) -> bool:
+    def update_probe(self, freqs: np.ndarray, amps: np.ndarray, voice_ids: list[str] | None = None) -> bool:
         with self._lock:
             if not self._playing or self._mode != "probe":
                 return False
-            self._begin_probe_transition(freqs, amps, stop_after_fade=False)
+            next_freqs = np.asarray(freqs, dtype=np.float64)
+            next_amps = np.asarray(amps, dtype=np.float64)
+            next_voice_ids = self._normalize_probe_voice_ids(voice_ids, next_freqs.size)
+            # 同一ボイス構成の更新は遷移を張り直さず、目標パラメータのみ更新する。
+            if next_voice_ids == self._probe_voice_ids:
+                self._probe_freqs = next_freqs
+                self._probe_amps = next_amps
+                self._probe_gain = self._compute_probe_gain(self._probe_amps)
+                self._probe_stop_after_fade = False
+                return True
+            self._begin_probe_transition(freqs, amps, voice_ids=voice_ids, stop_after_fade=False)
         return True
 
     def stop_probe(self) -> bool:
@@ -217,6 +238,7 @@ class AudioPlayer:
             self._begin_probe_transition(
                 np.array([], dtype=np.float64),
                 np.array([], dtype=np.float64),
+                voice_ids=[],
                 stop_after_fade=True,
             )
         return True
@@ -279,12 +301,16 @@ class AudioPlayer:
                         fade_frames,
                         self._probe_prev_gain,
                     )
-                    new_block, self._probe_phases = self._render_probe_bank(
-                        self._probe_freqs,
-                        self._probe_amps,
-                        self._probe_phases,
-                        fade_frames,
-                        self._probe_gain,
+                    new_block, self._probe_phases, self._probe_runtime_freqs, self._probe_runtime_amps = (
+                        self._render_probe_bank_smoothed(
+                            self._probe_freqs,
+                            self._probe_amps,
+                            self._probe_runtime_freqs,
+                            self._probe_runtime_amps,
+                            self._probe_phases,
+                            fade_frames,
+                            self._probe_gain,
+                        )
                     )
                     ramp_start = self._probe_crossfade_total - self._probe_crossfade_remaining
                     fade = (np.arange(fade_frames, dtype=np.float64) + ramp_start + 1.0) / self._probe_crossfade_total
@@ -295,15 +321,21 @@ class AudioPlayer:
                         self._probe_prev_freqs = np.array([], dtype=np.float64)
                         self._probe_prev_amps = np.array([], dtype=np.float64)
                         self._probe_prev_phases = np.array([], dtype=np.float64)
+                        self._probe_prev_runtime_freqs = np.array([], dtype=np.float64)
+                        self._probe_prev_runtime_amps = np.array([], dtype=np.float64)
                         self._probe_prev_gain = 1.0
 
                 if head < frames:
-                    tail, self._probe_phases = self._render_probe_bank(
-                        self._probe_freqs,
-                        self._probe_amps,
-                        self._probe_phases,
-                        frames - head,
-                        self._probe_gain,
+                    tail, self._probe_phases, self._probe_runtime_freqs, self._probe_runtime_amps = (
+                        self._render_probe_bank_smoothed(
+                            self._probe_freqs,
+                            self._probe_amps,
+                            self._probe_runtime_freqs,
+                            self._probe_runtime_amps,
+                            self._probe_phases,
+                            frames - head,
+                            self._probe_gain,
+                        )
                     )
                     sample[head:] = tail
 
@@ -352,20 +384,70 @@ class AudioPlayer:
                     raise sd.CallbackStop
             outdata[:, 0] *= self._master_gain
 
-    def _begin_probe_transition(self, freqs: np.ndarray, amps: np.ndarray, stop_after_fade: bool) -> None:
+    def _begin_probe_transition(
+        self,
+        freqs: np.ndarray,
+        amps: np.ndarray,
+        voice_ids: list[str] | None,
+        stop_after_fade: bool,
+    ) -> None:
         self._probe_prev_freqs = self._probe_freqs
         self._probe_prev_amps = self._probe_amps
         self._probe_prev_phases = self._probe_phases
+        self._probe_prev_runtime_freqs = self._probe_runtime_freqs
+        self._probe_prev_runtime_amps = self._probe_runtime_amps
         self._probe_prev_gain = self._probe_gain
 
-        self._probe_freqs = np.asarray(freqs, dtype=np.float64)
-        self._probe_amps = np.asarray(amps, dtype=np.float64)
-        self._probe_phases = np.zeros(self._probe_freqs.size, dtype=np.float64)
+        next_freqs = np.asarray(freqs, dtype=np.float64)
+        next_amps = np.asarray(amps, dtype=np.float64)
+        next_voice_ids = self._normalize_probe_voice_ids(voice_ids, next_freqs.size)
+        next_phases = np.zeros(next_freqs.size, dtype=np.float64)
+        next_runtime_freqs = next_freqs.copy()
+        next_runtime_amps = next_amps.copy()
+        prev_phase_by_voice = {
+            voice_id: phase for voice_id, phase in zip(self._probe_voice_ids, self._probe_phases, strict=False)
+        }
+        prev_runtime_freq_by_voice = {
+            voice_id: freq
+            for voice_id, freq in zip(self._probe_voice_ids, self._probe_runtime_freqs, strict=False)
+        }
+        prev_runtime_amp_by_voice = {
+            voice_id: amp for voice_id, amp in zip(self._probe_voice_ids, self._probe_runtime_amps, strict=False)
+        }
+        for index, voice_id in enumerate(next_voice_ids):
+            phase = prev_phase_by_voice.get(voice_id)
+            if phase is not None:
+                next_phases[index] = phase
+            prev_freq = prev_runtime_freq_by_voice.get(voice_id)
+            if prev_freq is not None:
+                next_runtime_freqs[index] = prev_freq
+            prev_amp = prev_runtime_amp_by_voice.get(voice_id)
+            if prev_amp is not None:
+                next_runtime_amps[index] = prev_amp
+
+        self._probe_freqs = next_freqs
+        self._probe_amps = next_amps
+        self._probe_voice_ids = next_voice_ids
+        self._probe_phases = next_phases
+        self._probe_runtime_freqs = next_runtime_freqs
+        self._probe_runtime_amps = next_runtime_amps
         self._probe_gain = self._compute_probe_gain(self._probe_amps)
 
         self._probe_crossfade_total = max(1, int(self._sample_rate * _PROBE_CROSSFADE_SEC))
         self._probe_crossfade_remaining = self._probe_crossfade_total
         self._probe_stop_after_fade = stop_after_fade
+
+    def _normalize_probe_voice_ids(self, voice_ids: list[str] | None, size: int) -> list[str]:
+        if size <= 0:
+            return []
+        if voice_ids is None:
+            return [f"voice-{index}" for index in range(size)]
+        if len(voice_ids) >= size:
+            return [str(voice_ids[index]) for index in range(size)]
+        normalized = [str(voice_id) for voice_id in voice_ids]
+        for index in range(len(normalized), size):
+            normalized.append(f"voice-{index}")
+        return normalized
 
     def _render_probe_bank(
         self,
@@ -383,6 +465,46 @@ class AudioPlayer:
         block = np.sum(np.sin(phase_matrix) * amps[None, :], axis=1)
         next_phases = np.mod(phases + phase_step * frames, 2.0 * np.pi)
         return block * gain, next_phases
+
+    def _render_probe_bank_smoothed(
+        self,
+        target_freqs: np.ndarray,
+        target_amps: np.ndarray,
+        runtime_freqs: np.ndarray,
+        runtime_amps: np.ndarray,
+        phases: np.ndarray,
+        frames: int,
+        gain: float,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        if target_freqs.size == 0 or target_amps.size == 0 or frames <= 0:
+            return (
+                np.zeros(frames, dtype=np.float64),
+                phases,
+                runtime_freqs,
+                runtime_amps,
+            )
+
+        safe_runtime_freqs = np.asarray(runtime_freqs, dtype=np.float64)
+        safe_runtime_amps = np.asarray(runtime_amps, dtype=np.float64)
+        if safe_runtime_freqs.size != target_freqs.size:
+            safe_runtime_freqs = target_freqs.copy()
+        if safe_runtime_amps.size != target_amps.size:
+            safe_runtime_amps = target_amps.copy()
+
+        block_sec = frames / float(self._sample_rate)
+        tau = max(_PROBE_SMOOTHING_SEC, 1e-6)
+        alpha = 1.0 - np.exp(-block_sec / tau)
+        next_runtime_freqs = safe_runtime_freqs + (target_freqs - safe_runtime_freqs) * alpha
+        next_runtime_amps = safe_runtime_amps + (target_amps - safe_runtime_amps) * alpha
+
+        ramp = (np.arange(frames, dtype=np.float64)[:, None] + 1.0) / float(frames)
+        freq_ramp = safe_runtime_freqs[None, :] + ramp * (next_runtime_freqs - safe_runtime_freqs)[None, :]
+        amp_ramp = safe_runtime_amps[None, :] + ramp * (next_runtime_amps - safe_runtime_amps)[None, :]
+        phase_steps = (2.0 * np.pi * freq_ramp) / self._sample_rate
+        phase_matrix = phases[None, :] + np.cumsum(phase_steps, axis=0)
+        block = np.sum(np.sin(phase_matrix) * amp_ramp, axis=1)
+        next_phases = np.mod(phase_matrix[-1, :], 2.0 * np.pi)
+        return block * gain, next_phases, next_runtime_freqs, next_runtime_amps
 
     def _compute_probe_gain(self, amps: np.ndarray) -> float:
         amp_sum = float(np.sum(np.abs(amps)))

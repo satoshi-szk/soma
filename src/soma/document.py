@@ -849,9 +849,12 @@ class SomaDocument:
                 freqs=freqs.tolist(),
                 amps=amps.tolist(),
                 pitch_bend_range=self._midi_pitch_bend_range,
+                midi_mode=self._midi_mode,
+                amplitude_mapping=self._midi_amplitude_mapping,
+                amplitude_curve=self._midi_amplitude_curve,
             )
         else:
-            started = self.player.play_probe(freqs, amps)
+            started = self.player.play_probe(freqs, amps, voice_ids=partial_ids)
         if started:
             self._playback_mode = "probe"
             self._playback_speed_ratio = 1.0
@@ -866,8 +869,11 @@ class SomaDocument:
                 partial_ids=partial_ids,
                 freqs=freqs.tolist(),
                 amps=amps.tolist(),
+                midi_mode=self._midi_mode,
+                amplitude_mapping=self._midi_amplitude_mapping,
+                amplitude_curve=self._midi_amplitude_curve,
             )
-        return self.player.update_probe(freqs, amps)
+        return self.player.update_probe(freqs, amps, voice_ids=partial_ids)
 
     def stop_harmonic_probe(self) -> None:
         if self._playback_mode != "probe":
