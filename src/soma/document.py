@@ -834,15 +834,27 @@ class SomaDocument:
     def start_harmonic_probe(self, time_sec: float) -> bool:
         if self.audio_info is None:
             return False
-        if self._playback_output_mode == "midi":
-            return False
         self._cancel_playback_prepare()
-        freqs, amps = self._harmonic_probe_tones(time_sec)
+        partial_ids, freqs, amps = self._harmonic_probe_state(time_sec)
         if self.player.is_playing():
             self.player.stop(reset_position_sec=None)
         if self.midi_player.is_playing():
             self.midi_player.stop()
-        started = self.player.play_probe(freqs, amps)
+        if self._playback_output_mode == "midi":
+            if not self._midi_output_name:
+                raise ValueError("No MIDI output device selected.")
+            started = self.midi_player.start_probe(
+                output_name=self._midi_output_name,
+                partial_ids=partial_ids,
+                freqs=freqs.tolist(),
+                amps=amps.tolist(),
+                pitch_bend_range=self._midi_pitch_bend_range,
+                midi_mode=self._midi_mode,
+                amplitude_mapping=self._midi_amplitude_mapping,
+                amplitude_curve=self._midi_amplitude_curve,
+            )
+        else:
+            started = self.player.play_probe(freqs, amps, voice_ids=partial_ids)
         if started:
             self._playback_mode = "probe"
             self._playback_speed_ratio = 1.0
@@ -851,15 +863,27 @@ class SomaDocument:
     def update_harmonic_probe(self, time_sec: float) -> bool:
         if self._playback_mode != "probe":
             return False
-        freqs, amps = self._harmonic_probe_tones(time_sec)
-        return self.player.update_probe(freqs, amps)
+        partial_ids, freqs, amps = self._harmonic_probe_state(time_sec)
+        if self._playback_output_mode == "midi":
+            return self.midi_player.update_probe(
+                partial_ids=partial_ids,
+                freqs=freqs.tolist(),
+                amps=amps.tolist(),
+                midi_mode=self._midi_mode,
+                amplitude_mapping=self._midi_amplitude_mapping,
+                amplitude_curve=self._midi_amplitude_curve,
+            )
+        return self.player.update_probe(freqs, amps, voice_ids=partial_ids)
 
     def stop_harmonic_probe(self) -> None:
         if self._playback_mode != "probe":
             return
-        stopped = self.player.stop_probe()
-        if not stopped:
-            self.player.stop(reset_position_sec=None)
+        if self._playback_output_mode == "midi":
+            self.midi_player.stop_probe()
+        else:
+            stopped = self.player.stop_probe()
+            if not stopped:
+                self.player.stop(reset_position_sec=None)
         self._playback_mode = None
         self._playback_speed_ratio = 1.0
 
@@ -962,7 +986,11 @@ class SomaDocument:
         return self.player.is_playing()
 
     def is_probe_playing(self) -> bool:
-        return self._playback_mode == "probe" and self.player.is_playing()
+        if self._playback_mode != "probe":
+            return False
+        if self._playback_output_mode == "midi":
+            return self.midi_player.is_playing()
+        return self.player.is_playing()
 
     def is_preparing_playback(self) -> bool:
         with self._lock:
@@ -1286,7 +1314,8 @@ class SomaDocument:
             source_info=self.source_info,
         )
 
-    def _harmonic_probe_tones(self, time_sec: float) -> tuple[np.ndarray, np.ndarray]:
+    def _harmonic_probe_state(self, time_sec: float) -> tuple[list[str], np.ndarray, np.ndarray]:
+        partial_ids: list[str] = []
         freqs: list[float] = []
         amps: list[float] = []
         for partial in self.store.all():
@@ -1298,11 +1327,16 @@ class SomaDocument:
             freq, amp = sample
             if freq <= 0.0 or amp <= 0.0:
                 continue
+            partial_ids.append(partial.id)
             freqs.append(freq)
             amps.append(amp)
         if not freqs:
-            return np.array([], dtype=np.float64), np.array([], dtype=np.float64)
-        return np.asarray(freqs, dtype=np.float64), np.asarray(amps, dtype=np.float64)
+            return [], np.array([], dtype=np.float64), np.array([], dtype=np.float64)
+        return partial_ids, np.asarray(freqs, dtype=np.float64), np.asarray(amps, dtype=np.float64)
+
+    def _harmonic_probe_tones(self, time_sec: float) -> tuple[np.ndarray, np.ndarray]:
+        _, freqs, amps = self._harmonic_probe_state(time_sec)
+        return freqs, amps
 
 
 def _ensure_soma_extension(path: Path) -> Path:

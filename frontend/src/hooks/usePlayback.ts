@@ -43,7 +43,49 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
   const [midiOutputs, setMidiOutputs] = useState<string[]>([])
   const playbackStartRef = useRef(0)
   const wasNormalPlayingRef = useRef(false)
+  const probeUpdateRafRef = useRef<number | null>(null)
+  const probeUpdatePendingRef = useRef<number | null>(null)
+  const probeUpdateInFlightRef = useRef(false)
   const speedValue = SPEED_PRESET_RATIOS[speedPresetIndex]
+
+  const flushProbeUpdate = useCallback(async () => {
+    probeUpdateRafRef.current = null
+    if (probeUpdateInFlightRef.current) return
+    if (!isProbePlaying) {
+      probeUpdatePendingRef.current = null
+      return
+    }
+    const api = isPywebviewApiAvailable() ? pywebviewApi : null
+    if (!api?.update_harmonic_probe) return
+    probeUpdateInFlightRef.current = true
+    try {
+      while (isProbePlaying) {
+        const nextPosition = probeUpdatePendingRef.current
+        if (nextPosition == null) break
+        probeUpdatePendingRef.current = null
+        const result = await api.update_harmonic_probe({ time_sec: nextPosition })
+        if (result.status === 'error') {
+          reportError('Harmonic Probe', result.message ?? 'Failed to update probe')
+        }
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unexpected error'
+      reportError('Harmonic Probe', message)
+    } finally {
+      probeUpdateInFlightRef.current = false
+    }
+  }, [isProbePlaying, reportError])
+
+  useEffect(() => {
+    return () => {
+      if (probeUpdateRafRef.current != null) {
+        window.cancelAnimationFrame(probeUpdateRafRef.current)
+      }
+      probeUpdateRafRef.current = null
+      probeUpdatePendingRef.current = null
+      probeUpdateInFlightRef.current = false
+    }
+  }, [])
 
   const syncStatus = useCallback(async () => {
     const api = isPywebviewApiAvailable() ? pywebviewApi : null
@@ -223,24 +265,18 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
   }, [reportError])
 
   const setPlayheadPosition = useCallback(
-    async (positionSec: number) => {
+    (positionSec: number) => {
       if (isPlaying || isPreparingPlayback) return
       const nextPosition = Math.max(0, positionSec)
       setPlaybackPosition(nextPosition)
       if (!isProbePlaying) return
-      const api = isPywebviewApiAvailable() ? pywebviewApi : null
-      if (!api?.update_harmonic_probe) return
-      try {
-        const result = await api.update_harmonic_probe({ time_sec: nextPosition })
-        if (result.status === 'error') {
-          reportError('Harmonic Probe', result.message ?? 'Failed to update probe')
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Unexpected error'
-        reportError('Harmonic Probe', message)
-      }
+      probeUpdatePendingRef.current = nextPosition
+      if (probeUpdateRafRef.current != null) return
+      probeUpdateRafRef.current = window.requestAnimationFrame(() => {
+        void flushProbeUpdate()
+      })
     },
-    [isPlaying, isPreparingPlayback, isProbePlaying, reportError],
+    [isPlaying, isPreparingPlayback, isProbePlaying, flushProbeUpdate],
   )
 
   const togglePlayStop = useCallback(async () => {
@@ -253,7 +289,6 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
 
   const toggleHarmonicProbe = useCallback(async () => {
     if (analysisState === 'analyzing') return
-    if (playbackMode === 'midi') return
     if (isPlaying) return
     if (isPreparingPlayback) return
     const api = isPywebviewApiAvailable() ? pywebviewApi : null
@@ -266,6 +301,11 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
         const result = await api.stop_harmonic_probe()
         if (result.status === 'ok') {
           setIsProbePlaying(false)
+          probeUpdatePendingRef.current = null
+          if (probeUpdateRafRef.current != null) {
+            window.cancelAnimationFrame(probeUpdateRafRef.current)
+            probeUpdateRafRef.current = null
+          }
         } else {
           reportError('Harmonic Probe', result.message ?? 'Failed to stop probe')
         }
@@ -281,7 +321,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       const message = error instanceof Error ? error.message : 'Unexpected error'
       reportError('Harmonic Probe', message)
     }
-  }, [analysisState, isPlaying, isPreparingPlayback, isProbePlaying, playbackMode, playbackPosition, reportError])
+  }, [analysisState, isPlaying, isPreparingPlayback, isProbePlaying, playbackPosition, reportError])
 
   const setMasterVolume = useCallback(
     async (value: number) => {

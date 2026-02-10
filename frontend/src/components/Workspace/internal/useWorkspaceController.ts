@@ -43,6 +43,7 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
   const [draggedPartial, setDraggedPartial] = useState<Partial | null>(null)
   const [hudPosition, setHudPosition] = useState({ x: 16, y: 16 })
   const [hoverPointer, setHoverPointer] = useState<{ x: number; y: number } | null>(null)
+  const [isRulerDragging, setIsRulerDragging] = useState(false)
   const automationPadding = { top: 18, bottom: 16 }
 
   const previewImage = useMemo(() => {
@@ -214,10 +215,16 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
       if (!stage) return
       const pointer = stage.getPointerPosition()
       if (!pointer) return
+      if (pointer.y < rulerHeight) {
+        if (!canEditPlayhead) return
+        setIsRulerDragging(true)
+        onPlayheadChange(positionToTimeValue(pointer.x))
+        return
+      }
       if (pointer.y < rulerHeight || pointer.y > spectrogramAreaHeight) return
       beginAt(pointer)
     },
-    [preview, rulerHeight, spectrogramAreaHeight, beginAt]
+    [preview, rulerHeight, canEditPlayhead, onPlayheadChange, positionToTimeValue, spectrogramAreaHeight, beginAt]
   )
 
   const handleStageMouseMove = useCallback(
@@ -228,6 +235,12 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
       const pointer = stage.getPointerPosition()
       if (!pointer) return
       setHoverPointer(pointer)
+      if (isRulerDragging) {
+        if (canEditPlayhead) {
+          onPlayheadChange(positionToTimeValue(pointer.x))
+        }
+        return
+      }
       if (pointer.y < rulerHeight || pointer.y > spectrogramAreaHeight) return
 
       const cursor = positionToTimeFreqValue(pointer.x, pointer.y)
@@ -245,16 +258,30 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
 
       moveAt(pointer, cursor)
     },
-    [preview, rulerHeight, spectrogramAreaHeight, positionToTimeFreqValue, onCursorMove, stageSize, moveAt]
+    [
+      preview,
+      isRulerDragging,
+      canEditPlayhead,
+      onPlayheadChange,
+      positionToTimeValue,
+      rulerHeight,
+      spectrogramAreaHeight,
+      positionToTimeFreqValue,
+      onCursorMove,
+      stageSize,
+      moveAt,
+    ]
   )
 
   const handleStageMouseUp = useCallback(() => {
+    setIsRulerDragging(false)
     if (!preview) return
     endInteraction()
   }, [preview, endInteraction])
 
   const handleStageMouseLeave = useCallback(() => {
     setHoverPointer(null)
+    setIsRulerDragging(false)
     endInteraction()
   }, [endInteraction])
 
