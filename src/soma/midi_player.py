@@ -2,10 +2,18 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import mido
+import numpy as np
 from mido import Message, MidiFile, bpm2tempo, merge_tracks, tick2second
+
+
+@dataclass
+class _ProbeVoice:
+    channel: int
+    note: int
 
 
 class MidiPlayer:
@@ -15,6 +23,10 @@ class MidiPlayer:
         self._stop_event = threading.Event()
         self._playing = False
         self._position_sec = 0.0
+        self._probe_output: Any | None = None
+        self._probe_pitch_bend_range = 48
+        self._probe_voices: dict[str, _ProbeVoice] = {}
+        self._probe_free_channels: set[int] = set(range(16))
 
     def list_outputs(self) -> list[str]:
         try:
@@ -103,6 +115,7 @@ class MidiPlayer:
         thread = self._thread
         if thread is not None and thread.is_alive():
             thread.join(timeout=1.0)
+        self._stop_probe_output()
         with self._lock:
             self._playing = False
 
@@ -113,6 +126,125 @@ class MidiPlayer:
     def position_sec(self) -> float:
         with self._lock:
             return self._position_sec
+
+    def start_probe(
+        self,
+        output_name: str,
+        partial_ids: list[str],
+        freqs: list[float],
+        amps: list[float],
+        pitch_bend_range: int,
+    ) -> bool:
+        self.stop()
+        try:
+            output = mido.open_output(output_name)
+        except Exception:
+            return False
+        self._probe_output = output
+        self._probe_voices = {}
+        self._probe_free_channels = set(range(16))
+        self._probe_pitch_bend_range = max(1, min(96, int(pitch_bend_range)))
+        self._apply_probe_state(partial_ids, freqs, amps)
+        with self._lock:
+            self._playing = True
+        return True
+
+    def update_probe(self, partial_ids: list[str], freqs: list[float], amps: list[float]) -> bool:
+        if self._probe_output is None:
+            return False
+        self._apply_probe_state(partial_ids, freqs, amps)
+        return True
+
+    def stop_probe(self) -> None:
+        self._stop_probe_output()
+        with self._lock:
+            self._playing = False
+
+    def _stop_probe_output(self) -> None:
+        output = self._probe_output
+        if output is None:
+            return
+        for voice in self._probe_voices.values():
+            output.send(Message("note_off", channel=voice.channel, note=voice.note, velocity=0))
+        self._send_panic(output, set(range(16)))
+        output.close()
+        self._probe_voices = {}
+        self._probe_free_channels = set(range(16))
+        self._probe_output = None
+
+    def _apply_probe_state(self, partial_ids: list[str], freqs: list[float], amps: list[float]) -> None:
+        output = self._probe_output
+        if output is None:
+            return
+        incoming: list[tuple[str, float, float]] = []
+        max_voice = min(len(partial_ids), len(freqs), len(amps), 16)
+        for index in range(max_voice):
+            partial_id = partial_ids[index]
+            freq = float(freqs[index])
+            if not np.isfinite(freq) or freq <= 0:
+                continue
+            amp = float(np.clip(amps[index], 0.0, 1.0))
+            incoming.append((partial_id, freq, amp))
+
+        incoming_ids = {partial_id for partial_id, _, _ in incoming}
+        for stale_id in list(self._probe_voices.keys()):
+            if stale_id in incoming_ids:
+                continue
+            stale = self._probe_voices.pop(stale_id)
+            output.send(Message("note_off", channel=stale.channel, note=stale.note, velocity=0))
+            self._probe_free_channels.add(stale.channel)
+
+        for partial_id, freq, amp in incoming:
+            voice = self._probe_voices.get(partial_id)
+            if voice is None:
+                if not self._probe_free_channels:
+                    continue
+                channel = min(self._probe_free_channels)
+                self._probe_free_channels.remove(channel)
+                self._send_pitch_bend_range(channel, self._probe_pitch_bend_range)
+                note = self._freq_to_midi(freq)
+                velocity = self._amp_to_value(amp)
+                output.send(Message("note_on", channel=channel, note=note, velocity=velocity))
+                voice = _ProbeVoice(channel=channel, note=note)
+                self._probe_voices[partial_id] = voice
+            elif self._needs_retrigger(freq, voice.note, self._probe_pitch_bend_range):
+                output.send(Message("note_off", channel=voice.channel, note=voice.note, velocity=0))
+                note = self._freq_to_midi(freq)
+                velocity = self._amp_to_value(amp)
+                output.send(Message("note_on", channel=voice.channel, note=note, velocity=velocity))
+                voice.note = note
+            output.send(Message("pitchwheel", channel=voice.channel, pitch=self._freq_to_pitch_bend(freq, voice.note)))
+            output.send(Message("aftertouch", channel=voice.channel, value=self._amp_to_value(amp)))
+
+    def _send_pitch_bend_range(self, channel: int, semitone_range: int) -> None:
+        output = self._probe_output
+        if output is None:
+            return
+        output.send(Message("control_change", channel=channel, control=101, value=0))
+        output.send(Message("control_change", channel=channel, control=100, value=0))
+        output.send(Message("control_change", channel=channel, control=6, value=int(np.clip(semitone_range, 1, 96))))
+        output.send(Message("control_change", channel=channel, control=38, value=0))
+        output.send(Message("control_change", channel=channel, control=101, value=127))
+        output.send(Message("control_change", channel=channel, control=100, value=127))
+
+    def _freq_to_midi(self, freq: float) -> int:
+        return int(np.clip(np.round(69 + 12 * np.log2(freq / 440.0)), 0, 127))
+
+    def _amp_to_value(self, amp: float) -> int:
+        return int(np.clip(round(1 + amp * 126), 1, 127))
+
+    def _needs_retrigger(self, freq: float, midi_note: int, pitch_bend_range: int) -> bool:
+        offset = self._freq_to_semitone_offset(freq, midi_note)
+        return abs(offset) > pitch_bend_range
+
+    def _freq_to_semitone_offset(self, freq: float, midi_note: int) -> float:
+        target = 69 + 12 * np.log2(freq / 440.0)
+        return float(target - midi_note)
+
+    def _freq_to_pitch_bend(self, freq: float, midi_note: int) -> int:
+        offset = self._freq_to_semitone_offset(freq, midi_note)
+        normalized = np.clip(offset / self._probe_pitch_bend_range, -1.0, 1.0)
+        return int(normalized * 8191)
 
     def _send_panic(self, output: Any, channels: set[int]) -> None:
         for channel in sorted(channels):

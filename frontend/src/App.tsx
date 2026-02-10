@@ -435,7 +435,7 @@ function App() {
           playbackMode={playback.playbackMode}
           playbackTimeLabel={formatDuration(playback.playbackPosition)}
           isProbePlaying={playback.isProbePlaying}
-          probeDisabled={playback.playbackMode === 'midi'}
+          probeDisabled={false}
           onMenuToggle={() => setMenuOpen((prev) => !prev)}
           onMenuAction={handleMenuAction}
           onToolChange={setActiveTool}

@@ -120,3 +120,72 @@ def test_start_harmonic_probe_allows_silent_position() -> None:
     assert doc._playback_mode == "probe"
     assert captured["freqs"] == []
     assert captured["amps"] == []
+
+
+def test_start_harmonic_probe_uses_midi_output_when_playback_mode_is_midi() -> None:
+    doc = _make_doc()
+    doc._playback_output_mode = "midi"
+    doc._midi_output_name = "Dummy MIDI Output"
+    partial = Partial(
+        id="p1",
+        points=[
+            PartialPoint(time=0.0, freq=440.0, amp=0.5),
+            PartialPoint(time=1.0, freq=440.0, amp=0.5),
+        ],
+    )
+    doc.store.add(partial)
+    captured: dict[str, object] = {}
+
+    def fake_start_probe(
+        output_name: str,
+        partial_ids: list[str],
+        freqs: list[float],
+        amps: list[float],
+        pitch_bend_range: int,
+    ) -> bool:
+        captured["output_name"] = output_name
+        captured["partial_ids"] = partial_ids
+        captured["freqs"] = freqs
+        captured["amps"] = amps
+        captured["pitch_bend_range"] = pitch_bend_range
+        return True
+
+    doc.midi_player.start_probe = fake_start_probe  # type: ignore[method-assign]
+    ok = doc.start_harmonic_probe(0.5)
+
+    assert ok is True
+    assert doc._playback_mode == "probe"
+    assert captured["output_name"] == "Dummy MIDI Output"
+    assert captured["partial_ids"] == ["p1"]
+    assert captured["freqs"] == [440.0]
+    assert captured["amps"] == [0.5]
+    assert captured["pitch_bend_range"] == 48
+
+
+def test_update_harmonic_probe_uses_midi_output_when_playback_mode_is_midi() -> None:
+    doc = _make_doc()
+    doc._playback_mode = "probe"
+    doc._playback_output_mode = "midi"
+    partial = Partial(
+        id="p1",
+        points=[
+            PartialPoint(time=0.0, freq=330.0, amp=0.4),
+            PartialPoint(time=1.0, freq=330.0, amp=0.6),
+        ],
+    )
+    doc.store.add(partial)
+    captured: dict[str, list[float]] = {}
+
+    def fake_update_probe(partial_ids: list[str], freqs: list[float], amps: list[float]) -> bool:
+        captured["partial_ids"] = partial_ids
+        captured["freqs"] = freqs
+        captured["amps"] = amps
+        return True
+
+    doc.midi_player.update_probe = fake_update_probe  # type: ignore[method-assign]
+    ok = doc.update_harmonic_probe(0.5)
+
+    assert ok is True
+    assert captured["partial_ids"] == ["p1"]
+    assert captured["freqs"] == [330.0]
+    assert captured["amps"] == [0.5]
