@@ -200,7 +200,7 @@ export const apiSchemas = {
     response: z.union([okStatusSchema, errorStatusSchema]),
   },
   list_midi_outputs: {
-    response: z.union([okStatusSchema.extend({ outputs: z.array(z.string()) }), errorStatusSchema]),
+    response: z.union([okStatusSchema.extend({ outputs: z.array(z.string()), error: z.string().nullable().optional() }), errorStatusSchema]),
   },
   update_playback_settings: {
     payload: z.object({

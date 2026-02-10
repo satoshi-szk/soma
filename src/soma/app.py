@@ -601,7 +601,9 @@ class SomaApi:
             return {"status": "error", "message": str(exc)}
 
     def list_midi_outputs(self) -> dict[str, Any]:
-        return {"status": "ok", "outputs": self._doc.midi_outputs()}
+        outputs = self._doc.midi_outputs()
+        error = self._doc.midi_player.last_list_outputs_error()
+        return {"status": "ok", "outputs": outputs, "error": error}
 
     def update_playback_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:

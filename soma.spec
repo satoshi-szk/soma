@@ -1,5 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
+from PyInstaller.utils.hooks import collect_submodules
 
 project_root = Path(SPECPATH).resolve()
 frontend_dist = project_root / "frontend" / "dist"
@@ -15,7 +16,7 @@ a = Analysis(
     pathex=[str(project_root)],
     binaries=[],
     datas=datas,
-    hiddenimports=[],
+    hiddenimports=collect_submodules("mido.backends") + ["rtmidi"],
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
