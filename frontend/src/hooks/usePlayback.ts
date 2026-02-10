@@ -46,6 +46,7 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
   const probeUpdateRafRef = useRef<number | null>(null)
   const probeUpdatePendingRef = useRef<number | null>(null)
   const probeUpdateInFlightRef = useRef(false)
+  const midiOutputListErrorRef = useRef<string | null>(null)
   const speedValue = SPEED_PRESET_RATIOS[speedPresetIndex]
 
   const flushProbeUpdate = useCallback(async () => {
@@ -139,11 +140,23 @@ export function usePlayback(reportError: ReportError, analysisState: 'idle' | 'a
       const result = await api.list_midi_outputs()
       if (result.status === 'ok') {
         setMidiOutputs(result.outputs)
+        const errorMessage = result.error?.trim()
+        if (errorMessage) {
+          if (midiOutputListErrorRef.current !== errorMessage) {
+            reportError('MIDI Outputs', errorMessage)
+            midiOutputListErrorRef.current = errorMessage
+          }
+        } else {
+          midiOutputListErrorRef.current = null
+        }
+      } else {
+        reportError('MIDI Outputs', result.message ?? 'Failed to list MIDI outputs')
       }
-    } catch {
-      // 無視: UIで都度エラーを出さない
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unexpected error'
+      reportError('MIDI Outputs', message)
     }
-  }, [])
+  }, [reportError])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {

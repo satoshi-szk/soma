@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from dataclasses import dataclass
@@ -8,6 +9,8 @@ from typing import Any
 import mido
 import numpy as np
 from mido import Message, MidiFile, bpm2tempo, merge_tracks, tick2second
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -23,6 +26,7 @@ class MidiPlayer:
         self._stop_event = threading.Event()
         self._playing = False
         self._position_sec = 0.0
+        self._last_list_outputs_error: str | None = None
         self._probe_output: Any | None = None
         self._probe_pitch_bend_range = 48
         self._probe_midi_mode = "mpe"
@@ -33,9 +37,19 @@ class MidiPlayer:
 
     def list_outputs(self) -> list[str]:
         try:
-            return list(mido.get_output_names())
-        except Exception:
+            outputs = list(mido.get_output_names())
+            with self._lock:
+                self._last_list_outputs_error = None
+            return outputs
+        except Exception as exc:
+            logger.exception("Failed to list MIDI outputs")
+            with self._lock:
+                self._last_list_outputs_error = str(exc)
             return []
+
+    def last_list_outputs_error(self) -> str | None:
+        with self._lock:
+            return self._last_list_outputs_error
 
     def play(self, midi: MidiFile, output_name: str, start_position_sec: float, speed_ratio: float) -> None:
         self.play_until(
