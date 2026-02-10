@@ -6,6 +6,8 @@ export type StatusBarProps = {
   spectrogramDim: number
   spectrogramDimEnabled: boolean
   onSpectrogramDimChange: (value: number) => void
+  playbackError: string | null
+  onOpenPlaybackSettings: () => void
 }
 
 export function StatusBar({
@@ -16,12 +18,27 @@ export function StatusBar({
   spectrogramDim,
   spectrogramDimEnabled,
   onSpectrogramDimChange,
+  playbackError,
+  onOpenPlaybackSettings,
 }: StatusBarProps) {
   return (
     <footer className="grid grid-cols-1 gap-2 px-1 py-1 text-[11px] tracking-normal text-[var(--ink)] lg:grid-cols-4">
-      <div className="flex items-center rounded-sm border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2">
+      <div
+        className={`flex items-center rounded-sm border px-3 py-2 ${
+          playbackError ? 'border-red-400 bg-red-900/30 text-red-100' : 'border-[var(--panel-border)] bg-[var(--panel-strong)]'
+        }`}
+      >
         Status: {statusLabel}
-        {statusNote ? <span className="ml-2 font-mono text-[11px] normal-case tracking-normal">{statusNote}</span> : null}
+        {playbackError ? (
+          <span className="ml-2 font-mono text-[11px] normal-case tracking-normal">
+            {playbackError}{' '}
+            <button type="button" className="underline decoration-dotted underline-offset-2" onClick={onOpenPlaybackSettings}>
+              Open MIDI Settings
+            </button>
+          </span>
+        ) : statusNote ? (
+          <span className="ml-2 font-mono text-[11px] normal-case tracking-normal">{statusNote}</span>
+        ) : null}
       </div>
       <div className="flex items-center rounded-sm border border-[var(--panel-border)] bg-[var(--panel-strong)] px-3 py-2 font-mono text-[11px] text-[var(--ink)]">
         {cursorLabel}

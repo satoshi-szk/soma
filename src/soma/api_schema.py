@@ -102,6 +102,19 @@ class UpdatePlaybackMixPayload(PayloadBase):
     mix_ratio: float = Field(ge=0.0, le=1.0)
 
 
+class UpdatePlaybackSettingsPayload(PayloadBase):
+    output_mode: str | None = Field(default=None, pattern="^(audio|midi)$")
+    mix_ratio: float | None = Field(default=None, ge=0.0, le=1.0)
+    speed_ratio: float | None = Field(default=None, ge=0.125, le=8.0)
+    time_stretch_mode: str | None = Field(default=None, pattern="^(native|librosa)$")
+    midi_mode: str | None = Field(default=None, pattern="^(mpe|multitrack|mono)$")
+    midi_output_name: str | None = None
+    midi_pitch_bend_range: int | None = Field(default=None, ge=1, le=96)
+    midi_amplitude_mapping: str | None = Field(default=None, pattern="^(velocity|pressure|cc74|cc1)$")
+    midi_amplitude_curve: str | None = Field(default=None, pattern="^(linear|db)$")
+    midi_bpm: float | None = Field(default=None, gt=0.0)
+
+
 class ExportMpePayload(PayloadBase):
     pitch_bend_range: int = 48
     amplitude_mapping: str = "velocity"

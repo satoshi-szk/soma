@@ -24,6 +24,16 @@ export type AudioInfo = {
 
 export type PlaybackSettings = {
   master_volume: number
+  output_mode: 'audio' | 'midi'
+  mix_ratio: number
+  speed_ratio: number
+  time_stretch_mode: 'native' | 'librosa'
+  midi_mode: 'mpe' | 'multitrack' | 'mono'
+  midi_output_name: string
+  midi_pitch_bend_range: number
+  midi_amplitude_mapping: 'velocity' | 'pressure' | 'cc74' | 'cc1'
+  midi_amplitude_curve: 'linear' | 'db'
+  midi_bpm: number
 }
 
 export type SpectrogramPreview = {

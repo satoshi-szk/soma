@@ -20,6 +20,7 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false)
   const [activeTool, setActiveTool] = useState<ToolId>('trace')
   const [statusNote, setStatusNote] = useState<string | null>(null)
+  const [playbackError, setPlaybackError] = useState<string | null>(null)
   const [spectrogramDim, setSpectrogramDim] = useState(0)
   const [cursorInfo, setCursorInfo] = useState<{ time: number; freq: number; amp: number | null }>({
     time: 0,
@@ -51,6 +52,9 @@ function App() {
   const reportError = useCallback((context: string, message: string) => {
     const detail = `${context}: ${message}`
     setStatusNote(detail)
+    if (context === 'Playback' || context === 'Playback Settings') {
+      setPlaybackError(detail)
+    }
     console.error(detail)
   }, [])
 
@@ -102,6 +106,7 @@ function App() {
         partialsHook.setPartials([])
         partialsHook.setSelection([])
         await playback.syncStatus()
+        setPlaybackError(null)
         setStatusNote('New project ready')
       }
       return
@@ -110,7 +115,8 @@ function App() {
       const result = await analysis.openProject()
       if (result) {
         partialsHook.setPartials(result.partials)
-        playback.applyPlaybackSettings(result.playbackSettings.master_volume)
+        playback.applyPlaybackSettings(result.playbackSettings)
+        setPlaybackError(null)
         setStatusNote('Project opened')
       }
       return
@@ -162,7 +168,8 @@ function App() {
     const result = await analysis.openAudio()
     if (result) {
       partialsHook.setPartials(result.partials)
-      playback.applyPlaybackSettings(result.playbackSettings.master_volume)
+      playback.applyPlaybackSettings(result.playbackSettings)
+      setPlaybackError(null)
       setStatusNote('Audio loaded')
     }
   }
@@ -173,7 +180,8 @@ function App() {
     const result = await analysis.openAudioPath(path)
     if (result) {
       partialsHook.setPartials(result.partials)
-      playback.applyPlaybackSettings(result.playbackSettings.master_volume)
+      playback.applyPlaybackSettings(result.playbackSettings)
+      setPlaybackError(null)
       setStatusNote('Audio loaded')
     }
   }
@@ -184,7 +192,8 @@ function App() {
     const result = await analysis.openAudioFile(file)
     if (result) {
       partialsHook.setPartials(result.partials)
-      playback.applyPlaybackSettings(result.playbackSettings.master_volume)
+      playback.applyPlaybackSettings(result.playbackSettings)
+      setPlaybackError(null)
       setStatusNote('Audio loaded')
     }
   }
@@ -341,11 +350,17 @@ function App() {
   const handlePlayStop = () => {
     if (playback.isProbePlaying) return
     if (!playback.isPlaying && analysis.analysisState === 'analyzing') return
+    setPlaybackError(null)
     void playback.togglePlayStop()
   }
 
   const handlePlaybackSettingsToggle = () => {
     setShowPlaybackSettings((prev) => !prev)
+  }
+
+  const handleOpenMidiSettings = () => {
+    setShowPlaybackSettings(true)
+    playback.setPlaybackMode('midi')
   }
 
   const statusLabel =
@@ -402,8 +417,10 @@ function App() {
           isPlaying={playback.isPlaying}
           isPreparingPlayback={playback.isPreparingPlayback}
           masterVolume={playback.masterVolume}
+          playbackMode={playback.playbackMode}
           playbackTimeLabel={formatDuration(playback.playbackPosition)}
           isProbePlaying={playback.isProbePlaying}
+          probeDisabled={playback.playbackMode === 'midi'}
           onMenuToggle={() => setMenuOpen((prev) => !prev)}
           onMenuAction={handleMenuAction}
           onToolChange={setActiveTool}
@@ -411,6 +428,7 @@ function App() {
           onProbeToggle={() => void playback.toggleHarmonicProbe()}
           onRewind={handleRewind}
           onMasterVolumeChange={(value) => void playback.setMasterVolume(value)}
+          onPlaybackModeChange={(mode) => playback.setPlaybackMode(mode)}
           onPlaybackSettingsOpen={handlePlaybackSettingsToggle}
           menuRef={menuRef}
           playDisabled={analysis.analysisState === 'analyzing' || playback.isProbePlaying || playback.isPreparingPlayback}
@@ -474,15 +492,33 @@ function App() {
           </main>
           {showPlaybackSettings ? (
             <PlaybackSettingsSidebar
+              playbackMode={playback.playbackMode}
               mixValue={playback.mixValue}
               speedPresetIndex={playback.speedPresetIndex}
               speedValue={playback.speedValue}
               timeStretchMode={playback.timeStretchMode}
+              midiMode={playback.midiMode}
+              midiOutputName={playback.midiOutputName}
+              midiOutputs={playback.midiOutputs}
+              midiPitchBendRange={playback.midiPitchBendRange}
+              midiAmplitudeMapping={playback.midiAmplitudeMapping}
+              midiAmplitudeCurve={playback.midiAmplitudeCurve}
+              midiBpm={playback.midiBpm}
               controlsDisabled={playback.isPlaying || playback.isPreparingPlayback}
               onClose={() => setShowPlaybackSettings(false)}
+              onPlaybackModeChange={playback.setPlaybackMode}
               onMixChange={(value) => void playback.setMixValue(value)}
+              onMixCommit={playback.commitMixValue}
               onSpeedChange={playback.setSpeedPresetIndex}
+              onSpeedCommit={playback.commitSpeedPresetIndex}
               onTimeStretchModeChange={playback.setTimeStretchMode}
+              onMidiModeChange={playback.setMidiPlaybackMode}
+              onMidiOutputChange={playback.setMidiOutput}
+              onMidiOutputsRefresh={() => void playback.refreshMidiOutputs()}
+              onMidiPitchBendRangeChange={playback.setMidiPitchBend}
+              onMidiAmplitudeMappingChange={playback.setMidiAmplitudeMapping}
+              onMidiAmplitudeCurveChange={playback.setMidiAmplitudeCurve}
+              onMidiBpmChange={playback.setMidiBpm}
             />
           ) : null}
         </div>
@@ -495,6 +531,8 @@ function App() {
           spectrogramDim={spectrogramDim}
           spectrogramDimEnabled={!!analysis.preview}
           onSpectrogramDimChange={setSpectrogramDim}
+          playbackError={playbackError}
+          onOpenPlaybackSettings={handleOpenMidiSettings}
         />
       </div>
 

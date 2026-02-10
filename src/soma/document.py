@@ -14,6 +14,8 @@ import numpy as np
 
 from soma.analysis import estimate_cwt_amp_reference, make_spectrogram_stft
 from soma.audio_utils import peak_normalize_buffer, time_stretch_pitch_preserving
+from soma.exporter import MidiExportSettings, build_midi_for_playback
+from soma.midi_player import MidiPlayer
 from soma.models import (
     AnalysisSettings,
     AudioInfo,
@@ -106,6 +108,7 @@ class SomaDocument:
         self.undo_manager = UndoRedoManager()
         self.synth = Synthesizer(sample_rate=44100, duration_sec=0.0)
         self.player = AudioPlayer()
+        self.midi_player = MidiPlayer()
         self._lock = threading.Lock()
         self._is_resynthesizing = False
         self._logger = logging.getLogger(__name__)
@@ -116,6 +119,7 @@ class SomaDocument:
         self._active_snap_trace: list[tuple[float, float]] | None = None
         self._queued_snaps: list[tuple[str, list[tuple[float, float]]]] = []
         self._playback_mode: str | None = None
+        self._playback_output_mode = "audio"
         self._playback_speed_ratio = 1.0
         self._is_preparing_playback = False
         self._pending_playback_position_sec = 0.0
@@ -126,7 +130,14 @@ class SomaDocument:
         self._master_volume = 1.0
         self.player.set_master_volume(self._master_volume)
         self._last_mix_ratio = 0.55
+        self._last_speed_ratio = 1.0
         self._last_time_stretch_mode = "librosa"
+        self._midi_mode = "mpe"
+        self._midi_output_name = ""
+        self._midi_pitch_bend_range = 48
+        self._midi_amplitude_mapping = "cc74"
+        self._midi_amplitude_curve = "linear"
+        self._midi_bpm = 120.0
 
         # バックグラウンド処理用の compute manager を初期化する。
         self._compute_manager = ComputeManager(
@@ -156,11 +167,21 @@ class SomaDocument:
         self._active_snap_trace = None
         self._queued_snaps = []
         self._playback_mode = None
+        self._playback_output_mode = "audio"
         self._playback_speed_ratio = 1.0
         self._is_preparing_playback = False
         self._pending_playback_position_sec = 0.0
         self._playback_prepare_request_id += 1
         self._invalidate_playback_cache()
+        self._last_mix_ratio = 0.55
+        self._last_speed_ratio = 1.0
+        self._last_time_stretch_mode = "librosa"
+        self._midi_mode = "mpe"
+        self._midi_output_name = ""
+        self._midi_pitch_bend_range = 48
+        self._midi_amplitude_mapping = "cc74"
+        self._midi_amplitude_curve = "linear"
+        self._midi_bpm = 120.0
         self.set_master_volume(1.0)
 
     def _emit(self, payload: dict[str, Any]) -> None:
@@ -314,6 +335,7 @@ class SomaDocument:
         self.preview_error = None
         self.synth.reset(sample_rate=info.sample_rate, duration_sec=info.duration_sec)
         self.player.load(self._mix_buffer(0.5), info.sample_rate)
+        self.midi_player.stop()
         self._playback_mode = None
         self._invalidate_playback_cache()
         return info
@@ -730,17 +752,40 @@ class SomaDocument:
         if self.is_resynthesizing():
             return
         self._last_mix_ratio = float(np.clip(mix_ratio, 0.0, 1.0))
+        clamped_speed = float(np.clip(speed_ratio, 0.125, 8.0))
+        self._last_speed_ratio = clamped_speed
         self._last_time_stretch_mode = time_stretch_mode
         self._cancel_playback_prepare()
         if self.player.is_playing():
             self.player.stop(reset_position_sec=None)
-            self._playback_mode = None
-            self._playback_speed_ratio = 1.0
-        clamped_speed = float(np.clip(speed_ratio, 0.125, 8.0))
+        if self.midi_player.is_playing():
+            self.midi_player.stop()
+        self._playback_mode = None
+        self._playback_speed_ratio = 1.0
         start_sec = float(start_position_sec or 0.0)
         self._pending_playback_position_sec = start_sec
-        self._playback_mode = "normal"
         self._playback_speed_ratio = clamped_speed
+        if self._playback_output_mode == "midi":
+            settings = MidiExportSettings(
+                pitch_bend_range=self._midi_pitch_bend_range,
+                amplitude_mapping=self._midi_amplitude_mapping,
+                amplitude_curve=self._midi_amplitude_curve,
+                bpm=self._midi_bpm,
+            )
+            midi = build_midi_for_playback(self.store.all(), self._midi_mode, settings)
+            if not self._midi_output_name:
+                raise ValueError("No MIDI output device selected.")
+            self.midi_player.play_until(
+                # MIDIイベントが途切れても、曲末（オーディオ尺）までは再生状態を維持する。
+                midi=midi,
+                output_name=self._midi_output_name,
+                start_position_sec=start_sec,
+                speed_ratio=clamped_speed,
+                end_position_sec=self.audio_info.duration_sec,
+            )
+            self._playback_mode = "normal"
+            return
+        self._playback_mode = "normal"
         if abs(clamped_speed - 1.0) <= 1e-4:
             mixed = self._mix_buffer(self._last_mix_ratio)
             self.player.load(peak_normalize_buffer(mixed), self.audio_info.sample_rate)
@@ -785,10 +830,14 @@ class SomaDocument:
     def start_harmonic_probe(self, time_sec: float) -> bool:
         if self.audio_info is None:
             return False
+        if self._playback_output_mode == "midi":
+            return False
         self._cancel_playback_prepare()
         freqs, amps = self._harmonic_probe_tones(time_sec)
         if self.player.is_playing():
             self.player.stop(reset_position_sec=None)
+        if self.midi_player.is_playing():
+            self.midi_player.stop()
         started = self.player.play_probe(freqs, amps)
         if started:
             self._playback_mode = "probe"
@@ -813,13 +862,17 @@ class SomaDocument:
     def pause(self) -> None:
         self._cancel_playback_prepare()
         self.player.pause()
+        self.midi_player.stop()
         self._playback_mode = None
         self._playback_speed_ratio = 1.0
 
     def stop(self, return_position_sec: float | None = 0.0) -> None:
         self._cancel_playback_prepare()
-        reset_position = None if return_position_sec is None else return_position_sec / self._playback_speed_ratio
-        self.player.stop(reset_position_sec=reset_position)
+        if self._playback_output_mode == "midi":
+            self.midi_player.stop()
+        else:
+            reset_position = None if return_position_sec is None else return_position_sec / self._playback_speed_ratio
+            self.player.stop(reset_position_sec=reset_position)
         self._playback_mode = None
         self._playback_speed_ratio = 1.0
 
@@ -832,15 +885,50 @@ class SomaDocument:
     def master_volume(self) -> float:
         return self._master_volume
 
+    def playback_settings(self) -> PlaybackSettings:
+        return PlaybackSettings(
+            master_volume=self._master_volume,
+            output_mode=self._playback_output_mode,
+            mix_ratio=self._last_mix_ratio,
+            speed_ratio=self._last_speed_ratio,
+            time_stretch_mode=self._last_time_stretch_mode,
+            midi_mode=self._midi_mode,
+            midi_output_name=self._midi_output_name,
+            midi_pitch_bend_range=self._midi_pitch_bend_range,
+            midi_amplitude_mapping=self._midi_amplitude_mapping,
+            midi_amplitude_curve=self._midi_amplitude_curve,
+            midi_bpm=self._midi_bpm,
+        )
+
+    def midi_outputs(self) -> list[str]:
+        return self.midi_player.list_outputs()
+
+    def update_playback_settings(self, settings: PlaybackSettings) -> PlaybackSettings:
+        if settings.output_mode != self._playback_output_mode:
+            self.stop(return_position_sec=None)
+        self._playback_output_mode = settings.output_mode
+        self._last_mix_ratio = float(np.clip(settings.mix_ratio, 0.0, 1.0))
+        self._last_speed_ratio = float(np.clip(settings.speed_ratio, 0.125, 8.0))
+        self._last_time_stretch_mode = settings.time_stretch_mode
+        self._midi_mode = settings.midi_mode
+        self._midi_output_name = settings.midi_output_name
+        self._midi_pitch_bend_range = max(1, int(settings.midi_pitch_bend_range))
+        self._midi_amplitude_mapping = settings.midi_amplitude_mapping
+        self._midi_amplitude_curve = settings.midi_amplitude_curve
+        self._midi_bpm = max(1.0, float(settings.midi_bpm))
+        return self.playback_settings()
+
     def update_mix_ratio(self, mix_ratio: float) -> bool:
         if self.audio_info is None:
             return False
+        clamped_mix = float(np.clip(mix_ratio, 0.0, 1.0))
+        self._last_mix_ratio = clamped_mix
+        if self._playback_output_mode == "midi":
+            return True
         if self._playback_mode != "normal":
             return False
         if not self.player.is_playing():
             return False
-        clamped_mix = float(np.clip(mix_ratio, 0.0, 1.0))
-        self._last_mix_ratio = clamped_mix
         speed_ratio = self._playback_speed_ratio
         time_stretch_mode = self._last_time_stretch_mode
         sample_rate = self.audio_info.sample_rate
@@ -858,10 +946,16 @@ class SomaDocument:
         with self._lock:
             if self._is_preparing_playback:
                 return self._pending_playback_position_sec
+        if self._playback_output_mode == "midi":
+            return self.midi_player.position_sec()
         return self.player.position_sec() * self._playback_speed_ratio
 
     def is_playing(self) -> bool:
-        return self._playback_mode == "normal" and self.player.is_playing()
+        if self._playback_mode != "normal":
+            return False
+        if self._playback_output_mode == "midi":
+            return self.midi_player.is_playing()
+        return self.player.is_playing()
 
     def is_probe_playing(self) -> bool:
         return self._playback_mode == "probe" and self.player.is_playing()
@@ -951,7 +1045,7 @@ class SomaDocument:
         payload = build_project_payload(
             source_info,
             self.settings,
-            PlaybackSettings(master_volume=self._master_volume),
+            self.playback_settings(),
             self.store.all(),
         )
         from soma.persistence import save_project
@@ -1004,6 +1098,7 @@ class SomaDocument:
         partials = parse_partials(data)
         self.settings = settings
         self.set_master_volume(playback_settings.master_volume)
+        self.update_playback_settings(playback_settings)
         self.store = PartialStore()
         for partial in partials:
             self.store.add(partial)

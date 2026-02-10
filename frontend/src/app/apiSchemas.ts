@@ -14,6 +14,16 @@ const analysisSettingsSchema = z.object({
 })
 const playbackSettingsSchema = z.object({
   master_volume: z.number(),
+  output_mode: z.enum(['audio', 'midi']),
+  mix_ratio: z.number(),
+  speed_ratio: z.number(),
+  time_stretch_mode: z.enum(['native', 'librosa']),
+  midi_mode: z.enum(['mpe', 'multitrack', 'mono']),
+  midi_output_name: z.string(),
+  midi_pitch_bend_range: z.number(),
+  midi_amplitude_mapping: z.enum(['velocity', 'pressure', 'cc74', 'cc1']),
+  midi_amplitude_curve: z.enum(['linear', 'db']),
+  midi_bpm: z.number(),
 })
 
 const audioInfoSchema = z.object({
@@ -81,6 +91,7 @@ const statusResponseSchema = z.object({
   is_resynthesizing: z.boolean(),
   position: z.number(),
   master_volume: z.number(),
+  playback_settings: playbackSettingsSchema,
 })
 
 const playbackStateResponseSchema = z.object({
@@ -186,6 +197,24 @@ export const apiSchemas = {
   update_playback_mix: {
     payload: z.object({ mix_ratio: z.number() }),
     response: z.union([okStatusSchema, errorStatusSchema]),
+  },
+  list_midi_outputs: {
+    response: z.union([okStatusSchema.extend({ outputs: z.array(z.string()) }), errorStatusSchema]),
+  },
+  update_playback_settings: {
+    payload: z.object({
+      output_mode: z.enum(['audio', 'midi']).optional(),
+      mix_ratio: z.number().optional(),
+      speed_ratio: z.number().optional(),
+      time_stretch_mode: z.enum(['native', 'librosa']).optional(),
+      midi_mode: z.enum(['mpe', 'multitrack', 'mono']).optional(),
+      midi_output_name: z.string().optional(),
+      midi_pitch_bend_range: z.number().optional(),
+      midi_amplitude_mapping: z.enum(['velocity', 'pressure', 'cc74', 'cc1']).optional(),
+      midi_amplitude_curve: z.enum(['linear', 'db']).optional(),
+      midi_bpm: z.number().optional(),
+    }),
+    response: z.union([okStatusSchema.extend({ playback_settings: playbackSettingsSchema }), errorStatusSchema]),
   },
   export_mpe: {
     payload: z.object({
