@@ -23,6 +23,7 @@ const playbackSettingsSchema = z.object({
   midi_pitch_bend_range: z.number(),
   midi_amplitude_mapping: z.enum(['velocity', 'pressure', 'cc74', 'cc1']),
   midi_amplitude_curve: z.enum(['linear', 'db']),
+  midi_cc_update_rate_hz: z.number(),
   midi_bpm: z.number(),
 })
 
@@ -33,6 +34,13 @@ const audioInfoSchema = z.object({
   duration_sec: z.number(),
   channels: z.number(),
   truncated: z.boolean(),
+})
+
+const recentProjectSchema = z.object({
+  path: z.string(),
+  name: z.string(),
+  last_opened_at: z.string(),
+  exists: z.boolean(),
 })
 
 const spectrogramPreviewSchema = z.object({
@@ -120,7 +128,11 @@ export const apiSchemas = {
   new_project: {
     response: z.union([okStatusSchema.extend({ playback_settings: playbackSettingsSchema }), errorStatusSchema]),
   },
+  list_recent_projects: {
+    response: z.union([okStatusSchema.extend({ projects: z.array(recentProjectSchema) }), errorStatusSchema]),
+  },
   open_project: { response: loadResponseSchema },
+  open_project_path: { payload: z.object({ path: z.string() }), response: loadResponseSchema },
   save_project: { response: z.union([okStatusSchema.extend({ path: z.string().optional() }), errorStatusSchema]) },
   save_project_as: { response: z.union([okStatusSchema.extend({ path: z.string() }), errorStatusSchema]) },
   reveal_audio_in_explorer: { response: z.union([okStatusSchema, errorStatusSchema]) },
@@ -213,6 +225,7 @@ export const apiSchemas = {
       midi_pitch_bend_range: z.number().optional(),
       midi_amplitude_mapping: z.enum(['velocity', 'pressure', 'cc74', 'cc1']).optional(),
       midi_amplitude_curve: z.enum(['linear', 'db']).optional(),
+      midi_cc_update_rate_hz: z.number().optional(),
       midi_bpm: z.number().optional(),
     }),
     response: z.union([okStatusSchema.extend({ playback_settings: playbackSettingsSchema }), errorStatusSchema]),
@@ -222,6 +235,7 @@ export const apiSchemas = {
       pitch_bend_range: z.number().optional(),
       amplitude_mapping: z.string().optional(),
       amplitude_curve: z.string().optional(),
+      cc_update_rate_hz: z.number().optional(),
       bpm: z.number().optional(),
     }),
     response: z.union([okStatusSchema.extend({ paths: z.array(z.string()) }), errorStatusSchema]),
@@ -231,6 +245,7 @@ export const apiSchemas = {
       pitch_bend_range: z.number().optional(),
       amplitude_mapping: z.string().optional(),
       amplitude_curve: z.string().optional(),
+      cc_update_rate_hz: z.number().optional(),
       bpm: z.number().optional(),
     }),
     response: z.union([okStatusSchema.extend({ paths: z.array(z.string()) }), errorStatusSchema]),
@@ -240,6 +255,7 @@ export const apiSchemas = {
       pitch_bend_range: z.number().optional(),
       amplitude_mapping: z.string().optional(),
       amplitude_curve: z.string().optional(),
+      cc_update_rate_hz: z.number().optional(),
       bpm: z.number().optional(),
     }),
     response: z.union([okStatusSchema.extend({ paths: z.array(z.string()) }), errorStatusSchema]),

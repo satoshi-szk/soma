@@ -43,6 +43,7 @@ _CWT_PREVIEW_WINDOW_THRESHOLD_SEC = 2.0
 _SNAP_TIME_MARGIN_SEC = 0.25
 _SNAP_FREQ_MARGIN_OCTAVES = 0.5
 _SNAP_QUEUE_MAX_WAITING = 2
+_MIDI_CC_UPDATE_RATE_OPTIONS_HZ = (50, 100, 200, 400, 800)
 
 
 @dataclass
@@ -141,6 +142,7 @@ class SomaDocument:
         self._midi_pitch_bend_range = 48
         self._midi_amplitude_mapping = "cc74"
         self._midi_amplitude_curve = "linear"
+        self._midi_cc_update_rate_hz = 400
         self._midi_bpm = 120.0
 
         # バックグラウンド処理用の compute manager を初期化する。
@@ -185,6 +187,7 @@ class SomaDocument:
         self._midi_pitch_bend_range = 48
         self._midi_amplitude_mapping = "cc74"
         self._midi_amplitude_curve = "linear"
+        self._midi_cc_update_rate_hz = 400
         self._midi_bpm = 120.0
         self.set_master_volume(1.0)
 
@@ -774,6 +777,7 @@ class SomaDocument:
                 pitch_bend_range=self._midi_pitch_bend_range,
                 amplitude_mapping=self._midi_amplitude_mapping,
                 amplitude_curve=self._midi_amplitude_curve,
+                cc_update_rate_hz=self._midi_cc_update_rate_hz,
                 bpm=self._midi_bpm,
             )
             midi = build_midi_for_playback(self.store.all(), self._midi_mode, settings)
@@ -925,6 +929,7 @@ class SomaDocument:
             midi_pitch_bend_range=self._midi_pitch_bend_range,
             midi_amplitude_mapping=self._midi_amplitude_mapping,
             midi_amplitude_curve=self._midi_amplitude_curve,
+            midi_cc_update_rate_hz=self._midi_cc_update_rate_hz,
             midi_bpm=self._midi_bpm,
         )
 
@@ -943,6 +948,11 @@ class SomaDocument:
         self._midi_pitch_bend_range = max(1, int(settings.midi_pitch_bend_range))
         self._midi_amplitude_mapping = settings.midi_amplitude_mapping
         self._midi_amplitude_curve = settings.midi_amplitude_curve
+        requested_cc_rate = int(settings.midi_cc_update_rate_hz)
+        self._midi_cc_update_rate_hz = min(
+            _MIDI_CC_UPDATE_RATE_OPTIONS_HZ,
+            key=lambda rate: abs(rate - requested_cc_rate),
+        )
         self._midi_bpm = max(1.0, float(settings.midi_bpm))
         return self.playback_settings()
 

@@ -3,6 +3,7 @@ type PlaybackMode = 'audio' | 'midi'
 type MidiMode = 'mpe' | 'multitrack' | 'mono'
 type MidiAmplitudeMapping = 'velocity' | 'pressure' | 'cc74' | 'cc1'
 type MidiAmplitudeCurve = 'linear' | 'db'
+type MidiCcUpdateRateHz = 50 | 100 | 200 | 400 | 800
 
 export type PlaybackSettingsSidebarProps = {
   playbackMode: PlaybackMode
@@ -16,6 +17,7 @@ export type PlaybackSettingsSidebarProps = {
   midiPitchBendRange: string
   midiAmplitudeMapping: MidiAmplitudeMapping
   midiAmplitudeCurve: MidiAmplitudeCurve
+  midiCcUpdateRateHz: MidiCcUpdateRateHz
   midiBpm: string
   controlsDisabled: boolean
   onClose: () => void
@@ -31,6 +33,7 @@ export type PlaybackSettingsSidebarProps = {
   onMidiPitchBendRangeChange: (value: string) => void
   onMidiAmplitudeMappingChange: (value: MidiAmplitudeMapping) => void
   onMidiAmplitudeCurveChange: (value: MidiAmplitudeCurve) => void
+  onMidiCcUpdateRateChange: (value: MidiCcUpdateRateHz) => void
   onMidiBpmChange: (value: string) => void
 }
 
@@ -46,6 +49,7 @@ export function PlaybackSettingsSidebar({
   midiPitchBendRange,
   midiAmplitudeMapping,
   midiAmplitudeCurve,
+  midiCcUpdateRateHz,
   midiBpm,
   controlsDisabled,
   onClose,
@@ -61,6 +65,7 @@ export function PlaybackSettingsSidebar({
   onMidiPitchBendRangeChange,
   onMidiAmplitudeMappingChange,
   onMidiAmplitudeCurveChange,
+  onMidiCcUpdateRateChange,
   onMidiBpmChange,
 }: PlaybackSettingsSidebarProps) {
   const lockedClass = controlsDisabled ? 'opacity-55' : ''
@@ -235,6 +240,21 @@ export function PlaybackSettingsSidebar({
             >
               <option value="linear">Linear</option>
               <option value="db">dB</option>
+            </select>
+          </label>
+          <label className="flex flex-col gap-1 text-[11px] tracking-normal text-[var(--ink)]">
+            CC Update Rate
+            <select
+              className={selectClass}
+              value={midiCcUpdateRateHz}
+              disabled={controlsDisabled}
+              onChange={(event) => onMidiCcUpdateRateChange(Number(event.target.value) as MidiCcUpdateRateHz)}
+            >
+              <option value={50}>50 Hz</option>
+              <option value={100}>100 Hz</option>
+              <option value={200}>200 Hz</option>
+              <option value={400}>400 Hz</option>
+              <option value={800}>800 Hz</option>
             </select>
           </label>
           <label className="flex flex-col gap-1 text-[11px] tracking-normal text-[var(--ink)]">

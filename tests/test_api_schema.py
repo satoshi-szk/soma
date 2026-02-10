@@ -1,6 +1,8 @@
 from soma.api_schema import (
+    ExportMpePayload,
     OpenAudioDataPayload,
     OpenAudioPathPayload,
+    OpenProjectPathPayload,
     PlayPayload,
     TracePartialPayload,
     UpdateSettingsPayload,
@@ -52,6 +54,13 @@ def test_parse_payload_accepts_audio_data() -> None:
     assert parsed.name == "example.wav"
 
 
+def test_parse_payload_accepts_project_path() -> None:
+    parsed, error = parse_payload(OpenProjectPathPayload, {"path": "/tmp/example.soma"})
+    assert error is None
+    assert parsed is not None
+    assert parsed.path == "/tmp/example.soma"
+
+
 def test_parse_payload_accepts_play_speed_ratio() -> None:
     parsed, error = parse_payload(PlayPayload, {"mix_ratio": 0.4, "speed_ratio": 0.125})
     assert error is None
@@ -76,3 +85,10 @@ def test_parse_payload_rejects_play_invalid_time_stretch_mode() -> None:
     parsed, error = parse_payload(PlayPayload, {"time_stretch_mode": "invalid"})
     assert parsed is None
     assert error is not None
+
+
+def test_parse_payload_accepts_export_mpe_cc_update_rate() -> None:
+    parsed, error = parse_payload(ExportMpePayload, {"cc_update_rate_hz": 400})
+    assert error is None
+    assert parsed is not None
+    assert parsed.cc_update_rate_hz == 400

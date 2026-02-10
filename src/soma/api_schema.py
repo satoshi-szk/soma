@@ -112,6 +112,7 @@ class UpdatePlaybackSettingsPayload(PayloadBase):
     midi_pitch_bend_range: int | None = Field(default=None, ge=1, le=96)
     midi_amplitude_mapping: str | None = Field(default=None, pattern="^(velocity|pressure|cc74|cc1)$")
     midi_amplitude_curve: str | None = Field(default=None, pattern="^(linear|db)$")
+    midi_cc_update_rate_hz: int | None = Field(default=None, ge=1, le=1000)
     midi_bpm: float | None = Field(default=None, gt=0.0)
 
 
@@ -119,6 +120,7 @@ class ExportMpePayload(PayloadBase):
     pitch_bend_range: int = 48
     amplitude_mapping: str = "velocity"
     amplitude_curve: str = "linear"
+    cc_update_rate_hz: int | None = Field(default=None, ge=1, le=1000)
     bpm: float = 120.0
 
 
@@ -126,6 +128,7 @@ class ExportMultiTrackMidiPayload(PayloadBase):
     pitch_bend_range: int = 12
     amplitude_mapping: str = "velocity"
     amplitude_curve: str = "linear"
+    cc_update_rate_hz: int | None = Field(default=None, ge=1, le=1000)
     bpm: float = 120.0
 
 
@@ -133,6 +136,7 @@ class ExportMonophonicMidiPayload(PayloadBase):
     pitch_bend_range: int = 12
     amplitude_mapping: str = "velocity"
     amplitude_curve: str = "linear"
+    cc_update_rate_hz: int | None = Field(default=None, ge=1, le=1000)
     bpm: float = 120.0
 
 
@@ -153,6 +157,10 @@ class OpenAudioPathPayload(PayloadBase):
 class OpenAudioDataPayload(PayloadBase):
     name: str
     data_base64: str
+
+
+class OpenProjectPathPayload(PayloadBase):
+    path: str
 
 
 class RequestViewportPreviewPayload(PayloadBase):

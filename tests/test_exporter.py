@@ -8,9 +8,11 @@ pytest.importorskip("mido")
 
 from soma.exporter import (  # noqa: E402
     AudioExportSettings,
+    MidiExportSettings,
     MonophonicExportSettings,
     MpeExportSettings,
     MultiTrackExportSettings,
+    _partial_timed_events,
     export_audio,
     export_cv_audio,
     export_monophonic_midi,
@@ -213,6 +215,23 @@ def test_export_mpe_amp_db_curve_changes_values(tmp_path: Path) -> None:
     assert len(linear_pressure) >= 3
     assert len(db_pressure) >= 3
     assert db_pressure[1] > linear_pressure[1]
+
+
+def test_partial_timed_events_cc74_linear_resample_density() -> None:
+    partial = Partial(
+        id="p1",
+        points=[
+            PartialPoint(time=0.0, freq=440.0, amp=0.0),
+            PartialPoint(time=1.0, freq=440.0, amp=1.0),
+        ],
+    )
+    settings = MidiExportSettings(amplitude_mapping="cc74", cc_update_rate_hz=4)
+    events = _partial_timed_events(partial, channel=0, settings=settings, amp_min=0.0, amp_max=1.0)
+    cc74 = [event for event in events if event.message.type == "control_change" and event.message.control == 74]
+
+    assert len(cc74) == 5
+    assert [event.time for event in cc74] == pytest.approx([0.0, 0.25, 0.5, 0.75, 1.0], abs=1e-9)
+    assert [event.message.value for event in cc74] == [1, 32, 64, 96, 127]
 
 
 def test_render_cv_mono_prefers_latest_started_partial() -> None:
