@@ -841,16 +841,15 @@ class SomaDocument:
             return False
         clamped_mix = float(np.clip(mix_ratio, 0.0, 1.0))
         self._last_mix_ratio = clamped_mix
-        position_sec = self.playback_position()
         speed_ratio = self._playback_speed_ratio
         time_stretch_mode = self._last_time_stretch_mode
         sample_rate = self.audio_info.sample_rate
         if abs(speed_ratio - 1.0) <= 1e-4:
             updated = self._mix_buffer(clamped_mix)
-            self.player.update_buffer(updated, start_position_sec=position_sec)
+            self.player.update_buffer(updated)
             return True
         updated = self._build_speed_adjusted_buffer(clamped_mix, speed_ratio, sample_rate, time_stretch_mode)
-        self.player.update_buffer(updated, start_position_sec=position_sec / speed_ratio)
+        self.player.update_buffer(updated)
         cache_key = self._playback_cache_lookup_key(clamped_mix, speed_ratio, time_stretch_mode)
         self._store_playback_cache(cache_key, updated)
         return True

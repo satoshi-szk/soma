@@ -144,3 +144,30 @@ def test_playback_resynth_only_skips_time_stretch(monkeypatch) -> None:  # type:
     doc.play(mix_ratio=1.0, loop=False, start_position_sec=0.0, speed_ratio=2.0, time_stretch_mode="librosa")
 
     assert started.wait(timeout=1.0)
+
+
+def test_update_mix_ratio_does_not_seek_backwards(monkeypatch) -> None:  # type: ignore[no-untyped-def]
+    doc = _make_doc(duration_sec=2.0)
+    doc._playback_mode = "normal"
+    doc._playback_speed_ratio = 2.0
+    doc.player.is_playing = lambda: True  # type: ignore[method-assign]
+
+    monkeypatch.setattr(
+        doc,
+        "_build_speed_adjusted_buffer",
+        lambda *_args, **_kwargs: np.zeros(32, dtype=np.float32),
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_update_buffer(buffer: np.ndarray, start_position_sec: float | None = None) -> None:
+        captured["size"] = buffer.size
+        captured["start_position_sec"] = start_position_sec
+
+    doc.player.update_buffer = fake_update_buffer  # type: ignore[method-assign]
+
+    updated = doc.update_mix_ratio(0.7)
+
+    assert updated is True
+    assert captured["size"] == 32
+    assert captured["start_position_sec"] is None
