@@ -16,7 +16,7 @@ class SpectrogramRenderer:
     _BASE_HEIGHT = 1024
     _TARGET_COLS_PER_SEC = 84.0
     _MIN_COLS = 2048
-    _MAX_COLS = 120_000
+    _MAX_COLS = 320_000
 
     def __init__(self, audio: np.ndarray, sample_rate: int) -> None:
         self._sample_rate = sample_rate
@@ -305,6 +305,17 @@ class SpectrogramRenderer:
             return source
         if width <= 1:
             return source[:, :1]
+        if source.shape[1] > width:
+            # ダウンサンプル時はピークを残す。線形補間のみだとピーク欠落が起きやすい。
+            boundaries = np.linspace(0, source.shape[1], width + 1, dtype=np.int64)
+            out = np.empty((source.shape[0], width), dtype=np.float32)
+            for i in range(width):
+                start = int(boundaries[i])
+                end = int(boundaries[i + 1])
+                if end <= start:
+                    end = min(source.shape[1], start + 1)
+                out[:, i] = np.max(source[:, start:end], axis=1)
+            return out
         src_x = np.linspace(0.0, 1.0, source.shape[1], dtype=np.float64)
         dst_x = np.linspace(0.0, 1.0, width, dtype=np.float64)
         out = np.empty((source.shape[0], width), dtype=np.float32)
