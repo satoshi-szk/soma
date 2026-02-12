@@ -224,8 +224,11 @@ class SpectrogramRenderer:
 
         start = max(0.0, min(time_start, total_duration))
         end = max(start + 1e-6, min(time_end, total_duration))
-        start_col = int(np.floor((start / max(total_duration, 1e-9)) * (self._matrix_cols - 1)))
-        end_col = int(np.ceil((end / max(total_duration, 1e-9)) * (self._matrix_cols - 1))) + 1
+        cols_per_sec = (self._matrix_cols - 1) / max(total_duration, 1e-9)
+        target_start_col = start * cols_per_sec
+        target_end_col = end * cols_per_sec
+        start_col = int(np.floor(target_start_col))
+        end_col = int(np.ceil(target_end_col)) + 1
         start_col = max(0, min(start_col, self._matrix_cols - 1))
         end_col = max(start_col + 1, min(end_col, self._matrix_cols))
 
@@ -248,7 +251,14 @@ class SpectrogramRenderer:
         effective_min = max(freq_min, settings.freq_min, self._matrix_freq_min)
         effective_max = min(freq_max, settings.preview_freq_max, settings.freq_max, self._matrix_freq_max)
         effective_max = max(effective_max, effective_min * 1.001)
-        time_resampled = self._resample_time_matrix(source, width)
+        relative_start_col = target_start_col - float(start_col)
+        relative_end_col = target_end_col - float(start_col)
+        time_resampled = self._resample_time_matrix(
+            source=source,
+            width=width,
+            relative_start_col=relative_start_col,
+            relative_end_col=relative_end_col,
+        )
         target_log_freqs = np.geomspace(effective_min, effective_max, height).astype(np.float64)
         composed = self._interpolate_freq_matrix(
             source_freqs=self._matrix_log_freqs,
@@ -300,27 +310,48 @@ class SpectrogramRenderer:
             mags[:, col] = np.abs(spectrum).astype(np.float32)
         return mags
 
-    def _resample_time_matrix(self, source: np.ndarray, width: int) -> np.ndarray:
-        if source.shape[1] == width:
-            return source
+    def _resample_time_matrix(
+        self,
+        source: np.ndarray,
+        width: int,
+        relative_start_col: float,
+        relative_end_col: float,
+    ) -> np.ndarray:
+        source_width = source.shape[1]
+        if source_width == 0:
+            return np.zeros((source.shape[0], width), dtype=np.float32)
         if width <= 1:
-            return source[:, :1]
-        if source.shape[1] > width:
+            sample_x = float(np.clip(relative_start_col, 0.0, max(0.0, source_width - 1)))
+            left = int(np.floor(sample_x))
+            right = min(source_width - 1, left + 1)
+            frac = float(sample_x - left)
+            return (source[:, left] * (1.0 - frac) + source[:, right] * frac)[:, None].astype(np.float32)
+
+        relative_start_col = float(np.clip(relative_start_col, 0.0, max(0.0, source_width - 1)))
+        relative_end_col = float(np.clip(relative_end_col, relative_start_col, max(0.0, source_width - 1)))
+        src_span = max(relative_end_col - relative_start_col, 1e-9)
+        source_samples_in_span = src_span + 1.0
+
+        if source_samples_in_span > float(width):
             # ダウンサンプル時はピークを残す。線形補間のみだとピーク欠落が起きやすい。
-            boundaries = np.linspace(0, source.shape[1], width + 1, dtype=np.int64)
+            boundaries = np.linspace(relative_start_col, relative_end_col, width + 1, dtype=np.float64)
             out = np.empty((source.shape[0], width), dtype=np.float32)
             for i in range(width):
-                start = int(boundaries[i])
-                end = int(boundaries[i + 1])
+                start = int(np.floor(boundaries[i]))
+                end = int(np.ceil(boundaries[i + 1]))
                 if end <= start:
-                    end = min(source.shape[1], start + 1)
+                    end = start + 1
+                start = max(0, min(start, source_width - 1))
+                end = max(start + 1, min(end, source_width))
                 out[:, i] = np.max(source[:, start:end], axis=1)
             return out
-        src_x = np.linspace(0.0, 1.0, source.shape[1], dtype=np.float64)
-        dst_x = np.linspace(0.0, 1.0, width, dtype=np.float64)
+
+        src_x = np.arange(source_width, dtype=np.float64)
+        dst_x = np.linspace(relative_start_col, relative_end_col, width, dtype=np.float64)
+        dst_x = np.clip(dst_x, 0.0, max(0.0, source_width - 1))
         out = np.empty((source.shape[0], width), dtype=np.float32)
         for row in range(source.shape[0]):
-            out[row, :] = np.interp(dst_x, src_x, source[row, :], left=0.0, right=0.0).astype(np.float32)
+            out[row, :] = np.interp(dst_x, src_x, source[row, :]).astype(np.float32)
         return out
 
     def _interpolate_freq_matrix(

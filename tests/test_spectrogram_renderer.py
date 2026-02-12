@@ -85,3 +85,53 @@ def test_adjacent_tiles_are_continuous_for_steady_tone() -> None:
         assert float(np.mean(seam_delta)) < 6.0
     finally:
         renderer.close()
+
+
+def test_split_tiles_match_single_render_for_fractional_boundaries() -> None:
+    sample_rate = 44100
+    duration_sec = 3.0
+    t = np.arange(int(sample_rate * duration_sec), dtype=np.float64) / float(sample_rate)
+    audio = (0.2 * np.sin(2.0 * np.pi * (180.0 + 120.0 * t) * t)).astype(np.float32)
+    settings = AnalysisSettings()
+    start = 0.73
+    split = 1.19
+    end = 1.61
+
+    renderer = SpectrogramRenderer(audio=audio, sample_rate=sample_rate)
+    try:
+        full, _, _ = renderer.render_tile(
+            settings=settings,
+            time_start=start,
+            time_end=end,
+            freq_min=20.0,
+            freq_max=12000.0,
+            width=800,
+            height=192,
+        )
+        left, _, _ = renderer.render_tile(
+            settings=settings,
+            time_start=start,
+            time_end=split,
+            freq_min=20.0,
+            freq_max=12000.0,
+            width=400,
+            height=192,
+        )
+        right, _, _ = renderer.render_tile(
+            settings=settings,
+            time_start=split,
+            time_end=end,
+            freq_min=20.0,
+            freq_max=12000.0,
+            width=400,
+            height=192,
+        )
+        full_data = np.asarray(full.data, dtype=np.float32).reshape((full.height, full.width))
+        left_data = np.asarray(left.data, dtype=np.float32).reshape((left.height, left.width))
+        right_data = np.asarray(right.data, dtype=np.float32).reshape((right.height, right.width))
+        combined = np.concatenate([left_data, right_data], axis=1)
+        seam_delta = np.abs(left_data[:, -1] - right_data[:, 0])
+        assert float(np.mean(seam_delta)) < 4.0
+        assert float(np.mean(np.abs(combined - full_data))) < 5.0
+    finally:
+        renderer.close()
