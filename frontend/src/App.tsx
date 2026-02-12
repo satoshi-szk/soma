@@ -108,6 +108,12 @@ function App() {
   }, [menuOpen])
 
   useEffect(() => {
+    if (apiStatus === 'checking') return
+    if (apiStatus !== 'connected') {
+      setRecentProjects([])
+      setRecentLoaded(true)
+      return
+    }
     let cancelled = false
     void (async () => {
       const projects = await listRecentProjects()
@@ -119,7 +125,7 @@ function App() {
     return () => {
       cancelled = true
     }
-  }, [listRecentProjects])
+  }, [apiStatus, listRecentProjects])
 
   const applyLoadedProject = useCallback(
     (result: LoadedProjectResult) => {
