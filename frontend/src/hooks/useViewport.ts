@@ -30,8 +30,18 @@ type ViewportCacheEntry = {
 
 type ReportError = (context: string, message: string) => void
 
-const buildViewportParamsKey = (params: ViewportParams): string =>
-  [params.timeStart.toFixed(6), params.timeEnd.toFixed(6), params.freqMin.toFixed(3), params.freqMax.toFixed(3)].join('|')
+const buildViewportParamsKey = (params: ViewportParams, settings: AnalysisSettings, pixelHeight: number): string =>
+  [
+    params.timeStart.toFixed(6),
+    params.timeEnd.toFixed(6),
+    params.freqMin.toFixed(3),
+    params.freqMax.toFixed(3),
+    settings.gain.toFixed(3),
+    settings.min_db.toFixed(3),
+    settings.max_db.toFixed(3),
+    settings.gamma.toFixed(3),
+    pixelHeight.toString(),
+  ].join('|')
 
 export function useViewport(preview: SpectrogramPreview | null, settings: AnalysisSettings, reportError: ReportError) {
   const [zoomXState, setZoomXState] = useState<number | null>(null)
@@ -222,32 +232,47 @@ export function useViewport(preview: SpectrogramPreview | null, settings: Analys
       const api = isPywebviewApiAvailable() ? pywebviewApi : null
       if (!api) return
 
+      const requestTasks: Promise<void>[] = []
+      const tileHeight = Math.round(spectrogramAreaHeight)
       for (const params of paramsList) {
-        const key = buildViewportParamsKey(params)
+        const key = buildViewportParamsKey(params, settings, tileHeight)
         if (requestedTileKeysRef.current.has(key)) continue
         requestedTileKeysRef.current.add(key)
-        const result = await api.request_spectrogram_tile({
-          time_start: params.timeStart,
-          time_end: params.timeEnd,
-          freq_min: params.freqMin,
-          freq_max: params.freqMax,
-          width: 1024,
-          height: Math.round(spectrogramAreaHeight),
-          gain: settings.gain,
-          min_db: settings.min_db,
-          max_db: settings.max_db,
-          gamma: settings.gamma,
-        })
+        requestTasks.push(
+          (async () => {
+            try {
+              const result = await api.request_spectrogram_tile({
+                time_start: params.timeStart,
+                time_end: params.timeEnd,
+                freq_min: params.freqMin,
+                freq_max: params.freqMax,
+                width: 1024,
+                height: tileHeight,
+                gain: settings.gain,
+                min_db: settings.min_db,
+                max_db: settings.max_db,
+                gamma: settings.gamma,
+              })
 
-        if (result.status === 'error') {
-          reportError('Viewport', result.message ?? 'Failed to request viewport preview')
-          continue
-        }
-        const resolved = await ensurePreviewData(result.preview)
-        if (!resolved.image_path) {
-          continue
-        }
-        upsertViewportPreview(resolved, result.quality === 'high' ? 'high' : 'low')
+              if (result.status === 'error') {
+                requestedTileKeysRef.current.delete(key)
+                reportError('Viewport', result.message ?? 'Failed to request viewport preview')
+                return
+              }
+              const resolved = await ensurePreviewData(result.preview)
+              if (!resolved.image_path) {
+                requestedTileKeysRef.current.delete(key)
+                return
+              }
+              upsertViewportPreview(resolved, result.quality === 'high' ? 'high' : 'low')
+            } catch {
+              requestedTileKeysRef.current.delete(key)
+            }
+          })()
+        )
+      }
+      if (requestTasks.length > 0) {
+        await Promise.allSettled(requestTasks)
       }
     },
     [reportError, spectrogramAreaHeight, settings, upsertViewportPreview]

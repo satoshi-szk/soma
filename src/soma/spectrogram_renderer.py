@@ -17,15 +17,24 @@ class SpectrogramRenderer:
         self._length = int(audio.shape[0])
         self._temp_dir = tempfile.TemporaryDirectory(prefix="soma-spec-")
         self._audio_path = Path(self._temp_dir.name) / "audio.dat"
-        write_map = np.memmap(self._audio_path, dtype=np.float32, mode="w+", shape=(self._length,))
-        write_map[:] = np.asarray(audio, dtype=np.float32)
-        write_map.flush()
-        del write_map
-        self._audio = np.memmap(self._audio_path, dtype=np.float32, mode="r", shape=(self._length,))
+        self._closed = False
+        try:
+            write_map = np.memmap(self._audio_path, dtype=np.float32, mode="w+", shape=(self._length,))
+            write_map[:] = np.asarray(audio, dtype=np.float32)
+            write_map.flush()
+            del write_map
+            self._audio = np.memmap(self._audio_path, dtype=np.float32, mode="r", shape=(self._length,))
+        except Exception:
+            self._temp_dir.cleanup()
+            raise
 
     def close(self) -> None:
-        del self._audio
+        if self._closed:
+            return
+        if hasattr(self, "_audio"):
+            del self._audio
         self._temp_dir.cleanup()
+        self._closed = True
 
     def render_overview(
         self,

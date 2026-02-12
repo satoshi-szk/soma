@@ -52,8 +52,12 @@ export function useViewportImageCache(viewportPreviews: SpectrogramPreview[] | n
         setViewportImageCache((prev) => {
           const next = new Map(prev)
           next.set(key, image)
-          for (const staleKey of next.keys()) {
+          for (const staleKey of [...next.keys()]) {
             if (!desiredViewportKeysRef.current.has(staleKey)) {
+              const staleImage = next.get(staleKey)
+              if (staleImage) {
+                staleImage.src = ''
+              }
               next.delete(staleKey)
             }
           }
@@ -79,8 +83,12 @@ export function useViewportImageCache(viewportPreviews: SpectrogramPreview[] | n
         if (desiredViewportKeysRef.current.size === 0 && prev.size === 0) return prev
         let updated = false
         const next = new Map(prev)
-        for (const key of next.keys()) {
+        for (const key of [...next.keys()]) {
           if (!desiredViewportKeysRef.current.has(key)) {
+            const staleImage = next.get(key)
+            if (staleImage) {
+              staleImage.src = ''
+            }
             next.delete(key)
             updated = true
           }
