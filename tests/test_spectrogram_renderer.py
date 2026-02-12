@@ -50,3 +50,38 @@ def test_close_is_idempotent() -> None:
     renderer = SpectrogramRenderer(audio=np.zeros(128, dtype=np.float32), sample_rate=44100)
     renderer.close()
     renderer.close()
+
+
+def test_adjacent_tiles_are_continuous_for_steady_tone() -> None:
+    sample_rate = 44100
+    duration_sec = 3.0
+    t = np.arange(int(sample_rate * duration_sec), dtype=np.float64) / float(sample_rate)
+    audio = (0.25 * np.sin(2.0 * np.pi * 220.0 * t)).astype(np.float32)
+    settings = AnalysisSettings()
+
+    renderer = SpectrogramRenderer(audio=audio, sample_rate=sample_rate)
+    try:
+        left, _, _ = renderer.render_tile(
+            settings=settings,
+            time_start=1.0,
+            time_end=1.5,
+            freq_min=20.0,
+            freq_max=12000.0,
+            width=1024,
+            height=256,
+        )
+        right, _, _ = renderer.render_tile(
+            settings=settings,
+            time_start=1.5,
+            time_end=2.0,
+            freq_min=20.0,
+            freq_max=12000.0,
+            width=1024,
+            height=256,
+        )
+        left_data = np.asarray(left.data, dtype=np.float32).reshape((left.height, left.width))
+        right_data = np.asarray(right.data, dtype=np.float32).reshape((right.height, right.width))
+        seam_delta = np.abs(left_data[:, -1] - right_data[:, 0])
+        assert float(np.mean(seam_delta)) < 6.0
+    finally:
+        renderer.close()
