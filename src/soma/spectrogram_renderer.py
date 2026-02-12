@@ -132,12 +132,12 @@ class SpectrogramRenderer:
         log_freqs = np.geomspace(effective_min, effective_max, height).astype(np.float64)
 
         bands = [
-            (20.0, 200.0, 4096),
-            (200.0, 2000.0, 1024),
-            (2000.0, effective_max, 256),
+            ("low", 20.0, 200.0, 4096),
+            ("mid", 200.0, 2000.0, 1024),
+            ("high", 2000.0, effective_max, 256),
         ]
-        composed = np.zeros((height, width), dtype=np.float32)
-        for low_hz, high_hz, nperseg in bands:
+        band_images: dict[str, np.ndarray] = {}
+        for band_name, low_hz, high_hz, nperseg in bands:
             band_lo = max(effective_min, low_hz)
             band_hi = min(effective_max, high_hz)
             if band_hi <= band_lo:
@@ -151,8 +151,38 @@ class SpectrogramRenderer:
                 resized[:, col] = np.interp(log_freqs, fft_freqs, band_mag[:, col], left=0.0, right=0.0).astype(
                     np.float32
                 )
-            mask = (log_freqs >= band_lo) & (log_freqs <= band_hi)
-            composed[mask, :] = resized[mask, :]
+            band_images[band_name] = resized
+
+        # バンド境界で不連続が出ないよう、隣接バンド中心間で広くクロスフェードする。
+        log2_freqs = np.log2(log_freqs)
+        low_center_hz = np.sqrt(20.0 * 200.0)
+        mid_center_hz = np.sqrt(200.0 * 2000.0)
+        high_upper_hz = max(2000.0, effective_max)
+        high_center_hz = np.sqrt(2000.0 * high_upper_hz)
+        t1 = np.clip(
+            (log2_freqs - np.log2(low_center_hz)) / (np.log2(mid_center_hz) - np.log2(low_center_hz)),
+            0.0,
+            1.0,
+        ).astype(np.float32)
+        t2 = np.clip(
+            (log2_freqs - np.log2(mid_center_hz)) / (np.log2(high_center_hz) - np.log2(mid_center_hz)),
+            0.0,
+            1.0,
+        ).astype(np.float32)
+        weight_low = 1.0 - t1
+        weight_mid = t1 * (1.0 - t2)
+        weight_high = t2
+
+        low_image = band_images.get("low")
+        mid_image = band_images.get("mid")
+        high_image = band_images.get("high")
+        composed = np.zeros((height, width), dtype=np.float32)
+        if low_image is not None:
+            composed += low_image * weight_low[:, None]
+        if mid_image is not None:
+            composed += mid_image * weight_mid[:, None]
+        if high_image is not None:
+            composed += high_image * weight_high[:, None]
 
         computed_amp_reference = float(np.max(composed)) if composed.size else 1.0
         reference = computed_amp_reference if amp_reference is None else amp_reference
