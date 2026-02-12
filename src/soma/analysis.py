@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
+from time import perf_counter
 
 import numpy as np
 import pywt
@@ -546,24 +547,272 @@ def snap_trace(
     window_ms: float = 200.0,
     freq_window_octaves: float = 0.5,
     amp_reference: float | None = None,
+    metrics: dict[str, float | int] | None = None,
+    tile_duration_sec: float = 0.75,
+    tile_overlap_ratio: float = 0.5,
 ) -> list[PartialPoint]:
+    total_started_at = perf_counter()
+    trace_count = len(trace)
     if not trace or audio.size == 0:
+        if metrics is not None:
+            metrics.update(
+                {
+                    "trace_points_in": int(trace_count),
+                    "trace_points_resampled": 0,
+                    "snap_points_out": 0,
+                    "skipped_windows": 0,
+                    "tiles": 0,
+                    "tile_duration_sec": float(tile_duration_sec),
+                    "tile_overlap_ratio": float(tile_overlap_ratio),
+                    "cwt_calls": 0,
+                    "resample_ms": 0.0,
+                    "cwt_ms": 0.0,
+                    "peak_ms": 0.0,
+                    "total_ms": (perf_counter() - total_started_at) * 1000.0,
+                }
+            )
         return []
 
+    resample_started_at = perf_counter()
     resampled = _resample_trace(trace, settings.time_resolution_ms)
     trace_points = list(resampled)
+    resample_ms = (perf_counter() - resample_started_at) * 1000.0
 
+    if len(trace_points) == 0:
+        if metrics is not None:
+            metrics.update(
+                {
+                    "trace_points_in": int(trace_count),
+                    "trace_points_resampled": 0,
+                    "snap_points_out": 0,
+                    "skipped_windows": 0,
+                    "tiles": 0,
+                    "tile_duration_sec": float(tile_duration_sec),
+                    "tile_overlap_ratio": float(tile_overlap_ratio),
+                    "cwt_calls": 0,
+                    "resample_ms": float(resample_ms),
+                    "cwt_ms": 0.0,
+                    "peak_ms": 0.0,
+                    "total_ms": float((perf_counter() - total_started_at) * 1000.0),
+                }
+            )
+        return []
+
+    if tile_duration_sec <= 0.0 or not (0.0 <= tile_overlap_ratio < 1.0):
+        return _snap_trace_pointwise(
+            audio=audio,
+            sample_rate=sample_rate,
+            settings=settings,
+            trace_points=trace_points,
+            window_ms=window_ms,
+            freq_window_octaves=freq_window_octaves,
+            amp_reference=amp_reference,
+            trace_count=trace_count,
+            resample_ms=resample_ms,
+            total_started_at=total_started_at,
+            metrics=metrics,
+        )
+
+    return _snap_trace_tiled(
+        audio=audio,
+        sample_rate=sample_rate,
+        settings=settings,
+        trace_points=trace_points,
+        window_ms=window_ms,
+        freq_window_octaves=freq_window_octaves,
+        amp_reference=amp_reference,
+        trace_count=trace_count,
+        resample_ms=resample_ms,
+        total_started_at=total_started_at,
+        metrics=metrics,
+        tile_duration_sec=tile_duration_sec,
+        tile_overlap_ratio=tile_overlap_ratio,
+    )
+
+
+def _snap_trace_tiled(
+    audio: np.ndarray,
+    sample_rate: int,
+    settings: AnalysisSettings,
+    trace_points: list[tuple[float, float]],
+    window_ms: float,
+    freq_window_octaves: float,
+    amp_reference: float | None,
+    trace_count: int,
+    resample_ms: float,
+    total_started_at: float,
+    metrics: dict[str, float | int] | None,
+    tile_duration_sec: float,
+    tile_overlap_ratio: float,
+) -> list[PartialPoint]:
+    window_samples = int(sample_rate * window_ms / 1000.0)
+    window_samples = max(32, window_samples)
+    half_window_sec = (window_samples // 2) / float(sample_rate)
+
+    min_time = trace_points[0][0]
+    max_time = trace_points[-1][0]
+    tile_step_sec = tile_duration_sec * (1.0 - tile_overlap_ratio)
+    tile_step_sec = max(tile_step_sec, 1.0 / float(sample_rate))
+
+    tile_ranges: list[tuple[float, float]] = []
+    start_sec = min_time
+    while start_sec <= max_time + tile_step_sec * 0.5:
+        end_sec = start_sec + tile_duration_sec
+        tile_ranges.append((start_sec, end_sec))
+        start_sec += tile_step_sec
+
+    accumulated_freq = np.zeros(len(trace_points), dtype=np.float64)
+    accumulated_amp = np.zeros(len(trace_points), dtype=np.float64)
+    accumulated_weight = np.zeros(len(trace_points), dtype=np.float64)
+    cwt_elapsed_ms = 0.0
+    peak_elapsed_ms = 0.0
+    cwt_calls = 0
+    skipped_windows = 0
+
+    for tile_start_sec, tile_end_sec in tile_ranges:
+        tile_trace_indices = [
+            index for index, (time_sec, _freq) in enumerate(trace_points) if tile_start_sec <= time_sec <= tile_end_sec
+        ]
+        if not tile_trace_indices:
+            continue
+
+        tile_freqs = np.asarray([trace_points[index][1] for index in tile_trace_indices], dtype=np.float64)
+        tile_freq_min = float(np.min(tile_freqs))
+        tile_freq_max = float(np.max(tile_freqs))
+        local_freq_min = max(1.0, tile_freq_min / (2.0**freq_window_octaves))
+        local_freq_max = min(settings.freq_max, tile_freq_max * (2.0**freq_window_octaves))
+        local_freq_max = max(local_freq_max, local_freq_min * 1.001)
+
+        frequencies = _build_frequencies(
+            AnalysisSettings(
+                freq_min=local_freq_min,
+                freq_max=local_freq_max,
+                bins_per_octave=settings.bins_per_octave,
+            )
+        )
+
+        segment_start_sec = max(0.0, tile_start_sec - half_window_sec)
+        segment_end_sec = min(audio.shape[0] / float(sample_rate), tile_end_sec + half_window_sec)
+        segment_start = max(0, int(segment_start_sec * sample_rate))
+        segment_end = min(audio.shape[0], int(segment_end_sec * sample_rate))
+        segment = audio[segment_start:segment_end]
+        if segment.size < 32:
+            skipped_windows += len(tile_trace_indices)
+            continue
+
+        segment = _to_float32(segment)
+        cwt_started_at = perf_counter()
+        magnitude = _cwt_magnitude(
+            segment,
+            sample_rate,
+            frequencies,
+            wavelet_bandwidth=settings.wavelet_bandwidth,
+            wavelet_center_freq=settings.wavelet_center_freq,
+        )
+        cwt_elapsed_ms += (perf_counter() - cwt_started_at) * 1000.0
+        cwt_calls += 1
+        if magnitude.size == 0 or magnitude.shape[1] == 0:
+            skipped_windows += len(tile_trace_indices)
+            continue
+        tile_max = float(np.max(magnitude))
+        normalizer = amp_reference if amp_reference and amp_reference > 0 else tile_max
+        normalizer = max(normalizer, tile_max)
+        tile_center_sec = 0.5 * (tile_start_sec + tile_end_sec)
+        tile_half_span = max(1e-9, 0.5 * tile_duration_sec)
+
+        for index in tile_trace_indices:
+            time_sec, freq_in = trace_points[index]
+            center_idx = int(round(time_sec * sample_rate)) - segment_start
+            center_idx = int(np.clip(center_idx, 0, magnitude.shape[1] - 1))
+            spectrum = magnitude[:, center_idx]
+            if spectrum.size == 0:
+                skipped_windows += 1
+                continue
+
+            peak_started_at = perf_counter()
+            peak_indices, _ = find_peaks(spectrum)
+            safe_freq = max(float(freq_in), 1e-3)
+            if len(peak_indices) > 0:
+                peak_freqs = frequencies[peak_indices]
+                log_distances = np.abs(np.log2(peak_freqs / safe_freq))
+                closest_idx = peak_indices[int(np.argmin(log_distances))]
+            else:
+                closest_idx = int(np.argmax(spectrum))
+            peak_elapsed_ms += (perf_counter() - peak_started_at) * 1000.0
+
+            peak_freq = float(frequencies[closest_idx])
+            peak_amp = float(spectrum[closest_idx])
+            normalized_amp = float(np.clip(peak_amp / (normalizer + 1e-8), 0.0, 1.0))
+            distance = abs(time_sec - tile_center_sec)
+            weight = max(1e-6, 1.0 - (distance / tile_half_span))
+
+            accumulated_freq[index] += peak_freq * weight
+            accumulated_amp[index] += normalized_amp * weight
+            accumulated_weight[index] += weight
+
+    points: list[PartialPoint] = []
+    for index, (time_sec, freq_in) in enumerate(trace_points):
+        weight = float(accumulated_weight[index])
+        if weight <= 0.0:
+            points.append(PartialPoint(time=time_sec, freq=float(freq_in), amp=0.0))
+            continue
+        points.append(
+            PartialPoint(
+                time=time_sec,
+                freq=float(accumulated_freq[index] / weight),
+                amp=float(np.clip(accumulated_amp[index] / weight, 0.0, 1.0)),
+            )
+        )
+
+    if metrics is not None:
+        metrics.update(
+            {
+                "trace_points_in": int(trace_count),
+                "trace_points_resampled": int(len(trace_points)),
+                "snap_points_out": int(len(points)),
+                "skipped_windows": int(skipped_windows),
+                "tiles": int(len(tile_ranges)),
+                "tile_duration_sec": float(tile_duration_sec),
+                "tile_overlap_ratio": float(tile_overlap_ratio),
+                "cwt_calls": int(cwt_calls),
+                "resample_ms": float(resample_ms),
+                "cwt_ms": float(cwt_elapsed_ms),
+                "peak_ms": float(peak_elapsed_ms),
+                "total_ms": float((perf_counter() - total_started_at) * 1000.0),
+            }
+        )
+    return points
+
+
+def _snap_trace_pointwise(
+    audio: np.ndarray,
+    sample_rate: int,
+    settings: AnalysisSettings,
+    trace_points: list[tuple[float, float]],
+    window_ms: float,
+    freq_window_octaves: float,
+    amp_reference: float | None,
+    trace_count: int,
+    resample_ms: float,
+    total_started_at: float,
+    metrics: dict[str, float | int] | None,
+) -> list[PartialPoint]:
     window_samples = int(sample_rate * window_ms / 1000.0)
     window_samples = max(32, window_samples)
     half_window = window_samples // 2
 
     points: list[PartialPoint] = []
+    cwt_calls = 0
+    skipped_windows = 0
+    cwt_elapsed_ms = 0.0
+    peak_elapsed_ms = 0.0
     for time_sec, freq_in in trace_points:
         center = int(time_sec * sample_rate)
         start = max(0, center - half_window)
         end = min(audio.shape[0], center + half_window)
         window = audio[start:end]
         if window.size < 32:
+            skipped_windows += 1
             continue
 
         window = _to_float32(window)
@@ -577,6 +826,7 @@ def snap_trace(
             )
         )
 
+        cwt_started_at = perf_counter()
         magnitude = _cwt_magnitude(
             window,
             sample_rate,
@@ -584,21 +834,23 @@ def snap_trace(
             wavelet_bandwidth=settings.wavelet_bandwidth,
             wavelet_center_freq=settings.wavelet_center_freq,
         )
+        cwt_elapsed_ms += (perf_counter() - cwt_started_at) * 1000.0
+        cwt_calls += 1
         center_idx = min(magnitude.shape[1] - 1, window.shape[0] // 2)
         spectrum = magnitude[:, center_idx]
         if spectrum.size == 0:
             continue
 
-        # 局所最大を探す（左右の近傍より大きいピーク）。
+        peak_started_at = perf_counter()
         peak_indices, _ = find_peaks(spectrum)
+        safe_freq = max(float(freq_in), 1e-3)
         if len(peak_indices) > 0:
-            # 対数周波数空間で freq_in に最も近いピークを選ぶ。
             peak_freqs = frequencies[peak_indices]
-            log_distances = np.abs(np.log2(peak_freqs / freq_in))
+            log_distances = np.abs(np.log2(peak_freqs / safe_freq))
             closest_idx = peak_indices[int(np.argmin(log_distances))]
         else:
-            # フォールバック: 局所最大がなければ全体最大を使う。
             closest_idx = int(np.argmax(spectrum))
+        peak_elapsed_ms += (perf_counter() - peak_started_at) * 1000.0
         peak_freq = float(frequencies[closest_idx])
         peak_amp = float(spectrum[closest_idx])
         window_max = float(np.max(magnitude))
@@ -607,6 +859,23 @@ def snap_trace(
         normalized_amp = float(np.clip(peak_amp / (normalizer + 1e-8), 0.0, 1.0))
         points.append(PartialPoint(time=time_sec, freq=peak_freq, amp=normalized_amp))
 
+    if metrics is not None:
+        metrics.update(
+            {
+                "trace_points_in": int(trace_count),
+                "trace_points_resampled": int(len(trace_points)),
+                "snap_points_out": int(len(points)),
+                "skipped_windows": int(skipped_windows),
+                "tiles": 0,
+                "tile_duration_sec": 0.0,
+                "tile_overlap_ratio": 0.0,
+                "cwt_calls": int(cwt_calls),
+                "resample_ms": float(resample_ms),
+                "cwt_ms": float(cwt_elapsed_ms),
+                "peak_ms": float(peak_elapsed_ms),
+                "total_ms": float((perf_counter() - total_started_at) * 1000.0),
+            }
+        )
     return points
 
 

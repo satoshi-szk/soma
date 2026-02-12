@@ -185,13 +185,14 @@ def _snap_worker_fn(
 
     try:
         logger.debug("Snap worker started: %s", request_id[:8])
-
+        metrics: dict[str, float | int] = {}
         points = snap_trace(
             audio=params.audio,
             sample_rate=params.sample_rate,
             settings=params.settings,
             trace=params.trace,
             amp_reference=params.amp_reference,
+            metrics=metrics,
         )
         if params.time_offset_sec:
             points = [
@@ -202,6 +203,26 @@ def _snap_worker_fn(
                 )
                 for point in points
             ]
+        logger.info(
+            (
+                "Snap worker metrics: id=%s total_ms=%.2f resample_ms=%.2f cwt_ms=%.2f "
+                "peak_ms=%.2f cwt_calls=%d tiles=%d tile_sec=%.2f overlap=%.2f "
+                "trace_in=%d trace_resampled=%d points_out=%d skipped_windows=%d"
+            ),
+            request_id[:8],
+            float(metrics.get("total_ms", 0.0)),
+            float(metrics.get("resample_ms", 0.0)),
+            float(metrics.get("cwt_ms", 0.0)),
+            float(metrics.get("peak_ms", 0.0)),
+            int(metrics.get("cwt_calls", 0)),
+            int(metrics.get("tiles", 0)),
+            float(metrics.get("tile_duration_sec", 0.0)),
+            float(metrics.get("tile_overlap_ratio", 0.0)),
+            int(metrics.get("trace_points_in", 0)),
+            int(metrics.get("trace_points_resampled", 0)),
+            int(metrics.get("snap_points_out", 0)),
+            int(metrics.get("skipped_windows", 0)),
+        )
 
         result_queue.put(
             {

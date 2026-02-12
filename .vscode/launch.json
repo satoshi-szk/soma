@@ -1,0 +1,35 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Frontend: Vite dev server",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "npm run dev",
+      "cwd": "${workspaceFolder}/frontend"
+    },
+    {
+      "name": "Backend: SOMA (dev)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "soma",
+      "cwd": "${workspaceFolder}",
+      "env": {
+        "SOMA_DEV": "1",
+        "SOMA_DEV_SERVER_URL": "http://localhost:5173"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": true
+    }
+  ],
+  "compounds": [
+    {
+      "name": "SOMA: Dev (Frontend + Backend)",
+      "configurations": [
+        "Frontend: Vite dev server",
+        "Backend: SOMA (dev)"
+      ],
+      "stopAll": true
+    }
+  ]
+}
