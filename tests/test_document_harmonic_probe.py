@@ -23,7 +23,11 @@ def _make_session_and_playback(
     session.audio_data = np.zeros(int(sample_rate * duration_sec), dtype=np.float32)
     session.synth.reset(sample_rate=sample_rate, duration_sec=duration_sec)
     playback = PlaybackService(session)
-    HistoryService(session, on_settings_applied=lambda: None, on_partials_changed=playback.invalidate_cache)
+    history = HistoryService(session)
+    history.set_callbacks(
+        on_settings_applied=lambda: None,
+        on_partials_changed=playback.invalidate_cache,
+    )
     return session, playback
 
 

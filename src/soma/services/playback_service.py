@@ -5,12 +5,11 @@ import threading
 import numpy as np
 
 from soma.audio_utils import peak_normalize_buffer, time_stretch_pitch_preserving
+from soma.constants import MIDI_CC_UPDATE_RATE_OPTIONS_HZ
 from soma.exporter import MidiExportSettings, build_midi_for_playback
 from soma.models import Partial, PlaybackSettings
 from soma.services.document_utils import partial_sample_at_time
 from soma.session import ProjectSession
-
-_MIDI_CC_UPDATE_RATE_OPTIONS_HZ = (50, 100, 200, 400, 800)
 
 
 class PlaybackService:
@@ -62,7 +61,7 @@ class PlaybackService:
         self._session._midi_amplitude_curve = settings.midi_amplitude_curve
         requested_cc_rate = int(settings.midi_cc_update_rate_hz)
         self._session._midi_cc_update_rate_hz = min(
-            _MIDI_CC_UPDATE_RATE_OPTIONS_HZ,
+            MIDI_CC_UPDATE_RATE_OPTIONS_HZ,
             key=lambda rate: abs(rate - requested_cc_rate),
         )
         self._session._midi_bpm = max(1.0, float(settings.midi_bpm))
@@ -541,3 +540,6 @@ class PlaybackService:
 
     def partials(self) -> list[Partial]:
         return self._session.store.all()
+
+    def mix_buffer(self, mix_ratio: float) -> np.ndarray:
+        return self._mix_buffer(mix_ratio)

@@ -37,42 +37,9 @@ class ProjectService:
 
     def new_project(self) -> None:
         self._preview.cancel_all()
-
-        self._session.audio_info = None
-        self._session.audio_data = None
-        self._session.settings = AnalysisSettings()
-        self._session.preview = None
-        self._session._amp_reference = None
-        self._session._stft_amp_reference = None
-        self._session._snap_amp_reference = None
-        self._session.store = type(self._session.store)()
-        self._session.project_path = None
-        self._session.source_info = None
         self._history.clear()
-        self._session.synth.reset(sample_rate=44100, duration_sec=0.0)
-        self._session._viewport_request_id = None
-        self._session._viewport_preview = None
-        self._session._active_snap_request_id = None
-        self._session._active_snap_trace = None
-        self._session._queued_snaps = []
-        self._session._playback_mode = None
-        self._session._playback_output_mode = "audio"
-        self._session._playback_speed_ratio = 1.0
-        self._session._is_preparing_playback = False
-        self._session._pending_playback_position_sec = 0.0
-        self._session._playback_prepare_request_id += 1
+        self._session.reset_for_new_project()
         self._playback.invalidate_cache()
-        self._session._last_mix_ratio = 0.55
-        self._session._last_speed_ratio = 1.0
-        self._session._last_time_stretch_mode = "librosa"
-        self._session._midi_mode = "mpe"
-        self._session._midi_output_name = ""
-        self._session._midi_pitch_bend_range = 48
-        self._session._midi_amplitude_mapping = "cc74"
-        self._session._midi_amplitude_curve = "linear"
-        self._session._midi_cc_update_rate_hz = 400
-        self._session._midi_bpm = 120.0
-        self._playback.set_master_volume(1.0)
 
     def load_audio(
         self,
@@ -83,24 +50,18 @@ class ProjectService:
         from soma.analysis import load_audio
 
         info, audio = load_audio(path, max_duration_sec=max_duration_sec, display_name=display_name)
-        self._session.audio_info = info
-        self._session.audio_data = audio
-        self._session.source_info = SourceInfo(
+        source_info = SourceInfo(
             file_path=info.path,
             sample_rate=info.sample_rate,
             duration_sec=info.duration_sec,
             md5_hash=compute_md5(path),
         )
-        self._session.preview = None
-        self._session._amp_reference = None
-        self._session._stft_amp_reference = None
-        self._session._snap_amp_reference = None
-        self._session.preview_state = "idle"
-        self._session.preview_error = None
-        self._session.synth.reset(sample_rate=info.sample_rate, duration_sec=info.duration_sec)
-        self._session.player.load(self._playback._mix_buffer(0.5), info.sample_rate)
-        self._session.midi_player.stop()
-        self._session._playback_mode = None
+        self._session.apply_loaded_audio(
+            info=info,
+            audio=audio,
+            source_info=source_info,
+            initial_mix_buffer=self._playback.mix_buffer(0.5),
+        )
         self._playback.invalidate_cache()
         return info
 

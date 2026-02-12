@@ -37,7 +37,11 @@ class _QueueCaptureComputeManager(_CaptureComputeManager):
 def _make_preview_with_audio() -> tuple[ProjectSession, PreviewService, np.ndarray, _CaptureComputeManager]:
     session = ProjectSession()
     playback = PlaybackService(session)
-    history = HistoryService(session, on_settings_applied=lambda: None, on_partials_changed=playback.invalidate_cache)
+    history = HistoryService(session)
+    history.set_callbacks(
+        on_settings_applied=lambda: None,
+        on_partials_changed=playback.invalidate_cache,
+    )
     preview = PreviewService(session, history, on_partials_changed=playback.invalidate_cache)
 
     audio = np.linspace(-1.0, 1.0, 1000, dtype=np.float32)
@@ -97,7 +101,11 @@ def test_snap_partial_async_queues_latest_request(monkeypatch) -> None:  # type:
         truncated=False,
     )
     playback = PlaybackService(session)
-    history = HistoryService(session, on_settings_applied=lambda: None, on_partials_changed=playback.invalidate_cache)
+    history = HistoryService(session)
+    history.set_callbacks(
+        on_settings_applied=lambda: None,
+        on_partials_changed=playback.invalidate_cache,
+    )
     preview = PreviewService(session, history, on_partials_changed=playback.invalidate_cache)
     manager = _QueueCaptureComputeManager()
     preview._compute_manager = manager  # type: ignore[assignment]

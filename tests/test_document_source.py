@@ -29,8 +29,8 @@ def test_save_project_bundles_temporary_source(tmp_path: Path) -> None:
 
         session = ProjectSession()
         playback = PlaybackService(session)
-        history = HistoryService(
-            session,
+        history = HistoryService(session)
+        history.set_callbacks(
             on_settings_applied=lambda: None,
             on_partials_changed=playback.invalidate_cache,
         )

@@ -13,7 +13,11 @@ def _partial(partial_id: str, times: list[float]) -> Partial:
 def _stack() -> tuple[ProjectSession, HistoryService, PartialEditService, PlaybackService]:
     session = ProjectSession()
     playback = PlaybackService(session)
-    history = HistoryService(session, on_settings_applied=lambda: None, on_partials_changed=playback.invalidate_cache)
+    history = HistoryService(session)
+    history.set_callbacks(
+        on_settings_applied=lambda: None,
+        on_partials_changed=playback.invalidate_cache,
+    )
     partial_edit = PartialEditService(session, history, on_partials_changed=playback.invalidate_cache)
     return session, history, partial_edit, playback
 

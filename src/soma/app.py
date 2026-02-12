@@ -46,6 +46,7 @@ from soma.api_schema import (
     parse_payload,
 )
 from soma.cache_server import PreviewCacheServer
+from soma.constants import MIDI_CC_UPDATE_RATE_OPTIONS_HZ
 from soma.exporter import (
     AudioExportSettings,
     MonophonicExportSettings,
@@ -70,7 +71,6 @@ _frontend_log_lock = threading.Lock()
 _frontend_event_lock = threading.Lock()
 _preview_cache: PreviewCacheConfig | None = None
 _preview_cache_server: PreviewCacheServer | None = None
-_MIDI_CC_UPDATE_RATE_OPTIONS_HZ = (50, 100, 200, 400, 800)
 
 
 def _dispatch_frontend_event(payload: dict[str, Any]) -> None:
@@ -149,26 +149,18 @@ def _validated_payload[PayloadT: PayloadBase](
 
 
 class SomaApi:
-    def _on_settings_applied(self) -> None:
-        if hasattr(self, "_preview_service"):
-            self._preview_service.start_preview_async()
-
-    def _on_partials_changed(self) -> None:
-        if hasattr(self, "_playback_service"):
-            self._playback_service.invalidate_cache()
-
     def __init__(self) -> None:
         self._session = ProjectSession(event_sink=_dispatch_frontend_event)
         self._playback_service = PlaybackService(self._session)
-        self._history_service = HistoryService(
-            self._session,
-            on_settings_applied=self._on_settings_applied,
-            on_partials_changed=self._on_partials_changed,
-        )
+        self._history_service = HistoryService(self._session)
         self._preview_service = PreviewService(
             self._session,
             self._history_service,
-            on_partials_changed=self._on_partials_changed,
+            on_partials_changed=self._playback_service.invalidate_cache,
+        )
+        self._history_service.set_callbacks(
+            on_settings_applied=self._preview_service.start_preview_async,
+            on_partials_changed=self._playback_service.invalidate_cache,
         )
         self._project_service = ProjectService(
             self._session,
@@ -179,7 +171,7 @@ class SomaApi:
         self._partial_edit_service = PartialEditService(
             self._session,
             self._history_service,
-            on_partials_changed=self._on_partials_changed,
+            on_partials_changed=self._playback_service.invalidate_cache,
         )
         self._last_audio_path: str | None = None
         self._frontend_log_path = get_session_log_dir("soma") / "frontend.log"
@@ -793,7 +785,7 @@ class SomaApi:
             return parsed
         base_cc_rate = self._playback_service.playback_settings().midi_cc_update_rate_hz
         requested_cc_rate = parsed.cc_update_rate_hz if parsed.cc_update_rate_hz is not None else base_cc_rate
-        cc_rate = min(_MIDI_CC_UPDATE_RATE_OPTIONS_HZ, key=lambda rate: abs(rate - int(requested_cc_rate)))
+        cc_rate = min(MIDI_CC_UPDATE_RATE_OPTIONS_HZ, key=lambda rate: abs(rate - int(requested_cc_rate)))
         settings = MpeExportSettings(
             pitch_bend_range=parsed.pitch_bend_range,
             amplitude_mapping=parsed.amplitude_mapping,
@@ -825,7 +817,7 @@ class SomaApi:
             return parsed
         base_cc_rate = self._playback_service.playback_settings().midi_cc_update_rate_hz
         requested_cc_rate = parsed.cc_update_rate_hz if parsed.cc_update_rate_hz is not None else base_cc_rate
-        cc_rate = min(_MIDI_CC_UPDATE_RATE_OPTIONS_HZ, key=lambda rate: abs(rate - int(requested_cc_rate)))
+        cc_rate = min(MIDI_CC_UPDATE_RATE_OPTIONS_HZ, key=lambda rate: abs(rate - int(requested_cc_rate)))
         settings = MultiTrackExportSettings(
             pitch_bend_range=parsed.pitch_bend_range,
             amplitude_mapping=parsed.amplitude_mapping,
@@ -857,7 +849,7 @@ class SomaApi:
             return parsed
         base_cc_rate = self._playback_service.playback_settings().midi_cc_update_rate_hz
         requested_cc_rate = parsed.cc_update_rate_hz if parsed.cc_update_rate_hz is not None else base_cc_rate
-        cc_rate = min(_MIDI_CC_UPDATE_RATE_OPTIONS_HZ, key=lambda rate: abs(rate - int(requested_cc_rate)))
+        cc_rate = min(MIDI_CC_UPDATE_RATE_OPTIONS_HZ, key=lambda rate: abs(rate - int(requested_cc_rate)))
         settings = MonophonicExportSettings(
             pitch_bend_range=parsed.pitch_bend_range,
             amplitude_mapping=parsed.amplitude_mapping,

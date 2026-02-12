@@ -51,16 +51,20 @@ class UndoRedoManager:
 
 
 class HistoryService:
-    def __init__(
+    def __init__(self, session: ProjectSession) -> None:
+        self._session = session
+        self._on_settings_applied: Callable[[], None] = lambda: None
+        self._on_partials_changed: Callable[[], None] = lambda: None
+        self._manager = UndoRedoManager()
+
+    def set_callbacks(
         self,
-        session: ProjectSession,
+        *,
         on_settings_applied: Callable[[], None],
         on_partials_changed: Callable[[], None],
     ) -> None:
-        self._session = session
         self._on_settings_applied = on_settings_applied
         self._on_partials_changed = on_partials_changed
-        self._manager = UndoRedoManager()
 
     def clear(self) -> None:
         self._manager.clear()

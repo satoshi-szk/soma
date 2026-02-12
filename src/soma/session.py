@@ -91,3 +91,64 @@ class ProjectSession:
 
     def emit_spectrogram_error(self, kind: str, message: str) -> None:
         self.emit({"type": "spectrogram_preview_error", "kind": kind, "message": message})
+
+    def reset_for_new_project(self) -> None:
+        self.audio_info = None
+        self.audio_data = None
+        self.settings = AnalysisSettings()
+        self.preview = None
+        self._amp_reference = None
+        self._stft_amp_reference = None
+        self._snap_amp_reference = None
+        self.preview_state = "idle"
+        self.preview_error = None
+        self.store = PartialStore()
+        self.project_path = None
+        self.source_info = None
+        self.synth.reset(sample_rate=44100, duration_sec=0.0)
+        self._preview_request_id = None
+        self._viewport_request_id = None
+        self._viewport_preview = None
+        self._active_snap_request_id = None
+        self._active_snap_trace = None
+        self._queued_snaps = []
+        self._playback_mode = None
+        self._playback_output_mode = "audio"
+        self._playback_speed_ratio = 1.0
+        self._is_preparing_playback = False
+        self._pending_playback_position_sec = 0.0
+        self._playback_prepare_request_id += 1
+        self._last_mix_ratio = 0.55
+        self._last_speed_ratio = 1.0
+        self._last_time_stretch_mode = "librosa"
+        self._midi_mode = "mpe"
+        self._midi_output_name = ""
+        self._midi_pitch_bend_range = 48
+        self._midi_amplitude_mapping = "cc74"
+        self._midi_amplitude_curve = "linear"
+        self._midi_cc_update_rate_hz = 400
+        self._midi_bpm = 120.0
+        self._master_volume = 1.0
+        self.player.set_master_volume(self._master_volume)
+
+    def apply_loaded_audio(
+        self,
+        *,
+        info: AudioInfo,
+        audio: np.ndarray,
+        source_info: SourceInfo,
+        initial_mix_buffer: np.ndarray,
+    ) -> None:
+        self.audio_info = info
+        self.audio_data = audio
+        self.source_info = source_info
+        self.preview = None
+        self._amp_reference = None
+        self._stft_amp_reference = None
+        self._snap_amp_reference = None
+        self.preview_state = "idle"
+        self.preview_error = None
+        self.synth.reset(sample_rate=info.sample_rate, duration_sec=info.duration_sec)
+        self.player.load(initial_mix_buffer, info.sample_rate)
+        self.midi_player.stop()
+        self._playback_mode = None
