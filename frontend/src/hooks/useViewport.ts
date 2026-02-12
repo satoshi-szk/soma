@@ -1,5 +1,4 @@
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, useMemo } from 'react'
-import { ensurePreviewData } from '../app/previewData'
 import { isPywebviewApiAvailable, pywebviewApi } from '../app/pywebviewApi'
 import {
   ZOOM_X_MAX_PX_PER_SEC,
@@ -259,12 +258,7 @@ export function useViewport(preview: SpectrogramPreview | null, settings: Analys
                 reportError('Viewport', result.message ?? 'Failed to request viewport preview')
                 return
               }
-              const resolved = await ensurePreviewData(result.preview)
-              if (!resolved.image_path) {
-                requestedTileKeysRef.current.delete(key)
-                return
-              }
-              upsertViewportPreview(resolved, result.quality === 'high' ? 'high' : 'low')
+              upsertViewportPreview(result.preview, result.quality === 'high' ? 'high' : 'low')
             } catch {
               requestedTileKeysRef.current.delete(key)
             }

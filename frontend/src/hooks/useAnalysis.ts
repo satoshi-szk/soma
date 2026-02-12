@@ -36,11 +36,11 @@ export function useAnalysis(reportError: ReportError) {
     await flushUi()
     try {
       const result = await api.open_audio()
-      if (result.status === 'ok' || result.status === 'processing') {
+      if (result.status === 'ok') {
         setAudioInfo(result.audio)
         setPreview(result.preview ?? null)
         setSettings(result.settings)
-        setAnalysisState(result.status === 'processing' ? 'analyzing' : 'idle')
+        setAnalysisState('idle')
         return {
           audio: result.audio,
           preview: result.preview ?? null,
@@ -85,11 +85,11 @@ export function useAnalysis(reportError: ReportError) {
       await flushUi()
       try {
         const result = await api.open_audio_path({ path })
-        if (result.status === 'ok' || result.status === 'processing') {
+        if (result.status === 'ok') {
           setAudioInfo(result.audio)
           setPreview(result.preview ?? null)
           setSettings(result.settings)
-          setAnalysisState(result.status === 'processing' ? 'analyzing' : 'idle')
+          setAnalysisState('idle')
           return {
             audio: result.audio,
             preview: result.preview ?? null,
@@ -149,11 +149,11 @@ export function useAnalysis(reportError: ReportError) {
           return null
         }
         const result = await api.open_audio_data({ name: file.name, data_base64: base64 })
-        if (result.status === 'ok' || result.status === 'processing') {
+        if (result.status === 'ok') {
           setAudioInfo(result.audio)
           setPreview(result.preview ?? null)
           setSettings(result.settings)
-          setAnalysisState(result.status === 'processing' ? 'analyzing' : 'idle')
+          setAnalysisState('idle')
           return {
             audio: result.audio,
             preview: result.preview ?? null,
@@ -197,15 +197,11 @@ export function useAnalysis(reportError: ReportError) {
     await flushUi()
     try {
       const result = await api.open_project()
-      if (result?.status === 'ok' || result?.status === 'processing') {
+      if (result?.status === 'ok') {
         setAudioInfo(result.audio)
         setPreview(result.preview ?? null)
         setSettings(result.settings)
-        if (result.status === 'processing') {
-          setAnalysisState('analyzing')
-        } else {
-          setAnalysisState('idle')
-        }
+        setAnalysisState('idle')
         return {
           audio: result.audio,
           preview: result.preview ?? null,
@@ -311,11 +307,11 @@ export function useAnalysis(reportError: ReportError) {
       await flushUi()
       try {
         const result = await api.open_project_path({ path })
-        if (result?.status === 'ok' || result?.status === 'processing') {
+        if (result?.status === 'ok') {
           setAudioInfo(result.audio)
           setPreview(result.preview ?? null)
           setSettings(result.settings)
-          setAnalysisState(result.status === 'processing' ? 'analyzing' : 'idle')
+          setAnalysisState('idle')
           return {
             audio: result.audio,
             preview: result.preview ?? null,
@@ -375,10 +371,10 @@ export function useAnalysis(reportError: ReportError) {
       setAnalysisState('analyzing')
       try {
         const result = await api.update_settings(newSettings)
-        if (result.status === 'ok' || result.status === 'processing') {
+        if (result.status === 'ok') {
           setSettings(result.settings)
           setPreview(result.preview ?? null)
-          setAnalysisState(result.status === 'processing' ? 'analyzing' : 'idle')
+          setAnalysisState('idle')
           return true
         } else if (result.status === 'error') {
           reportError('Settings', result.message ?? 'Failed to apply settings')

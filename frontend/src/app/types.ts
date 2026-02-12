@@ -49,8 +49,7 @@ export type PlaybackSettings = {
 export type SpectrogramPreview = {
   width: number
   height: number
-  data: number[]
-  image_path?: string
+  image_path: string
   time_start: number
   time_end: number
   freq_min: number

@@ -210,8 +210,10 @@ class SomaApi:
 
     def _project_load_response(self, info: Any) -> dict[str, Any]:
         preview_payload = self._build_overview_preview()
+        if preview_payload is None:
+            return {"status": "error", "message": "Failed to build overview preview."}
         return {
-            "status": "ok" if preview_payload is not None else "processing",
+            "status": "ok",
             "audio": info.to_dict(),
             "preview": preview_payload,
             "settings": self._session.settings.to_dict(),
@@ -461,8 +463,10 @@ class SomaApi:
         settings = AnalysisSettings(**parsed.model_dump())
         self._project_service.set_settings(settings)
         preview_payload = self._build_overview_preview()
+        if preview_payload is None:
+            return {"status": "error", "message": "Failed to build overview preview."}
         return {
-            "status": "ok" if preview_payload is not None else "processing",
+            "status": "ok",
             "settings": self._session.settings.to_dict(),
             "preview": preview_payload,
         }

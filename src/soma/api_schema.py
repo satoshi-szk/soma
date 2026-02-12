@@ -165,19 +165,6 @@ class OpenProjectPathPayload(PayloadBase):
     path: str
 
 
-class RequestViewportPreviewPayload(PayloadBase):
-    time_start: float
-    time_end: float
-    freq_min: float
-    freq_max: float
-    width: int
-    height: int
-    gain: float | None = None
-    min_db: float | None = None
-    max_db: float | None = None
-    gamma: float | None = None
-
-
 class RequestSpectrogramTilePayload(PayloadBase):
     time_start: float
     time_end: float

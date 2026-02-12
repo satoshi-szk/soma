@@ -48,8 +48,7 @@ const recentProjectSchema = z.object({
 const spectrogramPreviewSchema = z.object({
   width: z.number(),
   height: z.number(),
-  data: z.array(z.number()).optional().default([]),
-  image_path: z.string().optional(),
+  image_path: z.string(),
   time_start: z.number(),
   time_end: z.number(),
   freq_min: z.number(),
@@ -72,7 +71,7 @@ const errorStatusSchema = z.object({ status: z.literal('error'), message: z.stri
 
 const loadResponseSchema = z.union([
   z.object({
-    status: z.enum(['ok', 'processing']),
+    status: z.literal('ok'),
     audio: audioInfoSchema,
     preview: spectrogramPreviewSchema.nullable(),
     settings: analysisSettingsSchema,
@@ -85,7 +84,7 @@ const loadResponseSchema = z.union([
 
 const updateSettingsResponseSchema = z.union([
   z.object({
-    status: z.enum(['ok', 'processing']),
+    status: z.literal('ok'),
     settings: analysisSettingsSchema,
     preview: spectrogramPreviewSchema.nullable(),
   }),
