@@ -9,8 +9,10 @@ const analysisSettingsSchema = z.object({
   preview_bins_per_octave: z.number(),
   wavelet_bandwidth: z.number(),
   wavelet_center_freq: z.number(),
-  brightness: z.number(),
-  contrast: z.number(),
+  gain: z.number(),
+  min_db: z.number(),
+  max_db: z.number(),
+  gamma: z.number(),
 })
 const playbackSettingsSchema = z.object({
   master_volume: z.number(),
@@ -47,8 +49,7 @@ const spectrogramPreviewSchema = z.object({
   width: z.number(),
   height: z.number(),
   data: z.array(z.number()).optional().default([]),
-  data_path: z.string().optional(),
-  data_length: z.number().optional(),
+  image_path: z.string().optional(),
   time_start: z.number(),
   time_end: z.number(),
   freq_min: z.number(),
@@ -272,7 +273,7 @@ export const apiSchemas = {
     }),
     response: z.union([okStatusSchema.extend({ path: z.string(), paths: z.array(z.string()).optional() }), errorStatusSchema]),
   },
-  request_viewport_preview: {
+  request_spectrogram_tile: {
     payload: z.object({
       time_start: z.number(),
       time_end: z.number(),
@@ -280,7 +281,36 @@ export const apiSchemas = {
       freq_max: z.number(),
       width: z.number(),
       height: z.number(),
+      gain: z.number().optional(),
+      min_db: z.number().optional(),
+      max_db: z.number().optional(),
+      gamma: z.number().optional(),
     }),
-    response: z.union([z.object({ status: z.literal('accepted') }), errorStatusSchema]),
+    response: z.union([
+      z.object({
+        status: z.literal('ok'),
+        quality: z.enum(['low', 'high']).optional(),
+        preview: spectrogramPreviewSchema,
+      }),
+      errorStatusSchema,
+    ]),
+  },
+  request_spectrogram_overview: {
+    payload: z.object({
+      width: z.number().optional(),
+      height: z.number().optional(),
+      gain: z.number().optional(),
+      min_db: z.number().optional(),
+      max_db: z.number().optional(),
+      gamma: z.number().optional(),
+    }),
+    response: z.union([
+      z.object({
+        status: z.literal('ok'),
+        quality: z.enum(['low', 'high']).optional(),
+        preview: spectrogramPreviewSchema,
+      }),
+      errorStatusSchema,
+    ]),
   },
 } as const

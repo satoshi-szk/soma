@@ -10,7 +10,7 @@ import {
   RULER_HEIGHT,
   AUTOMATION_LANE_HEIGHT,
 } from '../app/constants'
-import type { SpectrogramPreview } from '../app/types'
+import type { AnalysisSettings, SpectrogramPreview } from '../app/types'
 
 type ViewportParams = {
   timeStart: number
@@ -28,17 +28,12 @@ type ViewportCacheEntry = {
   sourceFreqMax: number
 }
 
-function areParamsSimilar(a: ViewportParams | null, b: ViewportParams): boolean {
-  if (!a) return false
-  const threshold = 0.02
-  const timeDiff = Math.abs(a.timeStart - b.timeStart) + Math.abs(a.timeEnd - b.timeEnd)
-  const freqDiff = Math.abs(a.freqMin - b.freqMin) / b.freqMin + Math.abs(a.freqMax - b.freqMax) / b.freqMax
-  return timeDiff < threshold && freqDiff < threshold
-}
-
 type ReportError = (context: string, message: string) => void
 
-export function useViewport(preview: SpectrogramPreview | null, reportError: ReportError) {
+const buildViewportParamsKey = (params: ViewportParams): string =>
+  [params.timeStart.toFixed(6), params.timeEnd.toFixed(6), params.freqMin.toFixed(3), params.freqMax.toFixed(3)].join('|')
+
+export function useViewport(preview: SpectrogramPreview | null, settings: AnalysisSettings, reportError: ReportError) {
   const [zoomXState, setZoomXState] = useState<number | null>(null)
   const [zoomY, setZoomY] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
@@ -46,16 +41,8 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
   const [viewportCache, setViewportCache] = useState<ViewportCacheEntry[]>([])
   const interactionRef = useRef(false)
   const interactionTimerRef = useRef<number | null>(null)
-  const previewThrottleRef = useRef<{
-    lastApplied: number
-    timerId: number | null
-    pending: SpectrogramPreview | null
-    pendingQuality: 'low' | 'high'
-    pendingToken: number
-    nextToken: number
-  }>({ lastApplied: 0, timerId: null, pending: null, pendingQuality: 'low', pendingToken: 0, nextToken: 0 })
-  const lastRequestedParams = useRef<ViewportParams | null>(null)
-  const pendingParamsRef = useRef<ViewportParams | null>(null)
+  const requestedTileKeysRef = useRef<Set<string>>(new Set())
+  const pendingParamsRef = useRef<ViewportParams[] | null>(null)
   const lastPreviewId = useRef<string | null>(null)
 
   const baseZoomX = useMemo(() => {
@@ -115,15 +102,13 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
   useLayoutEffect(() => {
     if (currentPreviewId !== lastPreviewId.current) {
       lastPreviewId.current = currentPreviewId
-      lastRequestedParams.current = null
-
-      const state = previewThrottleRef.current
-      if (state.timerId) {
-        window.clearTimeout(state.timerId)
-        state.timerId = null
+      requestedTileKeysRef.current = new Set()
+      const clearTimer = window.setTimeout(() => {
+        setViewportCache([])
+      }, 0)
+      return () => {
+        window.clearTimeout(clearTimer)
       }
-      state.pending = null
-      state.lastApplied = 0
     }
   }, [currentPreviewId])
 
@@ -188,37 +173,90 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
       .map((entry) => entry.preview)
   }, [preview, zoomX, zoomY, viewportCache, baseZoomX])
 
+  const upsertViewportPreview = useCallback(
+    (resolved: SpectrogramPreview, quality: 'low' | 'high') => {
+      if (!preview) return
+      const entry: ViewportCacheEntry = {
+        preview: resolved,
+        quality,
+        receivedAt: Date.now(),
+        sourceDuration: preview.duration_sec,
+        sourceFreqMin: preview.freq_min,
+        sourceFreqMax: preview.freq_max,
+      }
+      setViewportCache((prev) => {
+        const hasHigh = prev.some(
+          (item) =>
+            item.quality === 'high' &&
+            Math.abs(item.preview.time_start - resolved.time_start) < 0.001 &&
+            Math.abs(item.preview.time_end - resolved.time_end) < 0.001 &&
+            Math.abs(item.preview.freq_min - resolved.freq_min) < 0.1 &&
+            Math.abs(item.preview.freq_max - resolved.freq_max) < 0.1
+        )
+        if (quality === 'low' && hasHigh) {
+          return prev
+        }
+        const filtered =
+          quality === 'high'
+            ? prev.filter(
+                (item) =>
+                  !(
+                    Math.abs(item.preview.time_start - resolved.time_start) < 0.001 &&
+                    Math.abs(item.preview.time_end - resolved.time_end) < 0.001 &&
+                    Math.abs(item.preview.freq_min - resolved.freq_min) < 0.1 &&
+                    Math.abs(item.preview.freq_max - resolved.freq_max) < 0.1
+                  )
+              )
+            : prev
+        const nextItems = [...filtered, entry]
+        const limit = 8
+        if (nextItems.length <= limit) return nextItems
+        return nextItems.slice(nextItems.length - limit)
+      })
+    },
+    [preview]
+  )
+
   const sendViewportRequest = useCallback(
-    async (params: ViewportParams) => {
+    async (paramsList: ViewportParams[]) => {
       const api = isPywebviewApiAvailable() ? pywebviewApi : null
       if (!api) return
 
-      if (areParamsSimilar(lastRequestedParams.current, params)) {
-        return
-      }
+      for (const params of paramsList) {
+        const key = buildViewportParamsKey(params)
+        if (requestedTileKeysRef.current.has(key)) continue
+        requestedTileKeysRef.current.add(key)
+        const result = await api.request_spectrogram_tile({
+          time_start: params.timeStart,
+          time_end: params.timeEnd,
+          freq_min: params.freqMin,
+          freq_max: params.freqMax,
+          width: 1024,
+          height: Math.round(spectrogramAreaHeight),
+          gain: settings.gain,
+          min_db: settings.min_db,
+          max_db: settings.max_db,
+          gamma: settings.gamma,
+        })
 
-      lastRequestedParams.current = params
-
-      const result = await api.request_viewport_preview({
-        time_start: params.timeStart,
-        time_end: params.timeEnd,
-        freq_min: params.freqMin,
-        freq_max: params.freqMax,
-        width: Math.round(stageSize.width),
-        height: Math.round(spectrogramAreaHeight),
-      })
-
-      if (result.status === 'error') {
-        reportError('Viewport', result.message ?? 'Failed to request viewport preview')
+        if (result.status === 'error') {
+          reportError('Viewport', result.message ?? 'Failed to request viewport preview')
+          continue
+        }
+        const resolved = await ensurePreviewData(result.preview)
+        if (!resolved.image_path) {
+          continue
+        }
+        upsertViewportPreview(resolved, result.quality === 'high' ? 'high' : 'low')
       }
     },
-    [reportError, stageSize.width, spectrogramAreaHeight]
+    [reportError, spectrogramAreaHeight, settings, upsertViewportPreview]
   )
 
   // zoom/pan 変更時に viewport preview を要求する（操作停止後）
   useEffect(() => {
     if (!preview || (zoomX <= baseZoomX && zoomY <= 1)) {
-      lastRequestedParams.current = null
+      requestedTileKeysRef.current = new Set()
       return
     }
 
@@ -239,12 +277,27 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
         Math.min(1, (spectrogramAreaHeight - pan.y) / (spectrogramAreaHeight * zoomY)) * (logMax - logMin)
     )
 
-    pendingParamsRef.current = {
-      timeStart: visibleTimeStart,
-      timeEnd: visibleTimeEnd,
-      freqMin: Math.max(freqMin, visibleFreqMin),
-      freqMax: Math.min(freqMax, visibleFreqMax),
+    const clampedFreqMin = Math.max(freqMin, visibleFreqMin)
+    const clampedFreqMax = Math.min(freqMax, visibleFreqMax)
+    const viewportDuration = Math.max(1e-6, stageSize.width / zoomX)
+    const overscanStart = Math.max(0, visibleTimeStart - viewportDuration)
+    const overscanEnd = Math.min(duration, visibleTimeEnd + viewportDuration)
+    const tileDuration = Math.max(1e-6, 1024 / zoomX)
+    const startTileIndex = Math.floor(overscanStart / tileDuration)
+    const endTileIndex = Math.floor(Math.max(overscanStart, overscanEnd - 1e-9) / tileDuration)
+    const tiles: ViewportParams[] = []
+    for (let tileIndex = startTileIndex; tileIndex <= endTileIndex; tileIndex += 1) {
+      const tileStart = Math.max(0, tileIndex * tileDuration)
+      const tileEnd = Math.min(duration, tileStart + tileDuration)
+      if (tileEnd - tileStart < 1e-6) continue
+      tiles.push({
+        timeStart: tileStart,
+        timeEnd: tileEnd,
+        freqMin: clampedFreqMin,
+        freqMax: clampedFreqMax,
+      })
     }
+    pendingParamsRef.current = tiles
 
     interactionRef.current = true
     if (interactionTimerRef.current) {
@@ -253,10 +306,10 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
     interactionTimerRef.current = window.setTimeout(() => {
       interactionRef.current = false
       const params = pendingParamsRef.current
-      if (params) {
+      if (params && params.length > 0) {
         void sendViewportRequest(params)
       }
-    }, 300)
+    }, 200)
 
     return () => {
       if (interactionTimerRef.current) {
@@ -264,172 +317,6 @@ export function useViewport(preview: SpectrogramPreview | null, reportError: Rep
       }
     }
   }, [zoomX, zoomY, pan, stageSize.width, spectrogramAreaHeight, preview, baseZoomX, sendViewportRequest])
-
-  // viewport preview イベント（push）を購読する
-  useEffect(() => {
-    const cleanupState = previewThrottleRef.current
-    const applyPreview = async (next: SpectrogramPreview, quality: 'low' | 'high', token: number) => {
-      const resolved = await ensurePreviewData(next)
-      const state = previewThrottleRef.current
-      if (state.pendingToken !== token) return
-      if (!preview) {
-        console.warn('[useViewport] applyPreview called but preview is null, skipping')
-        return
-      }
-
-      // 受信した preview が現在ソースと整合するか検証する
-      // 時間範囲が有効な境界内か確認する
-      if (resolved.time_start < 0 || resolved.time_end > preview.duration_sec + 0.01) {
-        console.warn(
-          '[useViewport] Invalid preview time range:',
-          resolved.time_start,
-          '-',
-          resolved.time_end,
-          'vs duration:',
-          preview.duration_sec
-        )
-        return
-      }
-
-      // 安全確認: preview の寸法が妥当か確認する
-      if (resolved.width <= 0 || resolved.height <= 0 || resolved.data.length !== resolved.width * resolved.height) {
-        console.error(
-          '[useViewport] Invalid preview dimensions:',
-          resolved.width,
-          'x',
-          resolved.height,
-          'data length:',
-          resolved.data.length
-        )
-        return
-      }
-
-      const entry: ViewportCacheEntry = {
-        preview: resolved,
-        quality,
-        receivedAt: Date.now(),
-        sourceDuration: preview.duration_sec,
-        sourceFreqMin: preview.freq_min,
-        sourceFreqMax: preview.freq_max,
-      }
-      setViewportCache((prev) => {
-        // 同じ領域の高品質版がすでにある場合は追加しない
-        const hasHigh = prev.some(
-          (item) =>
-            item.quality === 'high' &&
-            Math.abs(item.preview.time_start - resolved.time_start) < 0.001 &&
-            Math.abs(item.preview.time_end - resolved.time_end) < 0.001 &&
-            Math.abs(item.preview.freq_min - resolved.freq_min) < 0.1 &&
-            Math.abs(item.preview.freq_max - resolved.freq_max) < 0.1
-        )
-        if (quality === 'low' && hasHigh) {
-          return prev
-        }
-        // 高品質版を追加する際、同一領域の古いエントリを取り除く
-        const filtered = quality === 'high'
-          ? prev.filter(
-              (item) =>
-                !(
-                  Math.abs(item.preview.time_start - resolved.time_start) < 0.001 &&
-                  Math.abs(item.preview.time_end - resolved.time_end) < 0.001 &&
-                  Math.abs(item.preview.freq_min - resolved.freq_min) < 0.1 &&
-                  Math.abs(item.preview.freq_max - resolved.freq_max) < 0.1
-                )
-            )
-          : prev
-        const nextItems = [...filtered, entry]
-        const limit = 3
-        if (nextItems.length <= limit) return nextItems
-        // 最新のエントリだけを保持する
-        return nextItems.slice(nextItems.length - limit)
-      })
-    }
-
-    const schedulePreview = (next: SpectrogramPreview, quality: 'low' | 'high') => {
-      // スケジュール前に現在の preview と整合するか検証する
-      if (!preview) {
-        console.warn('[useViewport] schedulePreview called but preview is null')
-        return
-      }
-
-      // 受信 preview が現在ソース向けか確認する
-      if (next.time_end > preview.duration_sec + 0.01) {
-        console.warn(
-          '[useViewport] Ignoring stale viewport preview (time_end:',
-          next.time_end,
-          '> duration:',
-          preview.duration_sec,
-          ')'
-        )
-        return
-      }
-
-      if (interactionRef.current) {
-        return
-      }
-
-      const state = previewThrottleRef.current
-      const token = state.nextToken + 1
-      state.nextToken = token
-      state.pending = next
-      state.pendingQuality = quality
-      state.pendingToken = token
-      const now = Date.now()
-      const throttleMs = 1500
-      const elapsed = now - state.lastApplied
-
-      if (elapsed >= throttleMs) {
-        if (state.timerId) {
-          window.clearTimeout(state.timerId)
-          state.timerId = null
-        }
-        state.lastApplied = now
-        void applyPreview(next, quality, token)
-        return
-      }
-
-      if (state.timerId) {
-        return
-      }
-
-      const currentPreviewIdAtSchedule = currentPreviewId
-      state.timerId = window.setTimeout(() => {
-        state.timerId = null
-        // 適用前に preview ソースが変わっていないか再確認する
-        if (state.pending && currentPreviewIdAtSchedule === lastPreviewId.current) {
-          state.lastApplied = Date.now()
-          void applyPreview(state.pending, state.pendingQuality, state.pendingToken)
-        } else if (state.pending) {
-          state.pending = null
-        }
-      }, throttleMs - elapsed)
-    }
-
-    const handler = (event: Event) => {
-      const detail = (event as CustomEvent).detail as unknown
-      if (!detail || typeof detail !== 'object') return
-      const payload = detail as Record<string, unknown>
-      if (payload.type === 'spectrogram_preview_updated' && payload.kind === 'viewport') {
-        const next = payload.preview as SpectrogramPreview | undefined
-        const quality = payload.quality === 'high' ? 'high' : 'low'
-        if (!next) return
-        schedulePreview(next, quality)
-      }
-      if (payload.type === 'spectrogram_preview_error' && payload.kind === 'viewport') {
-        const message = typeof payload.message === 'string' ? payload.message : 'Viewport preview failed.'
-        reportError('Viewport', message)
-      }
-    }
-    window.addEventListener('soma:event', handler)
-    return () => {
-      window.removeEventListener('soma:event', handler)
-      const state = cleanupState
-      if (state.timerId) {
-        window.clearTimeout(state.timerId)
-        state.timerId = null
-      }
-    }
-  }, [preview, currentPreviewId, reportError])
 
   const zoomInX = useCallback(() => {
     setZoomXClamped((value) => value * ZOOM_X_STEP_RATIO)

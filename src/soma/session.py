@@ -36,9 +36,6 @@ class ProjectSession:
         self._logger = logging.getLogger(__name__)
         self._event_sink = event_sink
 
-        self._viewport_request_id: str | None = None
-        self._viewport_preview: SpectrogramPreview | None = None
-        self._preview_request_id: str | None = None
         self._active_snap_request_id: str | None = None
         self._active_snap_trace: list[tuple[float, float]] | None = None
         self._queued_snaps: list[tuple[str, list[tuple[float, float]]]] = []
@@ -69,6 +66,7 @@ class ProjectSession:
         self._midi_amplitude_curve = "linear"
         self._midi_cc_update_rate_hz = 400
         self._midi_bpm = 120.0
+        self._spectrogram_renderer: Any = None
 
     def emit(self, payload: dict[str, Any]) -> None:
         if self._event_sink is None:
@@ -78,21 +76,8 @@ class ProjectSession:
         except Exception:  # pragma: no cover
             self._logger.exception("event_sink failed")
 
-    def emit_spectrogram_preview(self, kind: str, quality: str, final: bool, preview: SpectrogramPreview) -> None:
-        self.emit(
-            {
-                "type": "spectrogram_preview_updated",
-                "kind": kind,
-                "quality": quality,
-                "final": final,
-                "preview": preview.to_dict(),
-            }
-        )
-
-    def emit_spectrogram_error(self, kind: str, message: str) -> None:
-        self.emit({"type": "spectrogram_preview_error", "kind": kind, "message": message})
-
     def reset_for_new_project(self) -> None:
+        self._close_spectrogram_renderer()
         self.audio_info = None
         self.audio_data = None
         self.settings = AnalysisSettings()
@@ -106,9 +91,6 @@ class ProjectSession:
         self.project_path = None
         self.source_info = None
         self.synth.reset(sample_rate=44100, duration_sec=0.0)
-        self._preview_request_id = None
-        self._viewport_request_id = None
-        self._viewport_preview = None
         self._active_snap_request_id = None
         self._active_snap_trace = None
         self._queued_snaps = []
@@ -139,6 +121,7 @@ class ProjectSession:
         source_info: SourceInfo,
         initial_mix_buffer: np.ndarray,
     ) -> None:
+        self._close_spectrogram_renderer()
         self.audio_info = info
         self.audio_data = audio
         self.source_info = source_info
@@ -152,3 +135,13 @@ class ProjectSession:
         self.player.load(initial_mix_buffer, info.sample_rate)
         self.midi_player.stop()
         self._playback_mode = None
+
+    def _close_spectrogram_renderer(self) -> None:
+        renderer = self._spectrogram_renderer
+        if renderer is None:
+            return
+        try:
+            renderer.close()
+        except Exception:
+            self._logger.exception("failed to close spectrogram renderer")
+        self._spectrogram_renderer = None

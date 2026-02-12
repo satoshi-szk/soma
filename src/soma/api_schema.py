@@ -18,8 +18,10 @@ class UpdateSettingsPayload(PayloadBase):
     preview_bins_per_octave: int = 48
     wavelet_bandwidth: float = 8.0
     wavelet_center_freq: float = 1.5
-    brightness: float = 0.0
-    contrast: float = 1.0
+    gain: float = 1.0
+    min_db: float = -80.0
+    max_db: float = 0.0
+    gamma: float = 1.0
 
 
 class TracePartialPayload(PayloadBase):
@@ -170,6 +172,32 @@ class RequestViewportPreviewPayload(PayloadBase):
     freq_max: float
     width: int
     height: int
+    gain: float | None = None
+    min_db: float | None = None
+    max_db: float | None = None
+    gamma: float | None = None
+
+
+class RequestSpectrogramTilePayload(PayloadBase):
+    time_start: float
+    time_end: float
+    freq_min: float
+    freq_max: float
+    width: int
+    height: int
+    gain: float | None = None
+    min_db: float | None = None
+    max_db: float | None = None
+    gamma: float | None = None
+
+
+class RequestSpectrogramOverviewPayload(PayloadBase):
+    width: int = Field(default=2048, ge=16, le=4096)
+    height: int = Field(default=320, ge=16, le=2048)
+    gain: float | None = None
+    min_db: float | None = None
+    max_db: float | None = None
+    gamma: float | None = None
 
 
 def _format_validation_error(exc: ValidationError) -> str:

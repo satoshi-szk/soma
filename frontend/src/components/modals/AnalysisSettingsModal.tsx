@@ -14,8 +14,10 @@ const numericKeys: NumericKey[] = [
   'preview_bins_per_octave',
   'wavelet_bandwidth',
   'wavelet_center_freq',
-  'brightness',
-  'contrast',
+  'gain',
+  'min_db',
+  'max_db',
+  'gamma',
 ]
 
 const toDraft = (settings: AnalysisSettings): DraftSettings => ({
@@ -27,8 +29,10 @@ const toDraft = (settings: AnalysisSettings): DraftSettings => ({
   preview_bins_per_octave: String(settings.preview_bins_per_octave),
   wavelet_bandwidth: String(settings.wavelet_bandwidth),
   wavelet_center_freq: String(settings.wavelet_center_freq),
-  brightness: String(settings.brightness),
-  contrast: String(settings.contrast),
+  gain: String(settings.gain),
+  min_db: String(settings.min_db),
+  max_db: String(settings.max_db),
+  gamma: String(settings.gamma),
 })
 
 const isTransientValue = (value: string) => {
@@ -54,8 +58,10 @@ const helpText: Record<string, string> = {
   freq_max: 'Maximum frequency for display/analysis. Higher values may reduce density.',
   preview_freq_max: 'Upper frequency limit for preview only. Higher values increase render cost.',
   preview_bins_per_octave: 'Frequency resolution for preview. Higher values provide finer detail.',
-  brightness: 'Adjusts overall preview brightness.',
-  contrast: 'Adjusts preview contrast.',
+  gain: 'Linear gain multiplier after dB normalization.',
+  min_db: 'Minimum dB shown (values below are clipped to black).',
+  max_db: 'Maximum dB shown (values above are clipped to white).',
+  gamma: 'Gamma correction for mid-tone balance.',
   bins_per_octave: 'Frequency resolution for snap analysis. Higher values provide finer detail.',
   time_resolution_ms: 'Resampling interval for snap points. Smaller values increase point count.',
   wavelet_bandwidth: 'Higher B sharpens frequency detail but smears time. Typical range: 2-12.',
@@ -234,34 +240,66 @@ export function AnalysisSettingsModal({ settings, onCancel, onApply }: AnalysisS
             </label>
             <label>
               <span className="modal-label-row">
-                Brightness
-                <button type="button" className="modal-help" onClick={() => toggleHelp('brightness')}>
+                Gain
+                <button type="button" className="modal-help" onClick={() => toggleHelp('gain')}>
                   ?
                 </button>
               </span>
-              {helpOpen.brightness ? <span className="modal-help-detail">{helpText.brightness}</span> : null}
+              {helpOpen.gain ? <span className="modal-help-detail">{helpText.gain}</span> : null}
               <input
                 type="text"
                 inputMode="decimal"
-                value={draft.brightness}
-                onChange={(event) => handleNumberChange('brightness', event.target.value)}
-                onBlur={() => handleNumberBlur('brightness')}
+                value={draft.gain}
+                onChange={(event) => handleNumberChange('gain', event.target.value)}
+                onBlur={() => handleNumberBlur('gain')}
               />
             </label>
             <label>
               <span className="modal-label-row">
-                Contrast
-                <button type="button" className="modal-help" onClick={() => toggleHelp('contrast')}>
+                Min dB
+                <button type="button" className="modal-help" onClick={() => toggleHelp('min_db')}>
                   ?
                 </button>
               </span>
-              {helpOpen.contrast ? <span className="modal-help-detail">{helpText.contrast}</span> : null}
+              {helpOpen.min_db ? <span className="modal-help-detail">{helpText.min_db}</span> : null}
               <input
                 type="text"
                 inputMode="decimal"
-                value={draft.contrast}
-                onChange={(event) => handleNumberChange('contrast', event.target.value)}
-                onBlur={() => handleNumberBlur('contrast')}
+                value={draft.min_db}
+                onChange={(event) => handleNumberChange('min_db', event.target.value)}
+                onBlur={() => handleNumberBlur('min_db')}
+              />
+            </label>
+            <label>
+              <span className="modal-label-row">
+                Max dB
+                <button type="button" className="modal-help" onClick={() => toggleHelp('max_db')}>
+                  ?
+                </button>
+              </span>
+              {helpOpen.max_db ? <span className="modal-help-detail">{helpText.max_db}</span> : null}
+              <input
+                type="text"
+                inputMode="decimal"
+                value={draft.max_db}
+                onChange={(event) => handleNumberChange('max_db', event.target.value)}
+                onBlur={() => handleNumberBlur('max_db')}
+              />
+            </label>
+            <label>
+              <span className="modal-label-row">
+                Gamma
+                <button type="button" className="modal-help" onClick={() => toggleHelp('gamma')}>
+                  ?
+                </button>
+              </span>
+              {helpOpen.gamma ? <span className="modal-help-detail">{helpText.gamma}</span> : null}
+              <input
+                type="text"
+                inputMode="decimal"
+                value={draft.gamma}
+                onChange={(event) => handleNumberChange('gamma', event.target.value)}
+                onBlur={() => handleNumberBlur('gamma')}
               />
             </label>
           </div>

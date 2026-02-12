@@ -42,33 +42,6 @@ export const toPartial = (raw: { id: string; is_muted: boolean; color?: string; 
   points: raw.points.map((point) => ({ time: point[0], freq: point[1], amp: point[2] })),
 })
 
-export const mapColor = (value: number): [number, number, number] => {
-  return interpolateColor(
-    value,
-    [
-      [0, 0, 4],
-      [50, 18, 91],
-      [121, 40, 130],
-      [189, 55, 84],
-      [249, 142, 8],
-      [252, 253, 191],
-    ],
-  )
-}
-
-const interpolateColor = (value: number, stops: number[][]): [number, number, number] => {
-  const t = Math.min(1, Math.max(0, value / 255))
-  const scaled = t * (stops.length - 1)
-  const idx = Math.floor(scaled)
-  const frac = scaled - idx
-  const start = stops[idx]
-  const end = stops[Math.min(stops.length - 1, idx + 1)]
-  const r = Math.round(start[0] + (end[0] - start[0]) * frac)
-  const g = Math.round(start[1] + (end[1] - start[1]) * frac)
-  const b = Math.round(start[2] + (end[2] - start[2]) * frac)
-  return [r, g, b]
-}
-
 const midiToNoteParts = (midi: number) => {
   const noteNames = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
   const name = noteNames[((midi % 12) + 12) % 12]

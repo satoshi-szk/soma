@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import io
 import logging
 import time
 import uuid
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
+
+import numpy as np
+from PIL import Image
 
 from soma.models import SpectrogramPreview
 
@@ -42,11 +46,11 @@ def _write_preview_file(
         stamp = int(time.time() * 1000)
         suffix = uuid.uuid4().hex[:8]
         safe_hint = _sanitize_hint(hint)
-        filename = f"{safe_hint}-{stamp}-{suffix}.bin" if safe_hint else f"preview-{stamp}-{suffix}.bin"
+        filename = f"{safe_hint}-{stamp}-{suffix}.jpg" if safe_hint else f"preview-{stamp}-{suffix}.jpg"
         file_path = cache.dir_path / filename
-        file_path.write_bytes(bytes(preview.data))
+        file_path.write_bytes(_render_preview_jpeg(preview))
         _cleanup_cache(cache)
-        data_path = _join_url(cache.url_prefix, filename)
+        image_path = _join_url(cache.url_prefix, filename)
         return {
             "width": preview.width,
             "height": preview.height,
@@ -55,8 +59,8 @@ def _write_preview_file(
             "freq_min": preview.freq_min,
             "freq_max": preview.freq_max,
             "duration_sec": preview.duration_sec,
-            "data_path": data_path,
-            "data_length": len(preview.data),
+            "data": [],
+            "image_path": image_path,
         }
     except Exception:
         logger.exception("failed to write preview cache")
@@ -66,7 +70,7 @@ def _write_preview_file(
 def _cleanup_cache(cache: PreviewCacheConfig) -> None:
     try:
         entries = sorted(
-            (path for path in cache.dir_path.glob("*.bin") if path.is_file()),
+            (path for path in cache.dir_path.glob("*.jpg") if path.is_file()),
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         )
@@ -98,3 +102,43 @@ def _sanitize_hint(value: str | None) -> str:
     cleaned = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "-" for ch in value)
     cleaned = cleaned.strip("-_")
     return cleaned[:40]
+
+
+def _render_preview_jpeg(preview: SpectrogramPreview) -> bytes:
+    if preview.width <= 0 or preview.height <= 0:
+        raise ValueError("invalid preview dimensions")
+    expected = preview.width * preview.height
+    if len(preview.data) != expected:
+        raise ValueError(f"invalid preview data length: expected={expected} got={len(preview.data)}")
+
+    levels = np.asarray(preview.data, dtype=np.uint8).reshape((preview.height, preview.width))
+    rgb = _apply_magma_like_colormap(levels)
+    image = Image.fromarray(rgb, mode="RGB")
+    buffer = io.BytesIO()
+    image.save(buffer, format="JPEG", quality=82, optimize=True)
+    return buffer.getvalue()
+
+
+def _apply_magma_like_colormap(levels: np.ndarray) -> np.ndarray:
+    # Frontend の旧カラーマップに合わせる。
+    stops = np.asarray(
+        [
+            [0, 0, 4],
+            [50, 18, 91],
+            [121, 40, 130],
+            [189, 55, 84],
+            [249, 142, 8],
+            [252, 253, 191],
+        ],
+        dtype=np.float32,
+    )
+
+    t = (levels.astype(np.float32) / 255.0) * float(stops.shape[0] - 1)
+    idx = np.floor(t).astype(np.int32)
+    idx = np.clip(idx, 0, stops.shape[0] - 1)
+    frac = (t - idx.astype(np.float32))[..., None]
+    next_idx = np.minimum(idx + 1, stops.shape[0] - 1)
+    start = stops[idx]
+    end = stops[next_idx]
+    rgb = np.rint(start + (end - start) * frac).astype(np.uint8)
+    return cast(np.ndarray, rgb)

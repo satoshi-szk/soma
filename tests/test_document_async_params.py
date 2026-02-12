@@ -13,15 +13,11 @@ class _CaptureComputeManager:
         self.last_snap_audio: np.ndarray | None = None
         self.last_snap_trace: list[tuple[float, float]] | None = None
         self.last_snap_offset: float | None = None
-        self.last_viewport_audio: np.ndarray | None = None
 
     def submit_snap(self, _request_id: str, params) -> None:  # type: ignore[no-untyped-def]
         self.last_snap_audio = params.audio
         self.last_snap_trace = params.trace
         self.last_snap_offset = params.time_offset_sec
-
-    def submit_viewport(self, _request_id: str, params) -> None:  # type: ignore[no-untyped-def]
-        self.last_viewport_audio = params.audio
 
 
 class _QueueCaptureComputeManager(_CaptureComputeManager):
@@ -70,22 +66,6 @@ def test_snap_partial_async_passes_time_roi_audio() -> None:
     assert np.array_equal(manager.last_snap_audio, audio[:450])
     assert manager.last_snap_trace == [(0.1, 440.0), (0.2, 441.0)]
     assert manager.last_snap_offset == 0.0
-
-
-def test_start_viewport_preview_async_passes_original_audio_reference() -> None:
-    _session, preview, audio, manager = _make_preview_with_audio()
-
-    request_id = preview.start_viewport_preview_async(
-        time_start=0.0,
-        time_end=0.5,
-        freq_min=20.0,
-        freq_max=500.0,
-        width=320,
-        height=200,
-    )
-
-    assert request_id != ""
-    assert manager.last_viewport_audio is audio
 
 
 def test_snap_partial_async_queues_latest_request(monkeypatch) -> None:  # type: ignore[no-untyped-def]

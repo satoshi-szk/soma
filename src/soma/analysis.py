@@ -275,6 +275,7 @@ def make_spectrogram(
     resized = resample(time_resampled, height, axis=0)
     normalized = np.clip(resized, 0.0, 1.0)
     normalized = np.flipud(normalized)
+    normalized = _apply_preview_tone(normalized, settings)
 
     data = (normalized * 255).astype(np.uint8).flatten().tolist()
     return SpectrogramPreview(
@@ -399,6 +400,7 @@ def make_spectrogram_stft(
 
     normalized = _normalize_magnitude_db(resized, reference_max=amp_reference)
     normalized = np.flipud(normalized)
+    normalized = _apply_preview_tone(normalized, settings)
     data = (normalized * 255).astype(np.uint8).flatten().tolist()
     return SpectrogramPreview(
         width=width,
@@ -983,6 +985,38 @@ def _normalize_magnitude_db(magnitude: np.ndarray, reference_max: float | None =
     db = 20.0 * (np.log10(magnitude.astype(np.float64) + eps) - np.log10(max_mag + eps))
     normalized = (db - min_db) / (-min_db)
     return np.asarray(np.clip(normalized, 0.0, 1.0), dtype=np.float32)
+
+
+def _apply_preview_tone(normalized: np.ndarray, settings: AnalysisSettings) -> np.ndarray:
+    gain = float(settings.gain)
+    if not np.isfinite(gain):
+        gain = 1.0
+    gain = max(0.0, gain)
+
+    gamma = float(settings.gamma)
+    if not np.isfinite(gamma) or gamma <= 0.0:
+        gamma = 1.0
+
+    min_db = float(settings.min_db)
+    max_db = float(settings.max_db)
+    if not np.isfinite(min_db):
+        min_db = -80.0
+    if not np.isfinite(max_db):
+        max_db = 0.0
+    if max_db <= min_db:
+        max_db = min_db + 1.0
+
+    default_min_db = -60.0
+    default_max_db = 0.0
+    rel_lo = (min_db - default_min_db) / (default_max_db - default_min_db)
+    rel_hi = (max_db - default_min_db) / (default_max_db - default_min_db)
+    lo = float(np.clip(rel_lo, 0.0, 1.0))
+    hi = float(np.clip(rel_hi, lo + 1e-6, 1.0))
+
+    remapped = (normalized.astype(np.float32) - lo) / (hi - lo)
+    remapped = np.clip(remapped, 0.0, 1.0)
+    adjusted = np.power(remapped, 1.0 / gamma) * gain
+    return np.asarray(np.clip(adjusted, 0.0, 1.0), dtype=np.float32)
 
 
 def _preview_sample_rate(sample_rate: int, freq_max: float) -> int:

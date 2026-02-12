@@ -1,9 +1,9 @@
-"""Multiprocess workers for heavy computation (CWT/STFT).
+"""Multiprocess workers for heavy computation.
 
 This module provides worker management for offloading heavy spectrogram
 computations to separate processes, avoiding GIL contention with the main UI thread.
 
-Invariant: At most 2 worker processes exist at any time (1 viewport + 1 snap).
+Invariant: At most 1 worker process exists at any time (snap).
 """
 
 from __future__ import annotations
@@ -22,30 +22,12 @@ from typing import Any
 
 import numpy as np
 
-from soma.models import AnalysisSettings, PartialPoint, SpectrogramPreview
+from soma.models import AnalysisSettings, PartialPoint
 
 _logger = logging.getLogger(__name__)
 
 # ワーカープロセスのタイムアウト（5分）
 _WORKER_TIMEOUT_SEC = 300.0
-
-
-@dataclass
-class ViewportParams:
-    """Parameters for viewport preview computation."""
-
-    audio: np.ndarray
-    sample_rate: int
-    settings: AnalysisSettings
-    time_start: float
-    time_end: float
-    freq_min: float
-    freq_max: float
-    width: int
-    height: int
-    use_stft: bool  # True は STFT のみ（窓幅 > 5 秒）、False は CWT のみ
-    stft_amp_reference: float | None = None
-    cwt_amp_reference: float | None = None
 
 
 @dataclass
@@ -61,113 +43,12 @@ class SnapParams:
 
 
 @dataclass
-class ViewportResult:
-    """Result from viewport worker."""
-
-    request_id: str
-    quality: str  # 'low' または 'high'
-    preview: SpectrogramPreview
-    amp_reference: float
-    final: bool
-    error: str | None = None
-
-
-@dataclass
 class SnapResult:
     """Result from snap worker."""
 
     request_id: str
     points: list[PartialPoint]
     error: str | None = None
-
-
-def _viewport_worker_fn(
-    request_id: str,
-    params: ViewportParams,
-    result_queue: Queue,  # type: ignore[type-arg]
-    log_dir: str | None,
-    log_name: str,
-) -> None:
-    """Viewport computation worker function (runs in separate process)."""
-    _configure_worker_logging(log_dir, log_name)
-    logger = logging.getLogger(__name__)
-
-    # マルチプロセス時の問題を避けるため、ここで import する。
-    from soma.analysis import make_spectrogram, make_spectrogram_stft
-
-    try:
-        logger.debug("Viewport worker started: %s", request_id[:8])
-
-        if params.use_stft:
-            # STFT 計算（高速・広い時間窓）
-            stft_preview, stft_ref = make_spectrogram_stft(
-                audio=params.audio,
-                sample_rate=params.sample_rate,
-                settings=params.settings,
-                time_start=params.time_start,
-                time_end=params.time_end,
-                freq_min=params.freq_min,
-                freq_max=params.freq_max,
-                width=params.width,
-                height=params.height,
-                amp_reference=params.stft_amp_reference,
-            )
-
-            result_queue.put(
-                {
-                    "type": "viewport",
-                    "request_id": request_id,
-                    "quality": "low",
-                    "preview": stft_preview.to_dict(),
-                    "amp_reference": stft_ref,
-                    "final": True,
-                    "error": None,
-                }
-            )
-            logger.debug("Viewport worker done (STFT only): %s", request_id[:8])
-            return
-
-        # CWT 計算（高品質だが重い）
-        logger.debug("Viewport worker starting CWT: %s", request_id[:8])
-        cwt_preview, cwt_ref = make_spectrogram(
-            audio=params.audio,
-            sample_rate=params.sample_rate,
-            settings=params.settings,
-            time_start=params.time_start,
-            time_end=params.time_end,
-            freq_min=params.freq_min,
-            freq_max=params.freq_max,
-            width=params.width,
-            height=params.height,
-            amp_reference=params.cwt_amp_reference,
-        )
-
-        result_queue.put(
-            {
-                "type": "viewport",
-                "request_id": request_id,
-                "quality": "high",
-                "preview": cwt_preview.to_dict(),
-                "amp_reference": cwt_ref,
-                "final": True,
-                "error": None,
-            }
-        )
-        logger.debug("Viewport worker done (CWT only): %s", request_id[:8])
-
-    except Exception as e:
-        logger.exception("Viewport worker error: %s", request_id[:8])
-        result_queue.put(
-            {
-                "type": "viewport",
-                "request_id": request_id,
-                "quality": "low",
-                "preview": None,
-                "amp_reference": None,
-                "final": True,
-                "error": str(e),
-            }
-        )
 
 
 def _snap_worker_fn(
@@ -488,36 +369,6 @@ class WorkerBase:
             self._monitor_thread.join(timeout=2.0)
 
 
-class ViewportWorker(WorkerBase):
-    """Worker for viewport preview computation."""
-
-    def _worker_type(self) -> str:
-        return "viewport"
-
-    def submit(self, request_id: str, params: ViewportParams) -> None:
-        """Submit new viewport computation (non-blocking)."""
-        _logger.debug("ViewportWorker.submit: %s", request_id[:8])
-        self.request_start(request_id, params)
-
-    def _make_process(self, request_id: str, params: Any) -> Process:
-        return Process(
-            target=_viewport_worker_fn,
-            args=(request_id, params, self._result_queue, self._log_dir, self._log_name),
-            name="soma-viewport-worker",
-        )
-
-    def _error_payload(self, request_id: str, exc: Exception) -> dict[str, Any]:
-        return {
-            "type": "viewport",
-            "request_id": request_id,
-            "quality": "low",
-            "preview": None,
-            "amp_reference": None,
-            "final": True,
-            "error": f"Failed to start worker: {exc}",
-        }
-
-
 class SnapWorker(WorkerBase):
     """Worker for snap trace computation."""
 
@@ -546,34 +397,18 @@ class SnapWorker(WorkerBase):
 
 
 class ComputeManager:
-    """Manages viewport and snap workers.
+    """Manages snap worker."""
 
-    Ensures the invariant: at most 2 worker processes (1 viewport + 1 snap).
-    """
-
-    def __init__(
-        self,
-        viewport_callback: Callable[[dict[str, Any]], None],
-        snap_callback: Callable[[dict[str, Any]], None],
-    ) -> None:
+    def __init__(self, snap_callback: Callable[[dict[str, Any]], None]) -> None:
         from soma.logging_utils import get_session_log_dir
 
         log_dir = str(get_session_log_dir("soma"))
-        self._viewport_worker = ViewportWorker(viewport_callback, log_dir, "soma-worker-viewport.log")
         self._snap_worker = SnapWorker(snap_callback, log_dir, "soma-worker-snap.log")
         _logger.info("ComputeManager initialized")
-
-    def submit_viewport(self, request_id: str, params: ViewportParams) -> None:
-        """Submit viewport preview computation."""
-        self._viewport_worker.submit(request_id, params)
 
     def submit_snap(self, request_id: str, params: SnapParams) -> None:
         """Submit snap trace computation."""
         self._snap_worker.submit(request_id, params)
-
-    def cancel_viewport(self) -> None:
-        """Cancel current viewport computation."""
-        self._viewport_worker.request_cancel()
 
     def cancel_snap(self) -> None:
         """Cancel current snap computation."""
@@ -581,12 +416,7 @@ class ComputeManager:
 
     def cancel_all(self) -> None:
         """Cancel all computations."""
-        self._viewport_worker.request_cancel()
         self._snap_worker.request_cancel()
-
-    def is_viewport_busy(self) -> bool:
-        """Check if viewport worker is busy."""
-        return self._viewport_worker.is_busy()
 
     def is_snap_busy(self) -> bool:
         """Check if snap worker is busy."""
@@ -595,7 +425,6 @@ class ComputeManager:
     def shutdown(self) -> None:
         """Shutdown all workers."""
         _logger.info("ComputeManager shutting down")
-        self._viewport_worker.shutdown()
         self._snap_worker.shutdown()
 
 

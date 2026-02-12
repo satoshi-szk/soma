@@ -1,8 +1,8 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { KonvaEventObject } from 'konva/lib/Node'
 import { AUTOMATION_LANE_HEIGHT, RULER_HEIGHT, ZOOM_X_MAX_PX_PER_SEC, ZOOM_X_MIN_PX_PER_SEC } from '../../../app/constants'
 import type { Partial } from '../../../app/types'
-import { formatNoteWithCents, mapColor } from '../../../app/utils'
+import { formatNoteWithCents } from '../../../app/utils'
 import { freqToY, positionToTime, positionToTimeFreq, timeToX } from './coordinate'
 import { useRulerMetrics } from './useRulerMetrics'
 import { useTraceSelectionInteraction } from './useTraceSelectionInteraction'
@@ -46,31 +46,32 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
   const [isRulerDragging, setIsRulerDragging] = useState(false)
   const automationPadding = { top: 18, bottom: 16 }
 
-  const previewImage = useMemo(() => {
-    if (!preview) return null
-    if (preview.data.length !== preview.width * preview.height) return null
-    const canvas = document.createElement('canvas')
-    canvas.width = preview.width
-    canvas.height = preview.height
-    const ctx = canvas.getContext('2d')
-    if (!ctx) return null
-    const image = ctx.createImageData(preview.width, preview.height)
-    for (let i = 0; i < preview.data.length; i += 1) {
-      const normalized = preview.data[i] / 255
-      const adjusted = Math.min(1, Math.max(0, (normalized - 0.5) * settings.contrast + 0.5 + settings.brightness))
-      const value = Math.round(adjusted * 255)
-      const color = mapColor(value)
-      const offset = i * 4
-      image.data[offset] = color[0]
-      image.data[offset + 1] = color[1]
-      image.data[offset + 2] = color[2]
-      image.data[offset + 3] = 255
+  const [previewImage, setPreviewImage] = useState<HTMLImageElement | null>(null)
+  const [previewImagePath, setPreviewImagePath] = useState<string | null>(null)
+  useEffect(() => {
+    if (!preview?.image_path) return
+    let cancelled = false
+    const image = new window.Image()
+    image.onload = () => {
+      if (!cancelled) {
+        setPreviewImage(image)
+        setPreviewImagePath(preview.image_path ?? null)
+      }
     }
-    ctx.putImageData(image, 0, 0)
-    return canvas
-  }, [preview, settings])
+    image.onerror = () => {
+      if (!cancelled) {
+        setPreviewImage(null)
+        setPreviewImagePath(null)
+      }
+    }
+    image.src = preview.image_path
+    return () => {
+      cancelled = true
+    }
+  }, [preview?.image_path])
+  const displayPreviewImage = previewImagePath === (preview?.image_path ?? null) ? previewImage : null
 
-  const { buildViewportKey, viewportImages } = useViewportImageCache(viewportPreviews, settings)
+  const { buildViewportKey, viewportImages } = useViewportImageCache(viewportPreviews)
 
   const contentOffset = useMemo(() => ({ x: 0, y: RULER_HEIGHT }), [])
   const rulerHeight = contentOffset.y
@@ -490,7 +491,7 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
     tracePathD,
     committedTracePaths,
     selectionBox,
-    previewImage,
+    previewImage: displayPreviewImage,
     viewportImages,
     viewportPositionsByKey,
     contentOffset,

@@ -46,8 +46,10 @@ class AnalysisSettings:
     preview_bins_per_octave: int = 48
     wavelet_bandwidth: float = 8.0
     wavelet_center_freq: float = 1.5
-    brightness: float = 0.0
-    contrast: float = 1.0
+    gain: float = 1.0
+    min_db: float = -80.0
+    max_db: float = 0.0
+    gamma: float = 1.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

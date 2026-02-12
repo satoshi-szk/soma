@@ -67,7 +67,7 @@ function App() {
   const analysis = useAnalysis(reportError)
   const partialsHook = usePartials(reportError)
   const playback = usePlayback(reportError, analysis.analysisState)
-  const viewport = useViewport(analysis.preview, reportError)
+  const viewport = useViewport(analysis.preview, analysis.settings, reportError)
   const { listRecentProjects, newProject, openProject, openProjectPath, saveProject, saveProjectAs } = analysis
 
   type LoadedProjectResult = {
