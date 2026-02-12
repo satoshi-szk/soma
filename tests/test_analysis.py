@@ -321,6 +321,70 @@ def test_snap_trace_resamples_to_time_resolution(monkeypatch: pytest.MonkeyPatch
     assert len(points) == 5
 
 
+def test_snap_trace_tiled_is_close_to_pointwise_on_freq_and_amp() -> None:
+    sample_rate = 12000
+    duration = 3.0
+    t = np.linspace(0.0, duration, int(sample_rate * duration), endpoint=False)
+    freq_curve = 440.0 + 60.0 * np.sin(2.0 * math.pi * 0.7 * t) + 8.0 * np.sin(2.0 * math.pi * 5.0 * t)
+    phase = 2.0 * math.pi * np.cumsum(freq_curve) / sample_rate
+    audio = (0.75 * np.sin(phase)).astype(np.float32)
+    settings = AnalysisSettings(time_resolution_ms=10.0, bins_per_octave=72)
+
+    trace_time = np.arange(0.3, 2.7, settings.time_resolution_ms / 1000.0, dtype=np.float64)
+    trace_freq = 440.0 + 60.0 * np.sin(2.0 * math.pi * 0.7 * trace_time) + 10.0
+    trace = list(zip(trace_time.tolist(), trace_freq.tolist(), strict=True))
+
+    pointwise = snap_trace(
+        audio,
+        sample_rate,
+        settings,
+        trace,
+        tile_duration_sec=0.0,
+        tile_overlap_ratio=0.0,
+    )
+    tiled = snap_trace(
+        audio,
+        sample_rate,
+        settings,
+        trace,
+        tile_duration_sec=0.75,
+        tile_overlap_ratio=0.5,
+    )
+
+    assert len(pointwise) == len(tiled)
+    pointwise_freq = np.asarray([p.freq for p in pointwise], dtype=np.float64)
+    tiled_freq = np.asarray([p.freq for p in tiled], dtype=np.float64)
+    freq_diff = np.abs(pointwise_freq - tiled_freq)
+    assert float(np.median(freq_diff)) < 4.0
+    assert float(np.percentile(freq_diff, 95.0)) < 12.0
+
+    pointwise_amp = np.asarray([p.amp for p in pointwise], dtype=np.float64)
+    tiled_amp = np.asarray([p.amp for p in tiled], dtype=np.float64)
+    amp_diff = np.abs(pointwise_amp - tiled_amp)
+    assert float(np.percentile(amp_diff, 95.0)) < 0.2
+
+
+def test_snap_trace_tiled_boundary_jump_is_controlled() -> None:
+    sample_rate = 12000
+    duration = 4.0
+    t = np.linspace(0.0, duration, int(sample_rate * duration), endpoint=False)
+    freq_curve = 520.0 + 120.0 * np.sin(2.0 * math.pi * 0.4 * t)
+    phase = 2.0 * math.pi * np.cumsum(freq_curve) / sample_rate
+    audio = (0.70 * np.sin(phase)).astype(np.float32)
+    settings = AnalysisSettings(time_resolution_ms=10.0, bins_per_octave=72)
+
+    trace_time = np.arange(0.4, 3.6, settings.time_resolution_ms / 1000.0, dtype=np.float64)
+    trace_freq = 520.0 + 120.0 * np.sin(2.0 * math.pi * 0.4 * trace_time) + 14.0
+    trace = list(zip(trace_time.tolist(), trace_freq.tolist(), strict=True))
+
+    pointwise = snap_trace(audio, sample_rate, settings, trace, tile_duration_sec=0.0, tile_overlap_ratio=0.0)
+    tiled = snap_trace(audio, sample_rate, settings, trace, tile_duration_sec=0.75, tile_overlap_ratio=0.5)
+
+    pointwise_jump = np.abs(np.diff(np.asarray([p.freq for p in pointwise], dtype=np.float64)))
+    tiled_jump = np.abs(np.diff(np.asarray([p.freq for p in tiled], dtype=np.float64)))
+    assert float(np.percentile(tiled_jump, 95.0)) <= float(np.percentile(pointwise_jump, 95.0)) * 1.2 + 3.0
+
+
 def test_cwt_ridge_is_not_too_broad_for_sine() -> None:
     """Guardrail for visualization/peak-finding defaults.
 
