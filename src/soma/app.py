@@ -46,7 +46,6 @@ from soma.api_schema import (
     parse_payload,
 )
 from soma.cache_server import PreviewCacheServer
-from soma.document import SomaDocument
 from soma.exporter import (
     AudioExportSettings,
     MonophonicExportSettings,
@@ -63,6 +62,8 @@ from soma.logging_utils import configure_logging, get_session_log_dir
 from soma.models import AnalysisSettings, PartialPoint, PlaybackSettings, SpectrogramPreview
 from soma.preview_cache import PreviewCacheConfig, build_preview_payload
 from soma.recent_projects import RecentProjectStore, default_recent_projects_path
+from soma.services import HistoryService, PartialEditService, PlaybackService, PreviewService, ProjectService
+from soma.session import ProjectSession
 
 logger = logging.getLogger(__name__)
 _frontend_log_lock = threading.Lock()
@@ -148,14 +149,44 @@ def _validated_payload[PayloadT: PayloadBase](
 
 
 class SomaApi:
+    def _on_settings_applied(self) -> None:
+        if hasattr(self, "_preview_service"):
+            self._preview_service.start_preview_async()
+
+    def _on_partials_changed(self) -> None:
+        if hasattr(self, "_playback_service"):
+            self._playback_service.invalidate_cache()
+
     def __init__(self) -> None:
-        self._doc = SomaDocument(event_sink=_dispatch_frontend_event)
+        self._session = ProjectSession(event_sink=_dispatch_frontend_event)
+        self._playback_service = PlaybackService(self._session)
+        self._history_service = HistoryService(
+            self._session,
+            on_settings_applied=self._on_settings_applied,
+            on_partials_changed=self._on_partials_changed,
+        )
+        self._preview_service = PreviewService(
+            self._session,
+            self._history_service,
+            on_partials_changed=self._on_partials_changed,
+        )
+        self._project_service = ProjectService(
+            self._session,
+            self._history_service,
+            self._playback_service,
+            self._preview_service,
+        )
+        self._partial_edit_service = PartialEditService(
+            self._session,
+            self._history_service,
+            on_partials_changed=self._on_partials_changed,
+        )
         self._last_audio_path: str | None = None
         self._frontend_log_path = get_session_log_dir("soma") / "frontend.log"
         self._recent_projects = RecentProjectStore(default_recent_projects_path(), limit=10)
 
     def _playback_settings_payload(self) -> dict[str, Any]:
-        return self._doc.playback_settings().to_dict()
+        return self._playback_service.playback_settings().to_dict()
 
     def _remember_recent_project(self, path: Path | None) -> None:
         if path is None:
@@ -170,14 +201,14 @@ class SomaApi:
             "status": "processing",
             "audio": info.to_dict(),
             "preview": None,
-            "settings": self._doc.settings.to_dict(),
+            "settings": self._session.settings.to_dict(),
             "playback_settings": self._playback_settings_payload(),
-            "partials": [partial.to_dict() for partial in self._doc.store.all()],
+            "partials": [partial.to_dict() for partial in self._session.store.all()],
         }
 
     def _open_project_from_path(self, path: Path) -> dict[str, Any]:
         try:
-            data = self._doc.load_project(path)
+            data = self._project_service.load_project(path)
         except Exception as exc:  # pragma: no cover
             logger.exception("open_project load failed")
             return {"status": "error", "message": str(exc)}
@@ -193,13 +224,13 @@ class SomaApi:
             return {"status": "error", "message": f"Audio file missing: {audio_path}"}
 
         try:
-            info = self._doc.load_audio(audio_path, max_duration_sec=None)
+            info = self._project_service.load_audio(audio_path, max_duration_sec=None)
         except Exception as exc:  # pragma: no cover
             logger.exception("open_project audio load failed")
             return {"status": "error", "message": str(exc)}
 
-        self._doc.rebuild_resynth()
-        self._doc.start_preview_async()
+        self._playback_service.rebuild_resynth()
+        self._preview_service.start_preview_async()
         self._remember_recent_project(path)
         return self._project_load_response(info)
 
@@ -227,8 +258,8 @@ class SomaApi:
         if duration_check is not None:
             return duration_check
         try:
-            info = self._doc.load_audio(path)
-            self._doc.start_preview_async()
+            info = self._project_service.load_audio(path)
+            self._preview_service.start_preview_async()
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("open_audio failed")
             return {"status": "error", "message": str(exc)}
@@ -238,9 +269,9 @@ class SomaApi:
             "status": "processing",
             "audio": info.to_dict(),
             "preview": None,
-            "settings": self._doc.settings.to_dict(),
+            "settings": self._session.settings.to_dict(),
             "playback_settings": self._playback_settings_payload(),
-            "partials": [partial.to_dict() for partial in self._doc.store.all()],
+            "partials": [partial.to_dict() for partial in self._session.store.all()],
         }
 
     def open_audio_path(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -262,8 +293,8 @@ class SomaApi:
         if duration_check is not None:
             return duration_check
         try:
-            info = self._doc.load_audio(path)
-            self._doc.start_preview_async()
+            info = self._project_service.load_audio(path)
+            self._preview_service.start_preview_async()
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("open_audio_path failed")
             return {"status": "error", "message": str(exc)}
@@ -273,9 +304,9 @@ class SomaApi:
             "status": "processing",
             "audio": info.to_dict(),
             "preview": None,
-            "settings": self._doc.settings.to_dict(),
+            "settings": self._session.settings.to_dict(),
             "playback_settings": self._playback_settings_payload(),
-            "partials": [partial.to_dict() for partial in self._doc.store.all()],
+            "partials": [partial.to_dict() for partial in self._session.store.all()],
         }
 
     def open_audio_data(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -305,8 +336,8 @@ class SomaApi:
                 logger.warning("Failed to remove temp audio file: %s", temp_path)
             return duration_check
         try:
-            info = self._doc.load_audio(temp_path, display_name=parsed.name)
-            self._doc.start_preview_async()
+            info = self._project_service.load_audio(temp_path, display_name=parsed.name)
+            self._preview_service.start_preview_async()
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("open_audio_data failed")
             return {"status": "error", "message": str(exc)}
@@ -316,13 +347,13 @@ class SomaApi:
             "status": "processing",
             "audio": info.to_dict(),
             "preview": None,
-            "settings": self._doc.settings.to_dict(),
+            "settings": self._session.settings.to_dict(),
             "playback_settings": self._playback_settings_payload(),
-            "partials": [partial.to_dict() for partial in self._doc.store.all()],
+            "partials": [partial.to_dict() for partial in self._session.store.all()],
         }
 
     def new_project(self) -> dict[str, Any]:
-        self._doc.new_project()
+        self._project_service.new_project()
         return {"status": "ok", "playback_settings": self._playback_settings_payload()}
 
     def list_recent_projects(self) -> dict[str, Any]:
@@ -368,15 +399,15 @@ class SomaApi:
         return self._open_project_from_path(path)
 
     def save_project(self) -> dict[str, Any]:
-        if self._doc.project_path is None:
+        if self._session.project_path is None:
             return self.save_project_as()
         try:
-            self._doc.save_project(self._doc.project_path)
+            self._project_service.save_project(self._session.project_path)
         except Exception as exc:  # pragma: no cover
             logger.exception("save_project failed")
             return {"status": "error", "message": str(exc)}
-        self._remember_recent_project(self._doc.project_path)
-        return {"status": "ok", "path": str(self._doc.project_path)}
+        self._remember_recent_project(self._session.project_path)
+        return {"status": "ok", "path": str(self._session.project_path)}
 
     def save_project_as(self) -> dict[str, Any]:
         window = webview.windows[0] if webview.windows else None
@@ -394,17 +425,17 @@ class SomaApi:
             return {"status": "cancelled"}
         path = Path(selection)
         try:
-            self._doc.save_project(path)
+            self._project_service.save_project(path)
         except Exception as exc:  # pragma: no cover
             logger.exception("save_project_as failed")
             return {"status": "error", "message": str(exc)}
-        self._remember_recent_project(self._doc.project_path)
-        return {"status": "ok", "path": str(self._doc.project_path)}
+        self._remember_recent_project(self._session.project_path)
+        return {"status": "ok", "path": str(self._session.project_path)}
 
     def reveal_audio_in_explorer(self) -> dict[str, Any]:
-        if self._doc.audio_info is None:
+        if self._session.audio_info is None:
             return {"status": "error", "message": "No audio loaded."}
-        path = Path(self._doc.audio_info.path).expanduser()
+        path = Path(self._session.audio_info.path).expanduser()
         if not path.exists():
             return {"status": "error", "message": "Audio file not found."}
         try:
@@ -419,10 +450,10 @@ class SomaApi:
         if isinstance(parsed, dict):
             return parsed
         settings = AnalysisSettings(**parsed.model_dump())
-        self._doc.set_settings(settings)
+        self._project_service.set_settings(settings)
         return {
             "status": "processing",
-            "settings": self._doc.settings.to_dict(),
+            "settings": self._session.settings.to_dict(),
             "preview": None,
         }
 
@@ -433,7 +464,7 @@ class SomaApi:
             if isinstance(parsed, dict):
                 return parsed
             points = [(point[0], point[1]) for point in parsed.trace]
-            request_id = self._doc.snap_partial_async(points)
+            request_id = self._preview_service.snap_partial_async(points)
             if request_id is None:
                 logger.warning("trace_partial rejected: no audio loaded")
                 return {"status": "error", "message": "No audio loaded."}
@@ -449,8 +480,8 @@ class SomaApi:
                 return parsed
             points = [(point[0], point[1]) for point in parsed.trace]
             radius = parsed.radius_hz
-            self._doc.erase_path(points, radius_hz=radius)
-            return {"status": "ok", "partials": [p.to_dict() for p in self._doc.store.all()]}
+            self._partial_edit_service.erase_path(points, radius_hz=radius)
+            return {"status": "ok", "partials": [p.to_dict() for p in self._session.store.all()]}
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("erase_partial failed")
             return {"status": "error", "message": str(exc)}
@@ -461,7 +492,7 @@ class SomaApi:
             if isinstance(parsed, dict):
                 return parsed
             points = [PartialPoint(time=p[0], freq=p[1], amp=p[2]) for p in parsed.points]
-            partial = self._doc.update_partial_points(parsed.id, points)
+            partial = self._partial_edit_service.update_partial_points(parsed.id, points)
             if partial is None:
                 return {"status": "error", "message": "Partial not found."}
             return {"status": "ok", "partial": partial.to_dict()}
@@ -474,7 +505,7 @@ class SomaApi:
             parsed = _validated_payload(MergePartialsPayload, payload, "merge_partials")
             if isinstance(parsed, dict):
                 return parsed
-            partial = self._doc.merge_partials(parsed.first, parsed.second)
+            partial = self._partial_edit_service.merge_partials(parsed.first, parsed.second)
             if partial is None:
                 return {"status": "error", "message": "Failed to merge partials."}
             return {"status": "ok", "partial": partial.to_dict()}
@@ -487,7 +518,7 @@ class SomaApi:
             parsed = _validated_payload(DeletePartialsPayload, payload, "delete_partials")
             if isinstance(parsed, dict):
                 return parsed
-            self._doc.delete_partials(parsed.ids)
+            self._partial_edit_service.delete_partials(parsed.ids)
             return {"status": "ok"}
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("delete_partials failed")
@@ -498,7 +529,7 @@ class SomaApi:
             parsed = _validated_payload(ToggleMutePayload, payload, "toggle_mute")
             if isinstance(parsed, dict):
                 return parsed
-            partial = self._doc.toggle_mute(parsed.id)
+            partial = self._partial_edit_service.toggle_mute(parsed.id)
             if partial is None:
                 return {"status": "error", "message": "Partial not found."}
             return {"status": "ok", "partial": partial.to_dict()}
@@ -511,7 +542,7 @@ class SomaApi:
             parsed = _validated_payload(HitTestPayload, payload, "hit_test")
             if isinstance(parsed, dict):
                 return parsed
-            result = self._doc.hit_test(parsed.time, parsed.freq, parsed.tolerance)
+            result = self._partial_edit_service.hit_test(parsed.time, parsed.freq, parsed.tolerance)
             return {"status": "ok", "id": result}
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("hit_test failed")
@@ -522,7 +553,7 @@ class SomaApi:
             parsed = _validated_payload(SelectInBoxPayload, payload, "select_in_box")
             if isinstance(parsed, dict):
                 return parsed
-            ids = self._doc.select_in_box(
+            ids = self._partial_edit_service.select_in_box(
                 time_start=parsed.time_start,
                 time_end=parsed.time_end,
                 freq_start=parsed.freq_start,
@@ -535,16 +566,16 @@ class SomaApi:
 
     def undo(self) -> dict[str, Any]:
         try:
-            self._doc.undo()
-            return {"status": "ok", "partials": [p.to_dict() for p in self._doc.store.all()]}
+            self._history_service.undo()
+            return {"status": "ok", "partials": [p.to_dict() for p in self._session.store.all()]}
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("undo failed")
             return {"status": "error", "message": str(exc)}
 
     def redo(self) -> dict[str, Any]:
         try:
-            self._doc.redo()
-            return {"status": "ok", "partials": [p.to_dict() for p in self._doc.store.all()]}
+            self._history_service.redo()
+            return {"status": "ok", "partials": [p.to_dict() for p in self._session.store.all()]}
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("redo failed")
             return {"status": "error", "message": str(exc)}
@@ -554,7 +585,7 @@ class SomaApi:
             parsed = _validated_payload(PlayPayload, payload, "play")
             if isinstance(parsed, dict):
                 return parsed
-            self._doc.play(
+            self._playback_service.play(
                 parsed.mix_ratio,
                 parsed.loop,
                 parsed.start_position_sec,
@@ -571,7 +602,7 @@ class SomaApi:
             parsed = _validated_payload(HarmonicProbePayload, payload, "start_harmonic_probe")
             if isinstance(parsed, dict):
                 return parsed
-            started = self._doc.start_harmonic_probe(parsed.time_sec)
+            started = self._playback_service.start_harmonic_probe(parsed.time_sec)
             if not started:
                 return {"status": "error", "message": "Failed to start harmonic probe."}
             return {"status": "ok"}
@@ -584,7 +615,7 @@ class SomaApi:
             parsed = _validated_payload(HarmonicProbePayload, payload, "update_harmonic_probe")
             if isinstance(parsed, dict):
                 return parsed
-            updated = self._doc.update_harmonic_probe(parsed.time_sec)
+            updated = self._playback_service.update_harmonic_probe(parsed.time_sec)
             if not updated:
                 return {"status": "error", "message": "Failed to update harmonic probe."}
             return {"status": "ok"}
@@ -594,7 +625,7 @@ class SomaApi:
 
     def stop_harmonic_probe(self) -> dict[str, Any]:
         try:
-            self._doc.stop_harmonic_probe()
+            self._playback_service.stop_harmonic_probe()
             return {"status": "ok"}
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("stop_harmonic_probe failed")
@@ -602,7 +633,7 @@ class SomaApi:
 
     def pause(self) -> dict[str, Any]:
         try:
-            self._doc.pause()
+            self._playback_service.pause()
             return {"status": "ok"}
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("pause failed")
@@ -614,7 +645,7 @@ class SomaApi:
             parsed = _validated_payload(StopPayload, stop_payload, "stop")
             if isinstance(parsed, dict):
                 return parsed
-            self._doc.stop(parsed.return_position_sec)
+            self._playback_service.stop(parsed.return_position_sec)
             return {"status": "ok"}
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("stop failed")
@@ -625,7 +656,7 @@ class SomaApi:
             parsed = _validated_payload(MasterVolumePayload, payload, "set_master_volume")
             if isinstance(parsed, dict):
                 return parsed
-            master_volume = self._doc.set_master_volume(parsed.master_volume)
+            master_volume = self._playback_service.set_master_volume(parsed.master_volume)
             return {"status": "ok", "master_volume": master_volume}
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("set_master_volume failed")
@@ -636,7 +667,7 @@ class SomaApi:
             parsed = _validated_payload(UpdatePlaybackMixPayload, payload, "update_playback_mix")
             if isinstance(parsed, dict):
                 return parsed
-            updated = self._doc.update_mix_ratio(parsed.mix_ratio)
+            updated = self._playback_service.update_mix_ratio(parsed.mix_ratio)
             if not updated:
                 return {"status": "error", "message": "Playback mix update is not available now."}
             return {"status": "ok"}
@@ -645,8 +676,8 @@ class SomaApi:
             return {"status": "error", "message": str(exc)}
 
     def list_midi_outputs(self) -> dict[str, Any]:
-        outputs = self._doc.midi_outputs()
-        error = self._doc.midi_player.last_list_outputs_error()
+        outputs = self._playback_service.midi_outputs()
+        error = self._playback_service.last_list_outputs_error()
         return {"status": "ok", "outputs": outputs, "error": error}
 
     def update_playback_settings(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -654,8 +685,8 @@ class SomaApi:
             parsed = _validated_payload(UpdatePlaybackSettingsPayload, payload, "update_playback_settings")
             if isinstance(parsed, dict):
                 return parsed
-            current = self._doc.playback_settings()
-            updated = self._doc.update_playback_settings(
+            current = self._playback_service.playback_settings()
+            updated = self._playback_service.update_playback_settings(
                 PlaybackSettings(
                     master_volume=current.master_volume,
                     output_mode=parsed.output_mode if parsed.output_mode is not None else current.output_mode,
@@ -697,14 +728,14 @@ class SomaApi:
             return {"status": "error", "message": str(exc)}
 
     def playback_state(self) -> dict[str, Any]:
-        return {"status": "ok", "position": self._doc.playback_position()}
+        return {"status": "ok", "position": self._playback_service.playback_position()}
 
     def request_viewport_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
         try:
             parsed = _validated_payload(RequestViewportPreviewPayload, payload, "request_viewport_preview")
             if isinstance(parsed, dict):
                 return parsed
-            request_id = self._doc.start_viewport_preview_async(
+            request_id = self._preview_service.start_viewport_preview_async(
                 time_start=parsed.time_start,
                 time_end=parsed.time_end,
                 freq_min=parsed.freq_min,
@@ -732,17 +763,17 @@ class SomaApi:
     def status(self) -> dict[str, Any]:
         return {
             "status": "ok",
-            "is_playing": self._doc.is_playing(),
-            "is_probe_playing": self._doc.is_probe_playing(),
-            "is_preparing_playback": self._doc.is_preparing_playback(),
-            "is_resynthesizing": self._doc.is_resynthesizing(),
-            "position": self._doc.playback_position(),
-            "master_volume": self._doc.master_volume(),
+            "is_playing": self._playback_service.is_playing(),
+            "is_probe_playing": self._playback_service.is_probe_playing(),
+            "is_preparing_playback": self._playback_service.is_preparing_playback(),
+            "is_resynthesizing": self._playback_service.is_resynthesizing(),
+            "position": self._playback_service.playback_position(),
+            "master_volume": self._playback_service.master_volume(),
             "playback_settings": self._playback_settings_payload(),
         }
 
     def export_mpe(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self._doc.audio_info is None:
+        if self._session.audio_info is None:
             return {"status": "error", "message": "No audio loaded."}
         window = webview.windows[0] if webview.windows else None
         if window is None:
@@ -760,7 +791,7 @@ class SomaApi:
         parsed = _validated_payload(ExportMpePayload, payload, "export_mpe")
         if isinstance(parsed, dict):
             return parsed
-        base_cc_rate = self._doc.playback_settings().midi_cc_update_rate_hz
+        base_cc_rate = self._playback_service.playback_settings().midi_cc_update_rate_hz
         requested_cc_rate = parsed.cc_update_rate_hz if parsed.cc_update_rate_hz is not None else base_cc_rate
         cc_rate = min(_MIDI_CC_UPDATE_RATE_OPTIONS_HZ, key=lambda rate: abs(rate - int(requested_cc_rate)))
         settings = MpeExportSettings(
@@ -770,11 +801,11 @@ class SomaApi:
             cc_update_rate_hz=cc_rate,
             bpm=parsed.bpm,
         )
-        paths = export_mpe(self._doc.store.all(), Path(selection), settings)
+        paths = export_mpe(self._session.store.all(), Path(selection), settings)
         return {"status": "ok", "paths": [str(p) for p in paths]}
 
     def export_multitrack_midi(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self._doc.audio_info is None:
+        if self._session.audio_info is None:
             return {"status": "error", "message": "No audio loaded."}
         window = webview.windows[0] if webview.windows else None
         if window is None:
@@ -792,7 +823,7 @@ class SomaApi:
         parsed = _validated_payload(ExportMultiTrackMidiPayload, payload, "export_multitrack_midi")
         if isinstance(parsed, dict):
             return parsed
-        base_cc_rate = self._doc.playback_settings().midi_cc_update_rate_hz
+        base_cc_rate = self._playback_service.playback_settings().midi_cc_update_rate_hz
         requested_cc_rate = parsed.cc_update_rate_hz if parsed.cc_update_rate_hz is not None else base_cc_rate
         cc_rate = min(_MIDI_CC_UPDATE_RATE_OPTIONS_HZ, key=lambda rate: abs(rate - int(requested_cc_rate)))
         settings = MultiTrackExportSettings(
@@ -802,11 +833,11 @@ class SomaApi:
             cc_update_rate_hz=cc_rate,
             bpm=parsed.bpm,
         )
-        paths = export_multitrack_midi(self._doc.store.all(), Path(selection), settings)
+        paths = export_multitrack_midi(self._session.store.all(), Path(selection), settings)
         return {"status": "ok", "paths": [str(p) for p in paths]}
 
     def export_monophonic_midi(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self._doc.audio_info is None:
+        if self._session.audio_info is None:
             return {"status": "error", "message": "No audio loaded."}
         window = webview.windows[0] if webview.windows else None
         if window is None:
@@ -824,7 +855,7 @@ class SomaApi:
         parsed = _validated_payload(ExportMonophonicMidiPayload, payload, "export_monophonic_midi")
         if isinstance(parsed, dict):
             return parsed
-        base_cc_rate = self._doc.playback_settings().midi_cc_update_rate_hz
+        base_cc_rate = self._playback_service.playback_settings().midi_cc_update_rate_hz
         requested_cc_rate = parsed.cc_update_rate_hz if parsed.cc_update_rate_hz is not None else base_cc_rate
         cc_rate = min(_MIDI_CC_UPDATE_RATE_OPTIONS_HZ, key=lambda rate: abs(rate - int(requested_cc_rate)))
         settings = MonophonicExportSettings(
@@ -834,11 +865,11 @@ class SomaApi:
             cc_update_rate_hz=cc_rate,
             bpm=parsed.bpm,
         )
-        paths = export_monophonic_midi(self._doc.store.all(), Path(selection), settings)
+        paths = export_monophonic_midi(self._session.store.all(), Path(selection), settings)
         return {"status": "ok", "paths": [str(p) for p in paths]}
 
     def export_audio(self, payload: dict[str, Any]) -> dict[str, Any]:
-        if self._doc.audio_info is None:
+        if self._session.audio_info is None:
             return {"status": "error", "message": "No audio loaded."}
         window = webview.windows[0] if webview.windows else None
         if window is None:
@@ -856,7 +887,7 @@ class SomaApi:
         parsed = _validated_payload(ExportAudioPayload, payload, "export_audio")
         if isinstance(parsed, dict):
             return parsed
-        sample_rate = parsed.sample_rate if parsed.sample_rate is not None else self._doc.audio_info.sample_rate
+        sample_rate = parsed.sample_rate if parsed.sample_rate is not None else self._session.audio_info.sample_rate
         settings = AudioExportSettings(
             sample_rate=sample_rate,
             bit_depth=parsed.bit_depth,
@@ -866,20 +897,26 @@ class SomaApi:
             cv_mode=parsed.cv_mode,
             amplitude_curve=parsed.amplitude_curve,
         )
-        buffer = self._doc.synth.get_mix_buffer().astype(np.float32)
-        if settings.sample_rate != self._doc.audio_info.sample_rate:
-            buffer, _ = resample_audio(buffer, self._doc.audio_info.sample_rate, settings.sample_rate)
+        buffer = self._playback_service.synth_mix_buffer()
+        if settings.sample_rate != self._session.audio_info.sample_rate:
+            buffer, _ = resample_audio(buffer, self._session.audio_info.sample_rate, settings.sample_rate)
         if settings.output_type == "cv":
             voice_buffers, amp_min, amp_max = render_cv_voice_buffers(
-                self._doc.store.all(),
+                self._session.store.all(),
                 settings.sample_rate,
-                self._doc.audio_info.duration_sec,
+                self._session.audio_info.duration_sec,
                 settings.cv_mode,
             )
             paths = export_cv_audio(Path(selection), settings, voice_buffers, amp_min, amp_max)
             return {"status": "ok", "path": str(paths[0]), "paths": [str(path) for path in paths]}
         else:
-            export_audio(Path(selection), buffer, settings, self._doc.settings.freq_min, self._doc.settings.freq_max)
+            export_audio(
+                Path(selection),
+                buffer,
+                settings,
+                self._session.settings.freq_min,
+                self._session.settings.freq_max,
+            )
         return {"status": "ok", "path": str(selection)}
 
 

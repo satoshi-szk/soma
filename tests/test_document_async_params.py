@@ -1,8 +1,11 @@
 import numpy as np
 import pytest
 
-from soma.document import SomaDocument
 from soma.models import AudioInfo
+from soma.services.history import HistoryService
+from soma.services.playback_service import PlaybackService
+from soma.services.preview_service import PreviewService
+from soma.session import ProjectSession
 
 
 class _CaptureComputeManager:
@@ -31,11 +34,15 @@ class _QueueCaptureComputeManager(_CaptureComputeManager):
         self.snap_request_ids.append(request_id)
 
 
-def _make_doc_with_audio() -> tuple[SomaDocument, np.ndarray, _CaptureComputeManager]:
-    doc = SomaDocument()
+def _make_preview_with_audio() -> tuple[ProjectSession, PreviewService, np.ndarray, _CaptureComputeManager]:
+    session = ProjectSession()
+    playback = PlaybackService(session)
+    history = HistoryService(session, on_settings_applied=lambda: None, on_partials_changed=playback.invalidate_cache)
+    preview = PreviewService(session, history, on_partials_changed=playback.invalidate_cache)
+
     audio = np.linspace(-1.0, 1.0, 1000, dtype=np.float32)
-    doc.audio_data = audio
-    doc.audio_info = AudioInfo(
+    session.audio_data = audio
+    session.audio_info = AudioInfo(
         path="/tmp/test.wav",
         name="test.wav",
         sample_rate=1000,
@@ -44,14 +51,14 @@ def _make_doc_with_audio() -> tuple[SomaDocument, np.ndarray, _CaptureComputeMan
         truncated=False,
     )
     manager = _CaptureComputeManager()
-    doc._compute_manager = manager  # type: ignore[assignment]
-    return doc, audio, manager
+    preview._compute_manager = manager  # type: ignore[assignment]
+    return session, preview, audio, manager
 
 
 def test_snap_partial_async_passes_time_roi_audio() -> None:
-    doc, audio, manager = _make_doc_with_audio()
+    _session, preview, audio, manager = _make_preview_with_audio()
 
-    request_id = doc.snap_partial_async([(0.1, 440.0), (0.2, 441.0)])
+    request_id = preview.snap_partial_async([(0.1, 440.0), (0.2, 441.0)])
 
     assert request_id is not None
     assert manager.last_snap_audio is not None
@@ -62,9 +69,9 @@ def test_snap_partial_async_passes_time_roi_audio() -> None:
 
 
 def test_start_viewport_preview_async_passes_original_audio_reference() -> None:
-    doc, audio, manager = _make_doc_with_audio()
+    _session, preview, audio, manager = _make_preview_with_audio()
 
-    request_id = doc.start_viewport_preview_async(
+    request_id = preview.start_viewport_preview_async(
         time_start=0.0,
         time_end=0.5,
         freq_min=20.0,
@@ -78,10 +85,10 @@ def test_start_viewport_preview_async_passes_original_audio_reference() -> None:
 
 
 def test_snap_partial_async_queues_latest_request(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    doc = SomaDocument()
+    session = ProjectSession()
     audio = np.linspace(-1.0, 1.0, 1000, dtype=np.float32)
-    doc.audio_data = audio
-    doc.audio_info = AudioInfo(
+    session.audio_data = audio
+    session.audio_info = AudioInfo(
         path="/tmp/test.wav",
         name="test.wav",
         sample_rate=1000,
@@ -89,23 +96,26 @@ def test_snap_partial_async_queues_latest_request(monkeypatch) -> None:  # type:
         channels=1,
         truncated=False,
     )
+    playback = PlaybackService(session)
+    history = HistoryService(session, on_settings_applied=lambda: None, on_partials_changed=playback.invalidate_cache)
+    preview = PreviewService(session, history, on_partials_changed=playback.invalidate_cache)
     manager = _QueueCaptureComputeManager()
-    doc._compute_manager = manager  # type: ignore[assignment]
-    monkeypatch.setattr(doc, "_estimate_snap_amp_reference_for_trace", lambda *_args: 1.0)
+    preview._compute_manager = manager  # type: ignore[assignment]
+    monkeypatch.setattr(preview, "_estimate_snap_amp_reference_for_trace", lambda *_args: 1.0)
 
-    first_id = doc.snap_partial_async([(0.1, 440.0), (0.2, 441.0)])
-    second_id = doc.snap_partial_async([(0.3, 440.0), (0.4, 441.0)])
-    third_id = doc.snap_partial_async([(0.5, 440.0), (0.6, 441.0)])
+    first_id = preview.snap_partial_async([(0.1, 440.0), (0.2, 441.0)])
+    second_id = preview.snap_partial_async([(0.3, 440.0), (0.4, 441.0)])
+    third_id = preview.snap_partial_async([(0.5, 440.0), (0.6, 441.0)])
 
     with pytest.raises(RuntimeError, match="Snap queue is full"):
-        doc.snap_partial_async([(0.7, 440.0), (0.8, 441.0)])
+        preview.snap_partial_async([(0.7, 440.0), (0.8, 441.0)])
 
     assert first_id is not None
     assert second_id is not None
     assert third_id is not None
     assert manager.snap_request_ids == [first_id]
 
-    doc._on_snap_result({"type": "snap", "request_id": first_id, "points": [], "error": "Canceled"})
+    preview._on_snap_result({"type": "snap", "request_id": first_id, "points": [], "error": "Canceled"})
     assert manager.snap_request_ids == [first_id, second_id]
-    doc._on_snap_result({"type": "snap", "request_id": second_id, "points": [], "error": "Canceled"})
+    preview._on_snap_result({"type": "snap", "request_id": second_id, "points": [], "error": "Canceled"})
     assert manager.snap_request_ids == [first_id, second_id, third_id]
