@@ -1,12 +1,18 @@
 import numpy as np
 
-from soma.document import SomaDocument, _partial_sample_at_time
 from soma.models import AudioInfo, Partial, PartialPoint
+from soma.services.document_utils import partial_sample_at_time
+from soma.services.history import HistoryService
+from soma.services.playback_service import PlaybackService
+from soma.session import ProjectSession
 
 
-def _make_doc(sample_rate: int = 48000, duration_sec: float = 1.0) -> SomaDocument:
-    doc = SomaDocument()
-    doc.audio_info = AudioInfo(
+def _make_session_and_playback(
+    sample_rate: int = 48000,
+    duration_sec: float = 1.0,
+) -> tuple[ProjectSession, PlaybackService]:
+    session = ProjectSession()
+    session.audio_info = AudioInfo(
         path="/tmp/test.wav",
         name="test.wav",
         sample_rate=sample_rate,
@@ -14,9 +20,15 @@ def _make_doc(sample_rate: int = 48000, duration_sec: float = 1.0) -> SomaDocume
         channels=1,
         truncated=False,
     )
-    doc.audio_data = np.zeros(int(sample_rate * duration_sec), dtype=np.float32)
-    doc.synth.reset(sample_rate=sample_rate, duration_sec=duration_sec)
-    return doc
+    session.audio_data = np.zeros(int(sample_rate * duration_sec), dtype=np.float32)
+    session.synth.reset(sample_rate=sample_rate, duration_sec=duration_sec)
+    playback = PlaybackService(session)
+    history = HistoryService(session)
+    history.set_callbacks(
+        on_settings_applied=lambda: None,
+        on_partials_changed=playback.invalidate_cache,
+    )
+    return session, playback
 
 
 def test_partial_sample_at_time_interpolates_freq_and_amp() -> None:
@@ -28,7 +40,7 @@ def test_partial_sample_at_time_interpolates_freq_and_amp() -> None:
         ],
     )
 
-    sample = _partial_sample_at_time(partial, 0.25)
+    sample = partial_sample_at_time(partial, 0.25)
 
     assert sample is not None
     freq, amp = sample
@@ -37,7 +49,7 @@ def test_partial_sample_at_time_interpolates_freq_and_amp() -> None:
 
 
 def test_harmonic_probe_tones_returns_active_partials_at_playhead() -> None:
-    doc = _make_doc()
+    session, playback = _make_session_and_playback()
     active = Partial(
         id="active",
         points=[
@@ -60,18 +72,18 @@ def test_harmonic_probe_tones_returns_active_partials_at_playhead() -> None:
             PartialPoint(time=1.5, freq=500.0, amp=0.9),
         ],
     )
-    doc.store.add(active)
-    doc.store.add(muted)
-    doc.store.add(outside)
+    session.store.add(active)
+    session.store.add(muted)
+    session.store.add(outside)
 
-    freqs, amps = doc._harmonic_probe_tones(0.5)
+    freqs, amps = playback.harmonic_probe_tones(0.5)
 
     assert freqs.tolist() == [550.0]
     assert amps.tolist() == [0.6]
 
 
 def test_update_harmonic_probe_allows_silent_position() -> None:
-    doc = _make_doc()
+    session, playback = _make_session_and_playback()
     partial = Partial(
         id="p1",
         points=[
@@ -79,8 +91,8 @@ def test_update_harmonic_probe_allows_silent_position() -> None:
             PartialPoint(time=0.5, freq=440.0, amp=0.5),
         ],
     )
-    doc.store.add(partial)
-    doc._playback_mode = "probe"
+    session.store.add(partial)
+    session._playback_mode = "probe"
     captured: dict[str, list[float]] = {}
 
     def fake_update_probe(freqs: np.ndarray, amps: np.ndarray, voice_ids: list[str] | None = None) -> bool:
@@ -89,8 +101,8 @@ def test_update_harmonic_probe_allows_silent_position() -> None:
         captured["voice_ids"] = [] if voice_ids is None else voice_ids
         return True
 
-    doc.player.update_probe = fake_update_probe  # type: ignore[method-assign]
-    ok = doc.update_harmonic_probe(0.8)
+    session.player.update_probe = fake_update_probe  # type: ignore[method-assign]
+    ok = playback.update_harmonic_probe(0.8)
 
     assert ok is True
     assert captured["freqs"] == []
@@ -99,7 +111,7 @@ def test_update_harmonic_probe_allows_silent_position() -> None:
 
 
 def test_start_harmonic_probe_allows_silent_position() -> None:
-    doc = _make_doc()
+    session, playback = _make_session_and_playback()
     partial = Partial(
         id="p1",
         points=[
@@ -107,7 +119,7 @@ def test_start_harmonic_probe_allows_silent_position() -> None:
             PartialPoint(time=0.4, freq=440.0, amp=0.5),
         ],
     )
-    doc.store.add(partial)
+    session.store.add(partial)
     captured: dict[str, list[float]] = {}
 
     def fake_play_probe(freqs: np.ndarray, amps: np.ndarray, voice_ids: list[str] | None = None) -> bool:
@@ -116,20 +128,20 @@ def test_start_harmonic_probe_allows_silent_position() -> None:
         captured["voice_ids"] = [] if voice_ids is None else voice_ids
         return True
 
-    doc.player.play_probe = fake_play_probe  # type: ignore[method-assign]
-    ok = doc.start_harmonic_probe(0.8)
+    session.player.play_probe = fake_play_probe  # type: ignore[method-assign]
+    ok = playback.start_harmonic_probe(0.8)
 
     assert ok is True
-    assert doc._playback_mode == "probe"
+    assert session._playback_mode == "probe"
     assert captured["freqs"] == []
     assert captured["amps"] == []
     assert captured["voice_ids"] == []
 
 
 def test_start_harmonic_probe_uses_midi_output_when_playback_mode_is_midi() -> None:
-    doc = _make_doc()
-    doc._playback_output_mode = "midi"
-    doc._midi_output_name = "Dummy MIDI Output"
+    session, playback = _make_session_and_playback()
+    session._playback_output_mode = "midi"
+    session._midi_output_name = "Dummy MIDI Output"
     partial = Partial(
         id="p1",
         points=[
@@ -137,7 +149,7 @@ def test_start_harmonic_probe_uses_midi_output_when_playback_mode_is_midi() -> N
             PartialPoint(time=1.0, freq=440.0, amp=0.5),
         ],
     )
-    doc.store.add(partial)
+    session.store.add(partial)
     captured: dict[str, object] = {}
 
     def fake_start_probe(
@@ -160,11 +172,11 @@ def test_start_harmonic_probe_uses_midi_output_when_playback_mode_is_midi() -> N
         captured["amplitude_curve"] = amplitude_curve
         return True
 
-    doc.midi_player.start_probe = fake_start_probe  # type: ignore[method-assign]
-    ok = doc.start_harmonic_probe(0.5)
+    session.midi_player.start_probe = fake_start_probe  # type: ignore[method-assign]
+    ok = playback.start_harmonic_probe(0.5)
 
     assert ok is True
-    assert doc._playback_mode == "probe"
+    assert session._playback_mode == "probe"
     assert captured["output_name"] == "Dummy MIDI Output"
     assert captured["partial_ids"] == ["p1"]
     assert captured["freqs"] == [440.0]
@@ -176,9 +188,9 @@ def test_start_harmonic_probe_uses_midi_output_when_playback_mode_is_midi() -> N
 
 
 def test_update_harmonic_probe_uses_midi_output_when_playback_mode_is_midi() -> None:
-    doc = _make_doc()
-    doc._playback_mode = "probe"
-    doc._playback_output_mode = "midi"
+    session, playback = _make_session_and_playback()
+    session._playback_mode = "probe"
+    session._playback_output_mode = "midi"
     partial = Partial(
         id="p1",
         points=[
@@ -186,7 +198,7 @@ def test_update_harmonic_probe_uses_midi_output_when_playback_mode_is_midi() -> 
             PartialPoint(time=1.0, freq=330.0, amp=0.6),
         ],
     )
-    doc.store.add(partial)
+    session.store.add(partial)
     captured: dict[str, list[float]] = {}
 
     def fake_update_probe(
@@ -205,8 +217,8 @@ def test_update_harmonic_probe_uses_midi_output_when_playback_mode_is_midi() -> 
         captured["amplitude_curve"] = amplitude_curve
         return True
 
-    doc.midi_player.update_probe = fake_update_probe  # type: ignore[method-assign]
-    ok = doc.update_harmonic_probe(0.5)
+    session.midi_player.update_probe = fake_update_probe  # type: ignore[method-assign]
+    ok = playback.update_harmonic_probe(0.5)
 
     assert ok is True
     assert captured["partial_ids"] == ["p1"]

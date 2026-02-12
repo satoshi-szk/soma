@@ -9,15 +9,15 @@ def _partial(partial_id: str, times: list[float], freq: float = 440.0) -> Partia
 
 def test_api_undo_redo_merge_cycle() -> None:
     api = SomaApi()
-    doc = api._doc
-    doc.synth.reset(sample_rate=44100, duration_sec=1.0)
+    session = api._session
+    session.synth.reset(sample_rate=44100, duration_sec=1.0)
 
     first = _partial("p1", [0.0, 0.05, 0.1])
     second = _partial("p2", [0.2, 0.25, 0.3])
-    doc.store.add(first)
-    doc.store.add(second)
-    doc.synth.apply_partial(first)
-    doc.synth.apply_partial(second)
+    session.store.add(first)
+    session.store.add(second)
+    session.synth.apply_partial(first)
+    session.synth.apply_partial(second)
 
     merge_result = api.merge_partials({"first": "p1", "second": "p2"})
     assert merge_result["status"] == "ok"
@@ -36,13 +36,13 @@ def test_api_undo_redo_merge_cycle() -> None:
 
 def test_api_update_delete_undo_redo_cycle() -> None:
     api = SomaApi()
-    doc = api._doc
-    doc.synth.reset(sample_rate=44100, duration_sec=1.0)
+    session = api._session
+    session.synth.reset(sample_rate=44100, duration_sec=1.0)
 
     # セットアップ: partial を作成
     original = _partial("p1", [0.0, 0.05, 0.1], freq=440.0)
-    doc.store.add(original)
-    doc.synth.apply_partial(original)
+    session.store.add(original)
+    session.synth.apply_partial(original)
 
     # 1. update_partial でポイントを編集 (周波数を変更)
     updated_points = [[0.0, 500.0, 0.5], [0.05, 510.0, 0.5], [0.1, 520.0, 0.5]]
@@ -53,7 +53,7 @@ def test_api_update_delete_undo_redo_cycle() -> None:
     # 2. delete_partials で削除
     delete_result = api.delete_partials({"ids": ["p1"]})
     assert delete_result["status"] == "ok"
-    assert doc.store.get("p1") is None
+    assert session.store.get("p1") is None
 
     # 3. undo → delete 取り消し (partial 復活、update 後の状態)
     undo1 = api.undo()

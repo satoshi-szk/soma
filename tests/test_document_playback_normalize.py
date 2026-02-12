@@ -2,14 +2,18 @@ import threading
 
 import numpy as np
 
-import soma.document as document_module
-from soma.document import SomaDocument
+import soma.services.playback_service as playback_module
 from soma.models import AudioInfo, Partial, PartialPoint
+from soma.services.playback_service import PlaybackService
+from soma.session import ProjectSession
 
 
-def _make_doc(sample_rate: int = 48000, duration_sec: float = 1.0) -> SomaDocument:
-    doc = SomaDocument()
-    doc.audio_info = AudioInfo(
+def _make_session_and_playback(
+    sample_rate: int = 48000,
+    duration_sec: float = 1.0,
+) -> tuple[ProjectSession, PlaybackService]:
+    session = ProjectSession()
+    session.audio_info = AudioInfo(
         path="/tmp/test.wav",
         name="test.wav",
         sample_rate=sample_rate,
@@ -17,13 +21,14 @@ def _make_doc(sample_rate: int = 48000, duration_sec: float = 1.0) -> SomaDocume
         channels=1,
         truncated=False,
     )
-    doc.audio_data = np.zeros(int(sample_rate * duration_sec), dtype=np.float32)
-    doc.synth.reset(sample_rate=sample_rate, duration_sec=duration_sec)
-    return doc
+    session.audio_data = np.zeros(int(sample_rate * duration_sec), dtype=np.float32)
+    session.synth.reset(sample_rate=sample_rate, duration_sec=duration_sec)
+    playback = PlaybackService(session)
+    return session, playback
 
 
 def test_mix_buffer_peak_normalize_prevents_clipping() -> None:
-    doc = _make_doc()
+    session, playback = _make_session_and_playback()
     partials = [
         Partial(
             id="p1",
@@ -41,9 +46,9 @@ def test_mix_buffer_peak_normalize_prevents_clipping() -> None:
         ),
     ]
     for partial in partials:
-        doc.synth.apply_partial(partial)
+        session.synth.apply_partial(partial)
 
-    mixed = doc._mix_buffer(1.0)
+    mixed = playback._mix_buffer(1.0)
     peak = float(np.max(np.abs(mixed)))
 
     assert peak <= 0.99 + 1e-6
@@ -51,13 +56,13 @@ def test_mix_buffer_peak_normalize_prevents_clipping() -> None:
 
 
 def test_mix_buffer_peak_normalize_silence_keeps_silence() -> None:
-    doc = _make_doc()
-    mixed = doc._mix_buffer(1.0)
+    _session, playback = _make_session_and_playback()
+    mixed = playback._mix_buffer(1.0)
     assert np.allclose(mixed, 0.0)
 
 
 def test_playback_position_and_start_are_mapped_by_speed_ratio() -> None:
-    doc = _make_doc()
+    _session, playback = _make_session_and_playback()
     captured: dict[str, float] = {}
     started = threading.Event()
 
@@ -66,29 +71,29 @@ def test_playback_position_and_start_are_mapped_by_speed_ratio() -> None:
         captured["start_position_sec"] = start_position_sec
         started.set()
 
-    doc.player.play = fake_play  # type: ignore[method-assign]
-    doc.player.is_playing = lambda: False  # type: ignore[method-assign]
-    doc.player.position_sec = lambda: 3.0  # type: ignore[method-assign]
+    playback._session.player.play = fake_play  # type: ignore[method-assign]
+    playback._session.player.is_playing = lambda: False  # type: ignore[method-assign]
+    playback._session.player.position_sec = lambda: 3.0  # type: ignore[method-assign]
 
-    doc.play(mix_ratio=0.5, loop=False, start_position_sec=2.0, speed_ratio=0.5)
+    playback.play(mix_ratio=0.5, loop=False, start_position_sec=2.0, speed_ratio=0.5)
 
     assert started.wait(timeout=1.0)
     assert captured["start_position_sec"] == 4.0
-    assert doc.playback_position() == 1.5
+    assert playback.playback_position() == 1.5
 
 
 def test_is_playing_excludes_prepare_state() -> None:
-    doc = _make_doc()
-    doc._playback_mode = "normal"
-    doc._is_preparing_playback = True
-    doc.player.is_playing = lambda: False  # type: ignore[method-assign]
+    _session, playback = _make_session_and_playback()
+    playback._session._playback_mode = "normal"
+    playback._session._is_preparing_playback = True
+    playback._session.player.is_playing = lambda: False  # type: ignore[method-assign]
 
-    assert doc.is_preparing_playback() is True
-    assert doc.is_playing() is False
+    assert playback.is_preparing_playback() is True
+    assert playback.is_playing() is False
 
 
 def test_playback_uses_cached_stretched_buffer(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    doc = _make_doc(duration_sec=2.0)
+    _session, playback = _make_session_and_playback(duration_sec=2.0)
     calls = {"stretch": 0, "play": 0}
     started = threading.Event()
 
@@ -102,15 +107,15 @@ def test_playback_uses_cached_stretched_buffer(monkeypatch) -> None:  # type: ig
         calls["play"] += 1
         started.set()
 
-    monkeypatch.setattr(document_module, "time_stretch_pitch_preserving", fake_stretch)
-    doc.player.play = fake_play  # type: ignore[method-assign]
-    doc.player.is_playing = lambda: False  # type: ignore[method-assign]
+    monkeypatch.setattr(playback_module, "time_stretch_pitch_preserving", fake_stretch)
+    playback._session.player.play = fake_play  # type: ignore[method-assign]
+    playback._session.player.is_playing = lambda: False  # type: ignore[method-assign]
 
-    doc.play(mix_ratio=0.55, loop=False, start_position_sec=0.5, speed_ratio=2.0, time_stretch_mode="native")
+    playback.play(mix_ratio=0.55, loop=False, start_position_sec=0.5, speed_ratio=2.0, time_stretch_mode="native")
     assert started.wait(timeout=1.0)
 
     started.clear()
-    doc.play(mix_ratio=0.55, loop=False, start_position_sec=1.0, speed_ratio=2.0, time_stretch_mode="native")
+    playback.play(mix_ratio=0.55, loop=False, start_position_sec=1.0, speed_ratio=2.0, time_stretch_mode="native")
     assert started.wait(timeout=1.0)
 
     assert calls["play"] == 2
@@ -118,7 +123,7 @@ def test_playback_uses_cached_stretched_buffer(monkeypatch) -> None:  # type: ig
 
 
 def test_playback_resynth_only_skips_time_stretch(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    doc = _make_doc(duration_sec=2.0)
+    session, playback = _make_session_and_playback(duration_sec=2.0)
     partial = Partial(
         id="p1",
         points=[
@@ -126,8 +131,8 @@ def test_playback_resynth_only_skips_time_stretch(monkeypatch) -> None:  # type:
             PartialPoint(time=2.0, freq=440.0, amp=0.5),
         ],
     )
-    doc.store.add(partial)
-    doc.synth.apply_partial(partial)
+    session.store.add(partial)
+    session.synth.apply_partial(partial)
     started = threading.Event()
 
     def should_not_be_called(*_args, **_kwargs) -> np.ndarray:  # type: ignore[no-untyped-def]
@@ -137,23 +142,23 @@ def test_playback_resynth_only_skips_time_stretch(monkeypatch) -> None:  # type:
         del loop, start_position_sec
         started.set()
 
-    monkeypatch.setattr(document_module, "time_stretch_pitch_preserving", should_not_be_called)
-    doc.player.play = fake_play  # type: ignore[method-assign]
-    doc.player.is_playing = lambda: False  # type: ignore[method-assign]
+    monkeypatch.setattr(playback_module, "time_stretch_pitch_preserving", should_not_be_called)
+    playback._session.player.play = fake_play  # type: ignore[method-assign]
+    playback._session.player.is_playing = lambda: False  # type: ignore[method-assign]
 
-    doc.play(mix_ratio=1.0, loop=False, start_position_sec=0.0, speed_ratio=2.0, time_stretch_mode="librosa")
+    playback.play(mix_ratio=1.0, loop=False, start_position_sec=0.0, speed_ratio=2.0, time_stretch_mode="librosa")
 
     assert started.wait(timeout=1.0)
 
 
 def test_update_mix_ratio_does_not_seek_backwards(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    doc = _make_doc(duration_sec=2.0)
-    doc._playback_mode = "normal"
-    doc._playback_speed_ratio = 2.0
-    doc.player.is_playing = lambda: True  # type: ignore[method-assign]
+    _session, playback = _make_session_and_playback(duration_sec=2.0)
+    playback._session._playback_mode = "normal"
+    playback._session._playback_speed_ratio = 2.0
+    playback._session.player.is_playing = lambda: True  # type: ignore[method-assign]
 
     monkeypatch.setattr(
-        doc,
+        playback,
         "_build_speed_adjusted_buffer",
         lambda *_args, **_kwargs: np.zeros(32, dtype=np.float32),
     )
@@ -164,9 +169,9 @@ def test_update_mix_ratio_does_not_seek_backwards(monkeypatch) -> None:  # type:
         captured["size"] = buffer.size
         captured["start_position_sec"] = start_position_sec
 
-    doc.player.update_buffer = fake_update_buffer  # type: ignore[method-assign]
+    playback._session.player.update_buffer = fake_update_buffer  # type: ignore[method-assign]
 
-    updated = doc.update_mix_ratio(0.7)
+    updated = playback.update_mix_ratio(0.7)
 
     assert updated is True
     assert captured["size"] == 32
@@ -174,7 +179,7 @@ def test_update_mix_ratio_does_not_seek_backwards(monkeypatch) -> None:  # type:
 
 
 def test_update_mix_ratio_reuses_stretched_original_cache(monkeypatch) -> None:  # type: ignore[no-untyped-def]
-    doc = _make_doc(duration_sec=2.0)
+    session, playback = _make_session_and_playback(duration_sec=2.0)
     partial = Partial(
         id="p1",
         points=[
@@ -182,13 +187,13 @@ def test_update_mix_ratio_reuses_stretched_original_cache(monkeypatch) -> None: 
             PartialPoint(time=2.0, freq=440.0, amp=0.5),
         ],
     )
-    doc.store.add(partial)
-    doc.synth.apply_partial(partial)
-    doc._playback_mode = "normal"
-    doc._playback_speed_ratio = 2.0
-    doc._last_time_stretch_mode = "native"
-    doc.player.is_playing = lambda: True  # type: ignore[method-assign]
-    doc.player.update_buffer = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
+    session.store.add(partial)
+    session.synth.apply_partial(partial)
+    playback._session._playback_mode = "normal"
+    playback._session._playback_speed_ratio = 2.0
+    playback._session._last_time_stretch_mode = "native"
+    playback._session.player.is_playing = lambda: True  # type: ignore[method-assign]
+    playback._session.player.update_buffer = lambda *_args, **_kwargs: None  # type: ignore[method-assign]
 
     calls = {"stretch": 0}
 
@@ -197,10 +202,10 @@ def test_update_mix_ratio_reuses_stretched_original_cache(monkeypatch) -> None: 
         calls["stretch"] += 1
         return buffer
 
-    monkeypatch.setattr(document_module, "time_stretch_pitch_preserving", fake_stretch)
+    monkeypatch.setattr(playback_module, "time_stretch_pitch_preserving", fake_stretch)
 
-    updated_first = doc.update_mix_ratio(0.4)
-    updated_second = doc.update_mix_ratio(0.7)
+    updated_first = playback.update_mix_ratio(0.4)
+    updated_second = playback.update_mix_ratio(0.7)
 
     assert updated_first is True
     assert updated_second is True
