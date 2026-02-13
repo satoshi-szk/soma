@@ -16,6 +16,7 @@ type ViewportParams = {
   timeEnd: number
   freqMin: number
   freqMax: number
+  viewportId: number
 }
 
 type ViewportQuality = 'low' | 'high' | 'local'
@@ -30,6 +31,7 @@ type ViewportCacheEntry = {
 }
 
 type ReportError = (context: string, message: string) => void
+const MAX_VIEWPORT_REQUESTS_IN_FLIGHT = 3
 
 const buildViewportParamsKey = (params: ViewportParams, settings: SpectrogramSettings, pixelHeight: number): string =>
   [
@@ -58,6 +60,7 @@ export function useViewport(
   const interactionTimerRef = useRef<number | null>(null)
   const requestedTileKeysRef = useRef<Set<string>>(new Set())
   const pendingParamsRef = useRef<ViewportParams[] | null>(null)
+  const viewportRequestIdRef = useRef(0)
   const lastPreviewId = useRef<string | null>(null)
 
   const baseZoomX = useMemo(() => {
@@ -237,48 +240,64 @@ export function useViewport(
       const api = isPywebviewApiAvailable() ? pywebviewApi : null
       if (!api) return
 
-      const requestTasks: Promise<void>[] = []
       const tileHeight = Math.round(spectrogramAreaHeight)
+      const pendingJobs: Array<{ params: ViewportParams; key: string }> = []
       for (const params of paramsList) {
         const key = buildViewportParamsKey(params, settings, tileHeight)
         if (requestedTileKeysRef.current.has(key)) continue
         requestedTileKeysRef.current.add(key)
-        requestTasks.push(
-          (async () => {
-            try {
-              const result = await api.request_spectrogram_tile({
-                time_start: params.timeStart,
-                time_end: params.timeEnd,
-                freq_min: params.freqMin,
-                freq_max: params.freqMax,
-                width: 1024,
-                height: tileHeight,
-                gain: settings.gain,
-                min_db: settings.min_db,
-                max_db: settings.max_db,
-                gamma: settings.gamma,
-              })
+        pendingJobs.push({ params, key })
+      }
+      if (pendingJobs.length === 0) return
 
-              if (result.status === 'error') {
-                requestedTileKeysRef.current.delete(key)
-                reportError('Viewport', result.message ?? 'Failed to request viewport preview')
-                return
-              }
-              const quality: ViewportQuality =
-                result.quality === 'local' ? 'local' : result.quality === 'high' ? 'high' : 'low'
-              upsertViewportPreview(result.preview, quality)
-            } catch (error) {
-              requestedTileKeysRef.current.delete(key)
-              console.error('[Viewport] request_spectrogram_tile failed', error)
-              const message = error instanceof Error ? error.message : String(error)
-              reportError('Viewport', `Failed to request viewport preview: ${message}`)
+      let nextIndex = 0
+      const workerCount = Math.min(MAX_VIEWPORT_REQUESTS_IN_FLIGHT, pendingJobs.length)
+      const runJob = async (job: { params: ViewportParams; key: string }) => {
+        try {
+          const result = await api.request_spectrogram_tile({
+            time_start: job.params.timeStart,
+            time_end: job.params.timeEnd,
+            freq_min: job.params.freqMin,
+            freq_max: job.params.freqMax,
+            width: 1024,
+            height: tileHeight,
+            viewport_id: job.params.viewportId,
+            gain: settings.gain,
+            min_db: settings.min_db,
+            max_db: settings.max_db,
+            gamma: settings.gamma,
+          })
+
+          if (result.status === 'error') {
+            requestedTileKeysRef.current.delete(job.key)
+            const message = result.message ?? ''
+            if (message.includes('Stale tile request dropped') || message.includes('Tile queue saturated')) {
+              return
             }
-          })()
-        )
+            reportError('Viewport', result.message ?? 'Failed to request viewport preview')
+            return
+          }
+          const quality: ViewportQuality =
+            result.quality === 'local' ? 'local' : result.quality === 'high' ? 'high' : 'low'
+          upsertViewportPreview(result.preview, quality)
+        } catch (error) {
+          requestedTileKeysRef.current.delete(job.key)
+          console.error('[Viewport] request_spectrogram_tile failed', error)
+          const message = error instanceof Error ? error.message : String(error)
+          reportError('Viewport', `Failed to request viewport preview: ${message}`)
+        }
       }
-      if (requestTasks.length > 0) {
-        await Promise.allSettled(requestTasks)
-      }
+      const workers = Array.from({ length: workerCount }, () =>
+        (async () => {
+          while (true) {
+            const current = nextIndex
+            nextIndex += 1
+            if (current >= pendingJobs.length) break
+            await runJob(pendingJobs[current])
+          }
+        })()
+      )
+      await Promise.allSettled(workers)
     },
     [reportError, spectrogramAreaHeight, settings, upsertViewportPreview]
   )
@@ -309,10 +328,13 @@ export function useViewport(
 
     const clampedFreqMin = Math.max(freqMin, visibleFreqMin)
     const clampedFreqMax = Math.min(freqMax, visibleFreqMax)
+    const visibleCenter = 0.5 * (visibleTimeStart + visibleTimeEnd)
     const viewportDuration = Math.max(1e-6, stageSize.width / zoomX)
     const overscanStart = Math.max(0, visibleTimeStart - viewportDuration)
     const overscanEnd = Math.min(duration, visibleTimeEnd + viewportDuration)
     const tileDuration = Math.max(1e-6, 1024 / zoomX)
+    const viewportId = viewportRequestIdRef.current + 1
+    viewportRequestIdRef.current = viewportId
     const startTileIndex = Math.floor(overscanStart / tileDuration)
     const endTileIndex = Math.floor(Math.max(overscanStart, overscanEnd - 1e-9) / tileDuration)
     const tiles: ViewportParams[] = []
@@ -325,8 +347,14 @@ export function useViewport(
         timeEnd: tileEnd,
         freqMin: clampedFreqMin,
         freqMax: clampedFreqMax,
+        viewportId,
       })
     }
+    tiles.sort((a, b) => {
+      const centerA = 0.5 * (a.timeStart + a.timeEnd)
+      const centerB = 0.5 * (b.timeStart + b.timeEnd)
+      return Math.abs(centerA - visibleCenter) - Math.abs(centerB - visibleCenter)
+    })
     pendingParamsRef.current = tiles
 
     interactionRef.current = true

@@ -286,6 +286,7 @@ export const apiSchemas = {
       freq_max: z.number(),
       width: z.number(),
       height: z.number(),
+      viewport_id: z.number().int().optional(),
       gain: z.number().optional(),
       min_db: z.number().optional(),
       max_db: z.number().optional(),

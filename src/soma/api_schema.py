@@ -182,6 +182,7 @@ class RequestSpectrogramTilePayload(PayloadBase):
     freq_max: float
     width: int
     height: int
+    viewport_id: int | None = None
     gain: float | None = None
     min_db: float | None = None
     max_db: float | None = None
