@@ -25,7 +25,7 @@ class AudioInfo:
 class SpectrogramPreview:
     width: int
     height: int
-    data: list[int]
+    data: list[int] | bytes
     time_start: float
     time_end: float
     freq_min: float
@@ -33,7 +33,11 @@ class SpectrogramPreview:
     duration_sec: float
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        payload = asdict(self)
+        if isinstance(self.data, bytes):
+            # JSON 応答時のみ list へ変換する。通常のキャッシュ経路では bytes のまま使う。
+            payload["data"] = list(self.data)
+        return payload
 
 
 @dataclass(frozen=True)
@@ -46,8 +50,10 @@ class AnalysisSettings:
     preview_bins_per_octave: int = 48
     wavelet_bandwidth: float = 8.0
     wavelet_center_freq: float = 1.5
-    brightness: float = 0.0
-    contrast: float = 1.0
+    gain: float = 1.0
+    min_db: float = -80.0
+    max_db: float = 0.0
+    gamma: float = 1.0
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

@@ -68,8 +68,10 @@ export const pywebviewApi = {
   export_multitrack_midi: (payload: PayloadFor<'export_multitrack_midi'>) => callApi('export_multitrack_midi', payload),
   export_monophonic_midi: (payload: PayloadFor<'export_monophonic_midi'>) => callApi('export_monophonic_midi', payload),
   export_audio: (payload: PayloadFor<'export_audio'>) => callApi('export_audio', payload),
-  request_viewport_preview: (payload: PayloadFor<'request_viewport_preview'>) =>
-    callApi('request_viewport_preview', payload),
+  request_spectrogram_tile: (payload: PayloadFor<'request_spectrogram_tile'>) =>
+    callApi('request_spectrogram_tile', payload),
+  request_spectrogram_overview: (payload: PayloadFor<'request_spectrogram_overview'>) =>
+    callApi('request_spectrogram_overview', payload),
 }
 
 export const isPywebviewApiAvailable = (): boolean => Boolean(getRawApi())

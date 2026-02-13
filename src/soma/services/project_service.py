@@ -62,6 +62,9 @@ class ProjectService:
             source_info=source_info,
             initial_mix_buffer=self._playback.mix_buffer(0.5),
         )
+        from soma.spectrogram_renderer import SpectrogramRenderer
+
+        self._session._spectrogram_renderer = SpectrogramRenderer(audio=audio, sample_rate=info.sample_rate)
         self._playback.invalidate_cache()
         return info
 
@@ -69,8 +72,6 @@ class ProjectService:
         before = self._history.snapshot_state(include_settings=True)
         self._session.settings = settings
         self._session._snap_amp_reference = None
-        if self._session.audio_data is not None and self._session.audio_info is not None:
-            self._preview.start_preview_async()
         after = self._history.snapshot_state(include_settings=True)
         self._history.record(before, after)
 

@@ -34,7 +34,8 @@ from soma.api_schema import (
     OpenProjectPathPayload,
     PayloadBase,
     PlayPayload,
-    RequestViewportPreviewPayload,
+    RequestSpectrogramOverviewPayload,
+    RequestSpectrogramTilePayload,
     SelectInBoxPayload,
     StopPayload,
     ToggleMutePayload,
@@ -60,7 +61,7 @@ from soma.exporter import (
     render_cv_voice_buffers,
 )
 from soma.logging_utils import configure_logging, get_session_log_dir
-from soma.models import AnalysisSettings, PartialPoint, PlaybackSettings, SpectrogramPreview
+from soma.models import AnalysisSettings, PartialPoint, PlaybackSettings
 from soma.preview_cache import PreviewCacheConfig, build_preview_payload
 from soma.recent_projects import RecentProjectStore, default_recent_projects_path
 from soma.services import HistoryService, PartialEditService, PlaybackService, PreviewService, ProjectService
@@ -78,7 +79,6 @@ def _dispatch_frontend_event(payload: dict[str, Any]) -> None:
     if window is None:
         return
     try:
-        payload = _maybe_externalize_preview(payload)
         detail = json.dumps(payload, ensure_ascii=False)
         script = f"window.dispatchEvent(new CustomEvent('soma:event', {{ detail: {detail} }}));"
         with _frontend_event_lock:
@@ -159,7 +159,7 @@ class SomaApi:
             on_partials_changed=self._playback_service.invalidate_cache,
         )
         self._history_service.set_callbacks(
-            on_settings_applied=self._preview_service.start_preview_async,
+            on_settings_applied=lambda: None,
             on_partials_changed=self._playback_service.invalidate_cache,
         )
         self._project_service = ProjectService(
@@ -180,6 +180,26 @@ class SomaApi:
     def _playback_settings_payload(self) -> dict[str, Any]:
         return self._playback_service.playback_settings().to_dict()
 
+    def _build_overview_preview(self, width: int = 768, height: int = 320) -> dict[str, Any] | None:
+        if self._session.audio_data is None or self._session.audio_info is None:
+            return None
+        renderer = self._session._spectrogram_renderer
+        if renderer is None:
+            return None
+        settings = self._session.settings
+        try:
+            preview, ref = renderer.render_overview(
+                settings=settings,
+                width=width,
+                height=height,
+                stft_amp_reference=self._session._stft_amp_reference,
+            )
+            self._session._stft_amp_reference = ref
+        except Exception:
+            logger.exception("build overview preview failed")
+            return None
+        return build_preview_payload(preview, _preview_cache, hint="overview")
+
     def _remember_recent_project(self, path: Path | None) -> None:
         if path is None:
             return
@@ -189,10 +209,13 @@ class SomaApi:
             logger.exception("failed to remember recent project: %s", path)
 
     def _project_load_response(self, info: Any) -> dict[str, Any]:
+        preview_payload = self._build_overview_preview()
+        if preview_payload is None:
+            return {"status": "error", "message": "Failed to build overview preview."}
         return {
-            "status": "processing",
+            "status": "ok",
             "audio": info.to_dict(),
-            "preview": None,
+            "preview": preview_payload,
             "settings": self._session.settings.to_dict(),
             "playback_settings": self._playback_settings_payload(),
             "partials": [partial.to_dict() for partial in self._session.store.all()],
@@ -222,7 +245,6 @@ class SomaApi:
             return {"status": "error", "message": str(exc)}
 
         self._playback_service.rebuild_resynth()
-        self._preview_service.start_preview_async()
         self._remember_recent_project(path)
         return self._project_load_response(info)
 
@@ -251,16 +273,15 @@ class SomaApi:
             return duration_check
         try:
             info = self._project_service.load_audio(path)
-            self._preview_service.start_preview_async()
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("open_audio failed")
             return {"status": "error", "message": str(exc)}
 
         self._last_audio_path = info.path
         return {
-            "status": "processing",
+            "status": "ok",
             "audio": info.to_dict(),
-            "preview": None,
+            "preview": self._build_overview_preview(),
             "settings": self._session.settings.to_dict(),
             "playback_settings": self._playback_settings_payload(),
             "partials": [partial.to_dict() for partial in self._session.store.all()],
@@ -286,16 +307,15 @@ class SomaApi:
             return duration_check
         try:
             info = self._project_service.load_audio(path)
-            self._preview_service.start_preview_async()
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("open_audio_path failed")
             return {"status": "error", "message": str(exc)}
 
         self._last_audio_path = info.path
         return {
-            "status": "processing",
+            "status": "ok",
             "audio": info.to_dict(),
-            "preview": None,
+            "preview": self._build_overview_preview(),
             "settings": self._session.settings.to_dict(),
             "playback_settings": self._playback_settings_payload(),
             "partials": [partial.to_dict() for partial in self._session.store.all()],
@@ -329,16 +349,15 @@ class SomaApi:
             return duration_check
         try:
             info = self._project_service.load_audio(temp_path, display_name=parsed.name)
-            self._preview_service.start_preview_async()
         except Exception as exc:  # pragma: no cover - surface errors to UI
             logger.exception("open_audio_data failed")
             return {"status": "error", "message": str(exc)}
 
         self._last_audio_path = info.path
         return {
-            "status": "processing",
+            "status": "ok",
             "audio": info.to_dict(),
-            "preview": None,
+            "preview": self._build_overview_preview(),
             "settings": self._session.settings.to_dict(),
             "playback_settings": self._playback_settings_payload(),
             "partials": [partial.to_dict() for partial in self._session.store.all()],
@@ -443,10 +462,13 @@ class SomaApi:
             return parsed
         settings = AnalysisSettings(**parsed.model_dump())
         self._project_service.set_settings(settings)
+        preview_payload = self._build_overview_preview()
+        if preview_payload is None:
+            return {"status": "error", "message": "Failed to build overview preview."}
         return {
-            "status": "processing",
+            "status": "ok",
             "settings": self._session.settings.to_dict(),
-            "preview": None,
+            "preview": preview_payload,
         }
 
     def trace_partial(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -722,26 +744,89 @@ class SomaApi:
     def playback_state(self) -> dict[str, Any]:
         return {"status": "ok", "position": self._playback_service.playback_position()}
 
-    def request_viewport_preview(self, payload: dict[str, Any]) -> dict[str, Any]:
+    def request_spectrogram_tile(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self._session.audio_data is None or self._session.audio_info is None:
+            return {"status": "error", "message": "No audio loaded."}
+        renderer = self._session._spectrogram_renderer
+        if renderer is None:
+            return {"status": "error", "message": "Renderer is not ready."}
+        parsed = _validated_payload(RequestSpectrogramTilePayload, payload, "request_spectrogram_tile")
+        if isinstance(parsed, dict):
+            return parsed
+        settings = self._session.settings
+        if any(
+            value is not None
+            for value in (parsed.gain, parsed.min_db, parsed.max_db, parsed.gamma)
+        ):
+            settings = AnalysisSettings(
+                **{
+                    **settings.to_dict(),
+                    "gain": settings.gain if parsed.gain is None else float(parsed.gain),
+                    "min_db": settings.min_db if parsed.min_db is None else float(parsed.min_db),
+                    "max_db": settings.max_db if parsed.max_db is None else float(parsed.max_db),
+                    "gamma": settings.gamma if parsed.gamma is None else float(parsed.gamma),
+                }
+            )
+
         try:
-            parsed = _validated_payload(RequestViewportPreviewPayload, payload, "request_viewport_preview")
-            if isinstance(parsed, dict):
-                return parsed
-            request_id = self._preview_service.start_viewport_preview_async(
+            preview, ref, quality = renderer.render_tile(
+                settings=settings,
                 time_start=parsed.time_start,
                 time_end=parsed.time_end,
                 freq_min=parsed.freq_min,
                 freq_max=parsed.freq_max,
                 width=parsed.width,
                 height=parsed.height,
+                stft_amp_reference=self._session._stft_amp_reference,
+                cwt_amp_reference=self._session._amp_reference,
             )
-            if not request_id:
-                logger.warning("request_viewport_preview rejected: request not accepted")
-                return {"status": "error", "message": "No audio loaded."}
-            return {"status": "accepted"}
+            if quality == "low":
+                self._session._stft_amp_reference = ref
+            else:
+                self._session._amp_reference = ref
         except Exception as exc:
-            logger.exception("request_viewport_preview failed")
+            logger.exception("request_spectrogram_tile failed")
             return {"status": "error", "message": str(exc)}
+
+        preview_payload = build_preview_payload(preview, _preview_cache, hint="tile")
+        return {"status": "ok", "preview": preview_payload, "quality": quality}
+
+    def request_spectrogram_overview(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if self._session.audio_data is None or self._session.audio_info is None:
+            return {"status": "error", "message": "No audio loaded."}
+        renderer = self._session._spectrogram_renderer
+        if renderer is None:
+            return {"status": "error", "message": "Renderer is not ready."}
+        parsed = _validated_payload(RequestSpectrogramOverviewPayload, payload, "request_spectrogram_overview")
+        if isinstance(parsed, dict):
+            return parsed
+        settings = self._session.settings
+        if any(
+            value is not None
+            for value in (parsed.gain, parsed.min_db, parsed.max_db, parsed.gamma)
+        ):
+            settings = AnalysisSettings(
+                **{
+                    **settings.to_dict(),
+                    "gain": settings.gain if parsed.gain is None else float(parsed.gain),
+                    "min_db": settings.min_db if parsed.min_db is None else float(parsed.min_db),
+                    "max_db": settings.max_db if parsed.max_db is None else float(parsed.max_db),
+                    "gamma": settings.gamma if parsed.gamma is None else float(parsed.gamma),
+                }
+            )
+        try:
+            preview, ref = renderer.render_overview(
+                settings=settings,
+                width=parsed.width,
+                height=parsed.height,
+                stft_amp_reference=self._session._stft_amp_reference,
+            )
+            self._session._stft_amp_reference = ref
+        except Exception as exc:
+            logger.exception("request_spectrogram_overview failed")
+            return {"status": "error", "message": str(exc)}
+        preview_payload = build_preview_payload(preview, _preview_cache, hint="overview")
+        return {"status": "ok", "preview": preview_payload, "quality": "low"}
 
     def frontend_log(self, level: str, message: str) -> dict[str, Any]:
         timestamp = datetime.now(UTC).isoformat(timespec="milliseconds")
@@ -1012,30 +1097,6 @@ def _configure_preview_cache() -> None:
         _preview_cache_server = PreviewCacheServer(cache_dir)
     base_url = _preview_cache_server.start()
     _preview_cache = PreviewCacheConfig(dir_path=cache_dir, url_prefix=f"{base_url}/.soma-cache")
-
-
-def _maybe_externalize_preview(payload: dict[str, Any]) -> dict[str, Any]:
-    if _preview_cache is None:
-        return payload
-    if payload.get("type") != "spectrogram_preview_updated":
-        return payload
-    preview_dict = payload.get("preview")
-    if not isinstance(preview_dict, dict):
-        return payload
-    if "data_path" in preview_dict:
-        return payload
-    data = preview_dict.get("data")
-    if not isinstance(data, list):
-        return payload
-    try:
-        preview = SpectrogramPreview(**preview_dict)
-    except Exception:
-        logger.debug("failed to parse preview for externalization", exc_info=True)
-        return payload
-    hint = payload.get("kind")
-    payload = dict(payload)
-    payload["preview"] = build_preview_payload(preview, _preview_cache, hint=str(hint) if hint else None)
-    return payload
 
 
 CONSOLE_HOOK_JS = r"""

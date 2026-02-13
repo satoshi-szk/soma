@@ -1,17 +1,13 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import type { AnalysisSettings, SpectrogramPreview } from '../../../app/types'
+import type { SpectrogramPreview } from '../../../app/types'
 
-type ViewportImageItem = { preview: SpectrogramPreview; image: ImageBitmap }
+type ViewportImageItem = { preview: SpectrogramPreview; image: HTMLImageElement }
 
-export function useViewportImageCache(
-  viewportPreviews: SpectrogramPreview[] | null,
-  settings: AnalysisSettings
-): {
+export function useViewportImageCache(viewportPreviews: SpectrogramPreview[] | null): {
   buildViewportKey: (current: SpectrogramPreview) => string
   viewportImages: ViewportImageItem[]
 } {
-  const [viewportImageCache, setViewportImageCache] = useState(new Map<string, ImageBitmap>())
-  const viewportWorkerRef = useRef<Worker | null>(null)
+  const [viewportImageCache, setViewportImageCache] = useState(new Map<string, HTMLImageElement>())
   const viewportPendingRef = useRef(new Set<string>())
   const desiredViewportKeysRef = useRef<Set<string>>(new Set())
 
@@ -24,57 +20,10 @@ export function useViewportImageCache(
         current.freq_max,
         current.width,
         current.height,
-        settings.brightness,
-        settings.contrast,
+        current.image_path ?? '',
       ].join('|'),
-    [settings],
+    [],
   )
-
-  useEffect(() => {
-    if (typeof OffscreenCanvas === 'undefined') {
-      console.warn('[ViewportWorker] OffscreenCanvas not available, viewport rendering disabled')
-      return
-    }
-    const worker = new Worker(new URL('../../../workers/viewportRenderer.ts', import.meta.url), { type: 'module' })
-    worker.onmessage = (event) => {
-      const payload = event.data as {
-        type: 'result' | 'error'
-        key: string
-        bitmap?: ImageBitmap
-        message?: string
-      }
-      if (payload.type === 'result') {
-        const bitmap = payload.bitmap
-        if (!bitmap) return
-        viewportPendingRef.current.delete(payload.key)
-        setViewportImageCache((prev) => {
-          const next = new Map(prev)
-          next.set(payload.key, bitmap)
-          for (const [key, image] of next) {
-            if (!desiredViewportKeysRef.current.has(key)) {
-              image.close()
-              next.delete(key)
-            }
-          }
-          return next
-        })
-      } else if (payload.type === 'error') {
-        viewportPendingRef.current.delete(payload.key)
-        console.warn(`[ViewportWorker] ${payload.message ?? 'render failed'}`)
-      }
-    }
-    viewportWorkerRef.current = worker
-    return () => {
-      worker.terminate()
-      viewportWorkerRef.current = null
-      setViewportImageCache((prev) => {
-        for (const bitmap of prev.values()) {
-          bitmap.close()
-        }
-        return new Map()
-      })
-    }
-  }, [])
 
   useEffect(() => {
     const previews = viewportPreviews ?? []
@@ -85,14 +34,8 @@ export function useViewportImageCache(
         console.warn('[Workspace] Invalid viewport preview dimensions:', current.width, 'x', current.height)
         continue
       }
-      const expectedLength = current.width * current.height
-      if (current.data.length !== expectedLength) {
-        console.error(
-          '[Workspace] Viewport preview data length mismatch: expected',
-          expectedLength,
-          'got',
-          current.data.length
-        )
+      if (!current.image_path) {
+        console.warn('[Workspace] Missing image_path for viewport preview')
         continue
       }
       const key = buildViewportKey(current)
@@ -102,19 +45,30 @@ export function useViewportImageCache(
         continue
       }
 
-      const worker = viewportWorkerRef.current
-      if (worker) {
-        viewportPendingRef.current.add(key)
-        worker.postMessage({
-          type: 'render',
-          key,
-          width: current.width,
-          height: current.height,
-          data: current.data,
-          brightness: settings.brightness,
-          contrast: settings.contrast,
+      viewportPendingRef.current.add(key)
+      const image = new window.Image()
+      image.onload = () => {
+        viewportPendingRef.current.delete(key)
+        setViewportImageCache((prev) => {
+          const next = new Map(prev)
+          next.set(key, image)
+          for (const staleKey of [...next.keys()]) {
+            if (!desiredViewportKeysRef.current.has(staleKey)) {
+              const staleImage = next.get(staleKey)
+              if (staleImage) {
+                staleImage.src = ''
+              }
+              next.delete(staleKey)
+            }
+          }
+          return next
         })
       }
+      image.onerror = () => {
+        viewportPendingRef.current.delete(key)
+        console.warn('[Workspace] Failed to load viewport image:', current.image_path)
+      }
+      image.src = current.image_path
     }
 
     desiredViewportKeysRef.current = desiredKeys
@@ -129,9 +83,12 @@ export function useViewportImageCache(
         if (desiredViewportKeysRef.current.size === 0 && prev.size === 0) return prev
         let updated = false
         const next = new Map(prev)
-        for (const [key, image] of next) {
+        for (const key of [...next.keys()]) {
           if (!desiredViewportKeysRef.current.has(key)) {
-            image.close()
+            const staleImage = next.get(key)
+            if (staleImage) {
+              staleImage.src = ''
+            }
             next.delete(key)
             updated = true
           }
@@ -143,7 +100,7 @@ export function useViewportImageCache(
     return () => {
       window.clearTimeout(cleanupTimer)
     }
-  }, [viewportPreviews, settings, buildViewportKey, viewportImageCache])
+  }, [viewportPreviews, buildViewportKey, viewportImageCache])
 
   const viewportImages = useMemo(() => {
     if (!viewportPreviews || viewportPreviews.length === 0) return []

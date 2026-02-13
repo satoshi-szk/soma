@@ -23,8 +23,10 @@ export const DEFAULT_SETTINGS: AnalysisSettings = {
   preview_bins_per_octave: 48,
   wavelet_bandwidth: 8.0,
   wavelet_center_freq: 1.5,
-  brightness: 0,
-  contrast: 1,
+  gain: 1,
+  min_db: -80,
+  max_db: 0,
+  gamma: 1,
 };
 
 export const ZOOM_X_MIN_PX_PER_SEC = 0.05;

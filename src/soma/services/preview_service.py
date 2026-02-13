@@ -5,13 +5,12 @@ from collections.abc import Callable
 
 import numpy as np
 
-from soma.analysis import estimate_cwt_amp_reference, make_spectrogram_stft
-from soma.models import AnalysisSettings, Partial, PartialPoint, SpectrogramPreview, generate_bright_color
+from soma.analysis import estimate_cwt_amp_reference
+from soma.models import AnalysisSettings, Partial, PartialPoint, generate_bright_color
 from soma.services.history import HistoryService
 from soma.session import ProjectSession
-from soma.workers import ComputeManager, SnapParams, ViewportParams
+from soma.workers import ComputeManager, SnapParams
 
-_CWT_PREVIEW_WINDOW_THRESHOLD_SEC = 2.0
 _SNAP_TIME_MARGIN_SEC = 0.25
 _SNAP_FREQ_MARGIN_OCTAVES = 0.5
 _SNAP_QUEUE_MAX_WAITING = 2
@@ -27,135 +26,10 @@ class PreviewService:
         self._session = session
         self._history = history
         self._on_partials_changed = on_partials_changed
-        self._compute_manager = ComputeManager(
-            viewport_callback=self._on_viewport_result,
-            snap_callback=self._on_snap_result,
-        )
+        self._compute_manager = ComputeManager(snap_callback=self._on_snap_result)
 
     def cancel_all(self) -> None:
         self._compute_manager.cancel_all()
-
-    def start_preview_async(self) -> None:
-        if self._session.audio_data is None or self._session.audio_info is None:
-            return
-        request_id = str(uuid.uuid4())
-        with self._session._lock:
-            self._session._preview_request_id = request_id
-            self._session.preview_state = "processing"
-            self._session.preview_error = None
-
-            audio = self._session.audio_data
-            sample_rate = self._session.audio_info.sample_rate
-            settings = self._session.settings
-            stft_reference = self._session._stft_amp_reference
-
-        def _worker() -> None:
-            with self._session._lock:
-                if self._session._preview_request_id != request_id:
-                    return
-            duration = audio.shape[0] / float(sample_rate) if audio.size else 0.0
-            freq_max = min(settings.preview_freq_max, settings.freq_max)
-
-            try:
-                preview, ref = make_spectrogram_stft(
-                    audio=audio,
-                    sample_rate=sample_rate,
-                    settings=settings,
-                    time_start=0.0,
-                    time_end=duration,
-                    freq_min=settings.freq_min,
-                    freq_max=freq_max,
-                    width=768,
-                    height=320,
-                    amp_reference=stft_reference,
-                )
-            except Exception as exc:  # pragma: no cover
-                self._session._logger.exception("STFT preview generation failed")
-                with self._session._lock:
-                    if self._session._preview_request_id != request_id:
-                        return
-                    self._session.preview_state = "error"
-                    self._session.preview_error = str(exc)
-                self._session.emit_spectrogram_error("overview", str(exc))
-                return
-
-            with self._session._lock:
-                if self._session._preview_request_id != request_id:
-                    return
-                self._session.preview = preview
-                self._session._stft_amp_reference = ref
-                self._session.preview_state = "ready"
-
-            self._session.emit_spectrogram_preview("overview", "low", final=True, preview=preview)
-
-        import threading
-
-        thread = threading.Thread(target=_worker, name="soma-preview", daemon=True)
-        thread.start()
-
-    def get_preview_status(self) -> tuple[str, SpectrogramPreview | None, str | None]:
-        with self._session._lock:
-            return self._session.preview_state, self._session.preview, self._session.preview_error
-
-    def start_viewport_preview_async(
-        self,
-        time_start: float,
-        time_end: float,
-        freq_min: float,
-        freq_max: float,
-        width: int,
-        height: int,
-    ) -> str:
-        if self._session.audio_data is None or self._session.audio_info is None:
-            self._session._logger.debug("start_viewport_preview_async: no audio loaded")
-            return ""
-
-        duration = self._session.audio_data.shape[0] / float(self._session.audio_info.sample_rate)
-        if time_start < 0 or time_end > duration + 0.01 or time_start >= time_end:
-            self._session._logger.warning(
-                "start_viewport_preview_async: invalid time range [%.3f, %.3f] for duration %.3f",
-                time_start,
-                time_end,
-                duration,
-            )
-            return ""
-
-        if width <= 0 or height <= 0 or width > 4096 or height > 4096:
-            self._session._logger.warning(
-                "start_viewport_preview_async: invalid dimensions %dx%d",
-                width,
-                height,
-            )
-            return ""
-
-        request_id = str(uuid.uuid4())
-        with self._session._lock:
-            self._session._viewport_request_id = request_id
-            self._session._viewport_preview = None
-
-        window_duration = max(0.0, float(time_end - time_start))
-        use_stft = window_duration > _CWT_PREVIEW_WINDOW_THRESHOLD_SEC
-
-        width_clamped = int(np.clip(width, 16, 1536))
-        height_clamped = int(np.clip(height, 16, 1024))
-
-        params = ViewportParams(
-            audio=self._session.audio_data,
-            sample_rate=self._session.audio_info.sample_rate,
-            settings=self._session.settings,
-            time_start=time_start,
-            time_end=time_end,
-            freq_min=freq_min,
-            freq_max=freq_max,
-            width=width_clamped,
-            height=height_clamped,
-            use_stft=use_stft,
-            stft_amp_reference=self._session._stft_amp_reference,
-            cwt_amp_reference=self._session._amp_reference,
-        )
-
-        self._compute_manager.submit_viewport(request_id, params)
-        return request_id
 
     def snap_partial_async(self, trace: list[tuple[float, float]]) -> str | None:
         if self._session.audio_data is None or self._session.audio_info is None:
@@ -270,53 +144,6 @@ class PreviewService:
         except Exception:  # pragma: no cover
             self._session._logger.exception("snap amp reference estimation failed")
             return fallback
-
-    def _on_viewport_result(self, result: dict[str, object]) -> None:
-        request_id = result.get("request_id")
-        error = result.get("error")
-
-        with self._session._lock:
-            if request_id != self._session._viewport_request_id:
-                return
-
-        if error:
-            self._session._logger.error("Viewport computation error: %s", error)
-            self._session.emit_spectrogram_error("viewport", str(error))
-            return
-
-        preview_dict = result.get("preview")
-        if preview_dict is None or not isinstance(preview_dict, dict):
-            return
-
-        quality = str(result.get("quality", "low"))
-        final = bool(result.get("final", True))
-        amp_reference = result.get("amp_reference")
-
-        with self._session._lock:
-            if (
-                quality == "low"
-                and isinstance(amp_reference, (int, float))
-                and self._session._stft_amp_reference is None
-            ):
-                self._session._stft_amp_reference = float(amp_reference)
-            elif quality == "high" and isinstance(amp_reference, (int, float)) and self._session._amp_reference is None:
-                self._session._amp_reference = float(amp_reference)
-
-        preview = SpectrogramPreview(
-            width=int(preview_dict["width"]),
-            height=int(preview_dict["height"]),
-            data=list(preview_dict["data"]),
-            freq_min=float(preview_dict["freq_min"]),
-            freq_max=float(preview_dict["freq_max"]),
-            duration_sec=float(preview_dict["duration_sec"]),
-            time_start=float(preview_dict["time_start"]),
-            time_end=float(preview_dict["time_end"]),
-        )
-
-        with self._session._lock:
-            self._session._viewport_preview = preview
-
-        self._session.emit_spectrogram_preview("viewport", quality, final, preview)
 
     def _on_snap_result(self, result: dict[str, object]) -> None:
         request_id = result.get("request_id")

@@ -9,8 +9,10 @@ export type AnalysisSettings = {
   preview_bins_per_octave: number
   wavelet_bandwidth: number
   wavelet_center_freq: number
-  brightness: number
-  contrast: number
+  gain: number
+  min_db: number
+  max_db: number
+  gamma: number
 }
 
 export type AudioInfo = {
@@ -47,9 +49,7 @@ export type PlaybackSettings = {
 export type SpectrogramPreview = {
   width: number
   height: number
-  data: number[]
-  data_path?: string
-  data_length?: number
+  image_path: string
   time_start: number
   time_end: number
   freq_min: number

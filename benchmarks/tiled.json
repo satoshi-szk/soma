@@ -1,0 +1,127 @@
+{
+  "captured_at": "2026-02-12T13:02:17.770972+00:00",
+  "env": {
+    "python": "3.12.12",
+    "platform": "macOS-15.7.2-arm64-arm-64bit",
+    "sample_rate": 44100,
+    "warmup": 2,
+    "iterations": 8,
+    "mode": "tiled",
+    "settings": {
+      "freq_min": 20.0,
+      "freq_max": 20000.0,
+      "bins_per_octave": 96,
+      "time_resolution_ms": 10.0,
+      "preview_freq_max": 12000.0,
+      "preview_bins_per_octave": 48,
+      "wavelet_bandwidth": 8.0,
+      "wavelet_center_freq": 1.5,
+      "brightness": 0.0,
+      "contrast": 1.0
+    }
+  },
+  "cases": [
+    {
+      "name": "short_trace",
+      "params": {
+        "name": "short_trace",
+        "duration_sec": 2.0,
+        "trace_start_sec": 0.2,
+        "trace_end_sec": 1.0,
+        "base_freq_hz": 330.0,
+        "sweep_hz": 80.0,
+        "vibrato_hz": 6.0,
+        "vibrato_rate_hz": 5.0,
+        "trace_error_hz": 7.0
+      },
+      "trace_points": 81,
+      "snap_points_min": 81,
+      "snap_points_max": 81,
+      "timing": {
+        "min_ms": 478.8369170273654,
+        "max_ms": 544.4686250120867,
+        "mean_ms": 500.44453638474806,
+        "p50_ms": 496.54837501293514,
+        "p95_ms": 544.4686250120867
+      },
+      "timings_ms": [
+        478.8369,
+        484.2916,
+        485.4173,
+        509.8909,
+        544.4686,
+        496.3333,
+        496.7634,
+        507.5542
+      ]
+    },
+    {
+      "name": "medium_trace",
+      "params": {
+        "name": "medium_trace",
+        "duration_sec": 8.0,
+        "trace_start_sec": 0.5,
+        "trace_end_sec": 5.0,
+        "base_freq_hz": 440.0,
+        "sweep_hz": 220.0,
+        "vibrato_hz": 12.0,
+        "vibrato_rate_hz": 4.0,
+        "trace_error_hz": 10.0
+      },
+      "trace_points": 451,
+      "snap_points_min": 451,
+      "snap_points_max": 451,
+      "timing": {
+        "min_ms": 2317.26008298574,
+        "max_ms": 2377.060208003968,
+        "mean_ms": 2345.000473625987,
+        "p50_ms": 2347.295645507984,
+        "p95_ms": 2377.060208003968
+      },
+      "timings_ms": [
+        2361.9885,
+        2346.5212,
+        2377.0602,
+        2356.9365,
+        2317.2601,
+        2324.1866,
+        2348.0701,
+        2327.9806
+      ]
+    },
+    {
+      "name": "long_trace",
+      "params": {
+        "name": "long_trace",
+        "duration_sec": 12.0,
+        "trace_start_sec": 1.0,
+        "trace_end_sec": 8.0,
+        "base_freq_hz": 360.0,
+        "sweep_hz": 220.0,
+        "vibrato_hz": 18.0,
+        "vibrato_rate_hz": 3.0,
+        "trace_error_hz": 12.0
+      },
+      "trace_points": 701,
+      "snap_points_min": 701,
+      "snap_points_max": 701,
+      "timing": {
+        "min_ms": 3995.500707998872,
+        "max_ms": 4246.792624995578,
+        "mean_ms": 4122.930249755882,
+        "p50_ms": 4131.224374505109,
+        "p95_ms": 4246.792624995578
+      },
+      "timings_ms": [
+        4125.1663,
+        4099.1748,
+        4144.618,
+        4038.2829,
+        3995.5007,
+        4196.6243,
+        4137.2825,
+        4246.7926
+      ]
+    }
+  ]
+}

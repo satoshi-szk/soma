@@ -43,7 +43,8 @@ declare global {
         export_multitrack_midi: (payload: unknown) => Promise<unknown>
         export_monophonic_midi: (payload: unknown) => Promise<unknown>
         export_audio: (payload: unknown) => Promise<unknown>
-        request_viewport_preview: (payload: unknown) => Promise<unknown>
+        request_spectrogram_tile: (payload: unknown) => Promise<unknown>
+        request_spectrogram_overview: (payload: unknown) => Promise<unknown>
       }
     }
   }
