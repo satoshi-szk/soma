@@ -33,6 +33,7 @@ class _CleanupState:
         self.running = False
         self.approx_entries = 0
         self.needs_initial_scan = True
+        self.writes_during_run = 0
 
 
 def build_preview_payload(
@@ -89,11 +90,14 @@ def _notify_cache_write(cache: PreviewCacheConfig) -> None:
     )
     with state.lock:
         state.approx_entries += 1
+        if state.running:
+            state.writes_during_run += 1
         over_limit = state.approx_entries > (cache.max_entries + margin)
         if state.needs_initial_scan:
             over_limit = True
         if over_limit and not state.running:
             state.running = True
+            state.writes_during_run = 0
             should_start = True
     if should_start:
         thread = threading.Thread(
@@ -118,9 +122,11 @@ def _cleanup_state(cache: PreviewCacheConfig) -> _CleanupState:
 def _run_cleanup_worker(cache: PreviewCacheConfig, state: _CleanupState) -> None:
     kept_count = _cleanup_cache(cache)
     with state.lock:
+        extra_writes = state.writes_during_run
         state.running = False
         state.needs_initial_scan = False
-        state.approx_entries = kept_count
+        state.writes_during_run = 0
+        state.approx_entries = kept_count + extra_writes
 
 
 def _cleanup_cache(cache: PreviewCacheConfig) -> int:

@@ -766,9 +766,13 @@ class SomaApi:
             if viewport_id is not None and viewport_id > self._latest_viewport_id:
                 self._latest_viewport_id = viewport_id
             if viewport_id is not None and viewport_id < self._latest_viewport_id:
-                return {"status": "error", "message": "Stale tile request dropped."}
+                return {"status": "error", "message": "Stale tile request dropped.", "error_code": "stale_tile"}
             if self._active_tile_requests >= self._MAX_ACTIVE_TILE_REQUESTS:
-                return {"status": "error", "message": "Tile queue saturated. Retry latest viewport."}
+                return {
+                    "status": "error",
+                    "message": "Tile queue saturated. Retry latest viewport.",
+                    "error_code": "tile_saturated",
+                }
             self._active_tile_requests += 1
 
         settings = self._session.settings
@@ -776,7 +780,7 @@ class SomaApi:
             if viewport_id is not None:
                 with self._tile_request_lock:
                     if viewport_id < self._latest_viewport_id:
-                        return {"status": "error", "message": "Stale tile request dropped."}
+                        return {"status": "error", "message": "Stale tile request dropped.", "error_code": "stale_tile"}
             if any(
                 value is not None
                 for value in (parsed.gain, parsed.min_db, parsed.max_db, parsed.gamma)

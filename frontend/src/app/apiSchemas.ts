@@ -73,7 +73,11 @@ const partialSchema = z.object({
 
 const okStatusSchema = z.object({ status: z.literal('ok') })
 const cancelledStatusSchema = z.object({ status: z.literal('cancelled') })
-const errorStatusSchema = z.object({ status: z.literal('error'), message: z.string().optional() })
+const errorStatusSchema = z.object({
+  status: z.literal('error'),
+  message: z.string().optional(),
+  error_code: z.string().optional(),
+})
 
 const loadResponseSchema = z.union([
   z.object({

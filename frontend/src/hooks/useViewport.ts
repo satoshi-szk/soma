@@ -17,6 +17,7 @@ type ViewportParams = {
   freqMin: number
   freqMax: number
   viewportId: number
+  retryCount?: number
 }
 
 type ViewportQuality = 'low' | 'high' | 'local'
@@ -241,7 +242,7 @@ export function useViewport(
       if (!api) return
 
       const tileHeight = Math.round(spectrogramAreaHeight)
-      const pendingJobs: Array<{ params: ViewportParams; key: string }> = []
+      let pendingJobs: Array<{ params: ViewportParams; key: string }> = []
       for (const params of paramsList) {
         const key = buildViewportParamsKey(params, settings, tileHeight)
         if (requestedTileKeysRef.current.has(key)) continue
@@ -250,9 +251,10 @@ export function useViewport(
       }
       if (pendingJobs.length === 0) return
 
-      let nextIndex = 0
-      const workerCount = Math.min(MAX_VIEWPORT_REQUESTS_IN_FLIGHT, pendingJobs.length)
-      const runJob = async (job: { params: ViewportParams; key: string }) => {
+      const runJob = async (
+        job: { params: ViewportParams; key: string },
+        retryJobs: ViewportParams[]
+      ) => {
         try {
           const result = await api.request_spectrogram_tile({
             time_start: job.params.timeStart,
@@ -270,8 +272,14 @@ export function useViewport(
 
           if (result.status === 'error') {
             requestedTileKeysRef.current.delete(job.key)
-            const message = result.message ?? ''
-            if (message.includes('Stale tile request dropped') || message.includes('Tile queue saturated')) {
+            if (result.error_code === 'stale_tile') {
+              return
+            }
+            if (result.error_code === 'tile_saturated') {
+              const retries = job.params.retryCount ?? 0
+              if (retries < 2) {
+                retryJobs.push({ ...job.params, retryCount: retries + 1 })
+              }
               return
             }
             reportError('Viewport', result.message ?? 'Failed to request viewport preview')
@@ -287,17 +295,33 @@ export function useViewport(
           reportError('Viewport', `Failed to request viewport preview: ${message}`)
         }
       }
-      const workers = Array.from({ length: workerCount }, () =>
-        (async () => {
-          while (true) {
-            const current = nextIndex
-            nextIndex += 1
-            if (current >= pendingJobs.length) break
-            await runJob(pendingJobs[current])
-          }
-        })()
-      )
-      await Promise.allSettled(workers)
+
+      while (pendingJobs.length > 0) {
+        let nextIndex = 0
+        const workerCount = Math.min(MAX_VIEWPORT_REQUESTS_IN_FLIGHT, pendingJobs.length)
+        const retryJobs: ViewportParams[] = []
+        const workers = Array.from({ length: workerCount }, () =>
+          (async () => {
+            while (true) {
+              const current = nextIndex
+              nextIndex += 1
+              if (current >= pendingJobs.length) break
+              await runJob(pendingJobs[current], retryJobs)
+            }
+          })()
+        )
+        await Promise.allSettled(workers)
+        const currentViewportId = viewportRequestIdRef.current
+        const validRetries = retryJobs.filter((job) => job.viewportId === currentViewportId)
+        if (validRetries.length === 0) {
+          break
+        }
+        await new Promise((resolve) => window.setTimeout(resolve, 80))
+        pendingJobs = validRetries.map((params) => ({
+          params,
+          key: buildViewportParamsKey(params, settings, tileHeight),
+        }))
+      }
     },
     [reportError, spectrogramAreaHeight, settings, upsertViewportPreview]
   )
