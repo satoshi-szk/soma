@@ -234,7 +234,7 @@ class SpectrogramRenderer:
         normalized = _normalize_magnitude_db(composed, reference_max=reference)
         normalized = np.flipud(normalized)
         normalized = _apply_preview_tone(normalized, settings)
-        data = (normalized * 255).astype(np.uint8).flatten().tolist()
+        data = (normalized * 255).astype(np.uint8, copy=False).tobytes()
         preview = SpectrogramPreview(
             width=width,
             height=height,
@@ -447,7 +447,7 @@ class SpectrogramRenderer:
         normalized = _normalize_magnitude_db(composed, reference_max=reference)
         normalized = np.flipud(normalized)
         normalized = _apply_preview_tone(normalized, settings)
-        data = (normalized * 255).astype(np.uint8).flatten().tolist()
+        data = (normalized * 255).astype(np.uint8, copy=False).tobytes()
         preview = SpectrogramPreview(
             width=width,
             height=height,

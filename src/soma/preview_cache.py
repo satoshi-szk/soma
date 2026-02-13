@@ -111,7 +111,10 @@ def _render_preview_jpeg(preview: SpectrogramPreview) -> bytes:
     if len(preview.data) != expected:
         raise ValueError(f"invalid preview data length: expected={expected} got={len(preview.data)}")
 
-    levels = np.asarray(preview.data, dtype=np.uint8).reshape((preview.height, preview.width))
+    if isinstance(preview.data, bytes):
+        levels = np.frombuffer(preview.data, dtype=np.uint8).reshape((preview.height, preview.width))
+    else:
+        levels = np.asarray(preview.data, dtype=np.uint8).reshape((preview.height, preview.width))
     rgb = _apply_magma_like_colormap(levels)
     image = Image.fromarray(rgb, mode="RGB")
     buffer = io.BytesIO()
