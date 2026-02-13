@@ -1,18 +1,28 @@
 export type ApiStatus = 'checking' | 'connected' | 'disconnected'
 
-export type AnalysisSettings = {
+export type SpectrogramSettings = {
   freq_min: number
   freq_max: number
-  bins_per_octave: number
-  time_resolution_ms: number
   preview_freq_max: number
-  preview_bins_per_octave: number
-  wavelet_bandwidth: number
-  wavelet_center_freq: number
+  multires_blend_octaves: number
   gain: number
   min_db: number
   max_db: number
   gamma: number
+}
+
+export type SnapSettings = {
+  freq_min: number
+  freq_max: number
+  bins_per_octave: number
+  time_resolution_ms: number
+  wavelet_bandwidth: number
+  wavelet_center_freq: number
+}
+
+export type AnalysisSettings = {
+  spectrogram: SpectrogramSettings
+  snap: SnapSettings
 }
 
 export type AudioInfo = {

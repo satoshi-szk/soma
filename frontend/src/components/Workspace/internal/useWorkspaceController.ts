@@ -94,8 +94,8 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
     return (duration * zoomX) / preview.width
   }, [preview, duration, zoomX])
   const scale = useMemo(() => ({ x: timeScale, y: baseScale.y * zoomY }), [timeScale, baseScale, zoomY])
-  const freqMin = preview?.freq_min ?? settings.freq_min
-  const freqMax = preview?.freq_max ?? settings.freq_max
+  const freqMin = preview?.freq_min ?? settings.spectrogram.freq_min
+  const freqMax = preview?.freq_max ?? settings.spectrogram.freq_max
 
   const viewportPositionsByKey = useMemo(() => {
     if (!viewportPreviews || !preview) return new Map<string, { x: number; y: number; width: number; height: number }>()
@@ -440,8 +440,8 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
     if (freqMin <= 0 || freqMax <= freqMin) return null
     if (!showResolutionAssist) return null
 
-    const timeResolutionSec = Math.max(0.001, settings.time_resolution_ms / 1000)
-    const binsPerOctave = Math.max(1, Math.round(settings.bins_per_octave))
+    const timeResolutionSec = Math.max(0.001, settings.snap.time_resolution_ms / 1000)
+    const binsPerOctave = Math.max(1, Math.round(settings.snap.bins_per_octave))
     const cursor = positionToTimeFreqValue(hoverPointer.x, hoverPointer.y)
 
     const clampedTime = Math.max(0, Math.min(duration, cursor.time))
@@ -473,8 +473,8 @@ export function useWorkspaceController(props: WorkspaceProps, stageSize: { width
     spectrogramAreaHeight,
     freqMin,
     freqMax,
-    settings.time_resolution_ms,
-    settings.bins_per_octave,
+    settings.snap.time_resolution_ms,
+    settings.snap.bins_per_octave,
     showResolutionAssist,
     positionToTimeFreqValue,
     duration,

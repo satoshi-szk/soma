@@ -8,7 +8,7 @@ from typing import cast
 import numpy as np
 
 from soma.analysis import _apply_preview_tone, _normalize_magnitude_db
-from soma.models import AnalysisSettings, SpectrogramPreview
+from soma.models import SpectrogramPreview, SpectrogramSettings
 
 
 class SpectrogramRenderer:
@@ -24,9 +24,13 @@ class SpectrogramRenderer:
     _MIN_COLS = 2048
     _MAX_COLS = 320_000
 
-    def __init__(self, audio: np.ndarray, sample_rate: int) -> None:
+    def __init__(self, audio: np.ndarray, sample_rate: int, global_blend_octaves: float = 1.0) -> None:
         self._sample_rate = sample_rate
         self._length = int(audio.shape[0])
+        blend = float(global_blend_octaves)
+        if not np.isfinite(blend) or blend <= 0.0:
+            blend = 1.0
+        self._global_blend_octaves = max(0.01, min(6.0, blend))
         self._temp_dir = tempfile.TemporaryDirectory(prefix="soma-spec-")
         self._audio_path = Path(self._temp_dir.name) / "audio.dat"
         self._matrix_path = Path(self._temp_dir.name) / "spec.dat"
@@ -39,7 +43,7 @@ class SpectrogramRenderer:
             self._audio = np.memmap(self._audio_path, dtype=np.float32, mode="r", shape=(self._length,))
             self._prefer_local_mode = False
             self._local_cache: OrderedDict[
-                tuple[int, int, int, int, int, int, int, int, int, int],
+                tuple[int, int, int, int, int, int, int, int, int, int, int],
                 tuple[SpectrogramPreview, float],
             ] = OrderedDict()
             self._prepare_global_matrix()
@@ -59,7 +63,7 @@ class SpectrogramRenderer:
 
     def render_overview(
         self,
-        settings: AnalysisSettings,
+        settings: SpectrogramSettings,
         width: int,
         height: int,
         stft_amp_reference: float | None = None,
@@ -78,7 +82,7 @@ class SpectrogramRenderer:
 
     def render_tile(
         self,
-        settings: AnalysisSettings,
+        settings: SpectrogramSettings,
         time_start: float,
         time_end: float,
         freq_min: float,
@@ -86,12 +90,11 @@ class SpectrogramRenderer:
         width: int,
         height: int,
         stft_amp_reference: float | None = None,
-        cwt_amp_reference: float | None = None,
     ) -> tuple[SpectrogramPreview, float, str]:
         time_span = max(time_end - time_start, 1e-9)
         required_cols_per_sec = width / time_span
         use_local = self._should_use_local_mode(required_cols_per_sec)
-        amp_reference = stft_amp_reference if stft_amp_reference is not None else cwt_amp_reference
+        amp_reference = stft_amp_reference
 
         if use_local:
             preview, ref = self._render_local_tile(
@@ -130,7 +133,7 @@ class SpectrogramRenderer:
 
     def _render_local_tile(
         self,
-        settings: AnalysisSettings,
+        settings: SpectrogramSettings,
         time_start: float,
         time_end: float,
         freq_min: float,
@@ -206,7 +209,7 @@ class SpectrogramRenderer:
         centers = np.rint(center_times * float(self._sample_rate)).astype(np.int64) - np.int64(ext_start_idx)
         target_log_freqs = np.geomspace(effective_min, effective_max, height).astype(np.float64)
         band_freq_max = max(effective_max, nyquist)
-        weights = self._band_weights(target_log_freqs, band_freq_max)
+        weights = self._band_weights(target_log_freqs, band_freq_max, settings.multires_blend_octaves)
         composed = np.zeros((height, width), dtype=np.float32)
 
         bands = [
@@ -251,14 +254,14 @@ class SpectrogramRenderer:
 
     def _build_local_cache_key(
         self,
-        settings: AnalysisSettings,
+        settings: SpectrogramSettings,
         time_start: float,
         time_end: float,
         freq_min: float,
         freq_max: float,
         width: int,
         height: int,
-    ) -> tuple[int, int, int, int, int, int, int, int, int, int]:
+    ) -> tuple[int, int, int, int, int, int, int, int, int, int, int]:
         return (
             int(round(time_start / self._LOCAL_TIME_QUANTUM_SEC)),
             int(round(time_end / self._LOCAL_TIME_QUANTUM_SEC)),
@@ -270,11 +273,12 @@ class SpectrogramRenderer:
             int(round(settings.min_db * 10.0)),
             int(round(settings.max_db * 10.0)),
             int(round(settings.gamma * 1000.0)),
+            int(round(settings.multires_blend_octaves * 1000.0)),
         )
 
     def _store_local_cache(
         self,
-        cache_key: tuple[int, int, int, int, int, int, int, int, int, int],
+        cache_key: tuple[int, int, int, int, int, int, int, int, int, int, int],
         value: tuple[SpectrogramPreview, float],
     ) -> None:
         self._local_cache[cache_key] = value
@@ -337,7 +341,7 @@ class SpectrogramRenderer:
             (2000.0, self._matrix_freq_max, 256),
         ]
 
-        weights = self._band_weights(self._matrix_log_freqs, self._matrix_freq_max)
+        weights = self._band_weights(self._matrix_log_freqs, self._matrix_freq_max, self._global_blend_octaves)
 
         chunk_cols = 256
         for chunk_start in range(0, self._matrix_cols, chunk_cols):
@@ -373,7 +377,7 @@ class SpectrogramRenderer:
 
     def _render_from_global_matrix(
         self,
-        settings: AnalysisSettings,
+        settings: SpectrogramSettings,
         time_start: float,
         time_end: float,
         freq_min: float,
@@ -479,18 +483,35 @@ class SpectrogramRenderer:
         mags = np.abs(spectra).astype(np.float32, copy=False)
         return mags.T
 
-    def _band_weights(self, target_freqs: np.ndarray, band_freq_max: float) -> list[np.ndarray]:
+    def _band_weights(
+        self,
+        target_freqs: np.ndarray,
+        band_freq_max: float,
+        blend_octaves: float,
+    ) -> list[np.ndarray]:
         log2_freqs = np.log2(target_freqs)
-        low_center_hz = np.sqrt(20.0 * 200.0)
-        mid_center_hz = np.sqrt(200.0 * 2000.0)
-        high_center_hz = np.sqrt(2000.0 * max(2000.0, band_freq_max))
-        denom_low_mid = max(np.log2(mid_center_hz) - np.log2(low_center_hz), 1e-12)
-        denom_mid_high = max(np.log2(high_center_hz) - np.log2(mid_center_hz), 1e-12)
-        t1 = np.clip((log2_freqs - np.log2(low_center_hz)) / denom_low_mid, 0.0, 1.0).astype(np.float32)
-        t2 = np.clip((log2_freqs - np.log2(mid_center_hz)) / denom_mid_high, 0.0, 1.0).astype(np.float32)
+        blend = float(blend_octaves)
+        if not np.isfinite(blend) or blend <= 0.0:
+            blend = 1.0
+        blend = max(0.01, min(6.0, blend))
+        half = blend * 0.5
+        edge_low_mid = np.log2(np.sqrt(200.0 * 200.0))
+        edge_mid_high = np.log2(np.sqrt(2000.0 * 2000.0))
+
+        def _smoothstep(x: np.ndarray) -> np.ndarray:
+            clipped = np.clip(x, 0.0, 1.0).astype(np.float32)
+            return np.asarray(clipped * clipped * (3.0 - 2.0 * clipped), dtype=np.float32)
+
+        t1 = _smoothstep((log2_freqs - (edge_low_mid - half)) / blend)
+        t2 = _smoothstep((log2_freqs - (edge_mid_high - half)) / blend)
         weight_low = 1.0 - t1
         weight_mid = t1 * (1.0 - t2)
         weight_high = t2
+        if band_freq_max < 2000.0:
+            weight_high = np.zeros_like(weight_high)
+            total = np.maximum(weight_low + weight_mid, 1e-12)
+            weight_low = weight_low / total
+            weight_mid = weight_mid / total
         return [weight_low, weight_mid, weight_high]
 
     def _resample_time_matrix(

@@ -15,18 +15,24 @@ export const TOOL_LIST: { id: ToolId; label: string }[] = [
 ];
 
 export const DEFAULT_SETTINGS: AnalysisSettings = {
-  freq_min: 20,
-  freq_max: 20000,
-  bins_per_octave: 48,
-  time_resolution_ms: 10,
-  preview_freq_max: 12000,
-  preview_bins_per_octave: 48,
-  wavelet_bandwidth: 8.0,
-  wavelet_center_freq: 1.5,
-  gain: 1,
-  min_db: -80,
-  max_db: 0,
-  gamma: 1,
+  spectrogram: {
+    freq_min: 20,
+    freq_max: 20000,
+    preview_freq_max: 12000,
+    multires_blend_octaves: 1.0,
+    gain: 1,
+    min_db: -80,
+    max_db: 0,
+    gamma: 1,
+  },
+  snap: {
+    freq_min: 20,
+    freq_max: 20000,
+    bins_per_octave: 96,
+    time_resolution_ms: 10,
+    wavelet_bandwidth: 8.0,
+    wavelet_center_freq: 1.5,
+  },
 };
 
 export const ZOOM_X_MIN_PX_PER_SEC = 0.05;

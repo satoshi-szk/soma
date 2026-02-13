@@ -1,6 +1,14 @@
 from pathlib import Path
 
-from soma.models import AnalysisSettings, Partial, PartialPoint, PlaybackSettings, SourceInfo
+from soma.models import (
+    AnalysisSettings,
+    Partial,
+    PartialPoint,
+    PlaybackSettings,
+    SnapSettings,
+    SourceInfo,
+    SpectrogramSettings,
+)
 from soma.persistence import (
     build_project_payload,
     load_project,
@@ -20,7 +28,10 @@ def test_save_and_load_project(tmp_path: Path) -> None:
         duration_sec=1.0,
         md5_hash="abc",
     )
-    settings = AnalysisSettings(freq_min=30.0, freq_max=18000.0)
+    settings = AnalysisSettings(
+        spectrogram=SpectrogramSettings(freq_min=30.0, freq_max=18000.0),
+        snap=SnapSettings(freq_min=30.0, freq_max=18000.0),
+    )
     playback_settings = PlaybackSettings(
         master_volume=0.35,
         output_mode="midi",
@@ -54,7 +65,7 @@ def test_save_and_load_project(tmp_path: Path) -> None:
 
     assert loaded_source is not None
     assert loaded_source.file_path == source.file_path
-    assert loaded_settings.freq_min == 30.0
+    assert loaded_settings.spectrogram.freq_min == 30.0
     assert loaded_playback_settings.master_volume == 0.35
     assert loaded_playback_settings.output_mode == "midi"
     assert loaded_playback_settings.mix_ratio == 0.42

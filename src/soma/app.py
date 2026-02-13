@@ -61,7 +61,7 @@ from soma.exporter import (
     render_cv_voice_buffers,
 )
 from soma.logging_utils import configure_logging, get_session_log_dir
-from soma.models import AnalysisSettings, PartialPoint, PlaybackSettings
+from soma.models import AnalysisSettings, PartialPoint, PlaybackSettings, SnapSettings, SpectrogramSettings
 from soma.preview_cache import PreviewCacheConfig, build_preview_payload
 from soma.recent_projects import RecentProjectStore, default_recent_projects_path
 from soma.services import HistoryService, PartialEditService, PlaybackService, PreviewService, ProjectService
@@ -189,7 +189,7 @@ class SomaApi:
         settings = self._session.settings
         try:
             preview, ref = renderer.render_overview(
-                settings=settings,
+                settings=settings.spectrogram,
                 width=width,
                 height=height,
                 stft_amp_reference=self._session._stft_amp_reference,
@@ -460,7 +460,10 @@ class SomaApi:
         parsed = _validated_payload(UpdateSettingsPayload, payload, "update_settings")
         if isinstance(parsed, dict):
             return parsed
-        settings = AnalysisSettings(**parsed.model_dump())
+        settings = AnalysisSettings(
+            spectrogram=SpectrogramSettings(**parsed.spectrogram.model_dump()),
+            snap=SnapSettings(**parsed.snap.model_dump()),
+        )
         self._project_service.set_settings(settings)
         preview_payload = self._build_overview_preview()
         if preview_payload is None:
@@ -758,19 +761,23 @@ class SomaApi:
             value is not None
             for value in (parsed.gain, parsed.min_db, parsed.max_db, parsed.gamma)
         ):
+            spectrogram = settings.spectrogram
             settings = AnalysisSettings(
-                **{
-                    **settings.to_dict(),
-                    "gain": settings.gain if parsed.gain is None else float(parsed.gain),
-                    "min_db": settings.min_db if parsed.min_db is None else float(parsed.min_db),
-                    "max_db": settings.max_db if parsed.max_db is None else float(parsed.max_db),
-                    "gamma": settings.gamma if parsed.gamma is None else float(parsed.gamma),
-                }
+                spectrogram=SpectrogramSettings(
+                    **{
+                        **spectrogram.to_dict(),
+                        "gain": spectrogram.gain if parsed.gain is None else float(parsed.gain),
+                        "min_db": spectrogram.min_db if parsed.min_db is None else float(parsed.min_db),
+                        "max_db": spectrogram.max_db if parsed.max_db is None else float(parsed.max_db),
+                        "gamma": spectrogram.gamma if parsed.gamma is None else float(parsed.gamma),
+                    }
+                ),
+                snap=settings.snap,
             )
 
         try:
             preview, ref, quality = renderer.render_tile(
-                settings=settings,
+                settings=settings.spectrogram,
                 time_start=parsed.time_start,
                 time_end=parsed.time_end,
                 freq_min=parsed.freq_min,
@@ -778,12 +785,8 @@ class SomaApi:
                 width=parsed.width,
                 height=parsed.height,
                 stft_amp_reference=self._session._stft_amp_reference,
-                cwt_amp_reference=self._session._amp_reference,
             )
-            if quality == "low":
-                self._session._stft_amp_reference = ref
-            else:
-                self._session._amp_reference = ref
+            self._session._stft_amp_reference = ref
         except Exception as exc:
             logger.exception("request_spectrogram_tile failed")
             return {"status": "error", "message": str(exc)}
@@ -805,18 +808,22 @@ class SomaApi:
             value is not None
             for value in (parsed.gain, parsed.min_db, parsed.max_db, parsed.gamma)
         ):
+            spectrogram = settings.spectrogram
             settings = AnalysisSettings(
-                **{
-                    **settings.to_dict(),
-                    "gain": settings.gain if parsed.gain is None else float(parsed.gain),
-                    "min_db": settings.min_db if parsed.min_db is None else float(parsed.min_db),
-                    "max_db": settings.max_db if parsed.max_db is None else float(parsed.max_db),
-                    "gamma": settings.gamma if parsed.gamma is None else float(parsed.gamma),
-                }
+                spectrogram=SpectrogramSettings(
+                    **{
+                        **spectrogram.to_dict(),
+                        "gain": spectrogram.gain if parsed.gain is None else float(parsed.gain),
+                        "min_db": spectrogram.min_db if parsed.min_db is None else float(parsed.min_db),
+                        "max_db": spectrogram.max_db if parsed.max_db is None else float(parsed.max_db),
+                        "gamma": spectrogram.gamma if parsed.gamma is None else float(parsed.gamma),
+                    }
+                ),
+                snap=settings.snap,
             )
         try:
             preview, ref = renderer.render_overview(
-                settings=settings,
+                settings=settings.spectrogram,
                 width=parsed.width,
                 height=parsed.height,
                 stft_amp_reference=self._session._stft_amp_reference,
@@ -991,8 +998,8 @@ class SomaApi:
                 Path(selection),
                 buffer,
                 settings,
-                self._session.settings.freq_min,
-                self._session.settings.freq_max,
+                self._session.settings.spectrogram.freq_min,
+                self._session.settings.spectrogram.freq_max,
             )
         return {"status": "ok", "path": str(selection)}
 

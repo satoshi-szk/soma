@@ -9,7 +9,7 @@ import numpy as np
 import pywt
 from scipy.signal import find_peaks, resample, resample_poly
 
-from soma.models import AnalysisSettings, AudioInfo, PartialPoint, SpectrogramPreview
+from soma.models import AnalysisSettings, AudioInfo, PartialPoint, SnapSettings, SpectrogramPreview, SpectrogramSettings
 
 
 def load_audio(
@@ -220,8 +220,8 @@ def make_spectrogram(
         ), 1.0
 
     # 周波数範囲を有効な境界内に収める。
-    effective_freq_min = max(freq_min, settings.freq_min, 1.0)
-    effective_freq_max = min(freq_max, settings.freq_max, sample_rate * 0.5)
+    effective_freq_min = max(freq_min, settings.snap.freq_min, 1.0)
+    effective_freq_max = min(freq_max, settings.snap.freq_max, sample_rate * 0.5)
     effective_freq_max = max(effective_freq_max, effective_freq_min * 1.001)
 
     # 出力 1px あたりの時間サンプル数を確保しつつ、要求 freq_max の
@@ -250,9 +250,9 @@ def make_spectrogram(
     # 出力高さに応じて bins_per_octave を決める。
     # ピクセル数が多いほど、より高い周波数解像度が必要になる。
     octaves = np.log2(effective_freq_max / effective_freq_min)
-    bins_per_octave = max(4, min(settings.preview_bins_per_octave, int(height / max(1, octaves))))
+    bins_per_octave = max(4, min(settings.snap.bins_per_octave, int(height / max(1, octaves))))
 
-    cwt_settings = AnalysisSettings(
+    cwt_settings = SnapSettings(
         freq_min=effective_freq_min,
         freq_max=effective_freq_max,
         bins_per_octave=bins_per_octave,
@@ -262,8 +262,8 @@ def make_spectrogram(
         audio_segment,
         working_sample_rate,
         frequencies,
-        wavelet_bandwidth=settings.wavelet_bandwidth,
-        wavelet_center_freq=settings.wavelet_center_freq,
+        wavelet_bandwidth=settings.snap.wavelet_bandwidth,
+        wavelet_center_freq=settings.snap.wavelet_center_freq,
     )
 
     computed_amp_reference = float(np.max(cwt_matrix)) if cwt_matrix.size else 1.0
@@ -275,7 +275,7 @@ def make_spectrogram(
     resized = resample(time_resampled, height, axis=0)
     normalized = np.clip(resized, 0.0, 1.0)
     normalized = np.flipud(normalized)
-    normalized = _apply_preview_tone(normalized, settings)
+    normalized = _apply_preview_tone(normalized, settings.spectrogram)
 
     data = (normalized * 255).astype(np.uint8).flatten().tolist()
     return SpectrogramPreview(
@@ -341,8 +341,13 @@ def make_spectrogram_stft(
         ), 1.0
 
     # 周波数範囲を有効な境界内に収める。
-    effective_freq_min = max(freq_min, settings.freq_min, 1.0)
-    effective_freq_max = min(freq_max, settings.preview_freq_max, settings.freq_max, sample_rate * 0.5)
+    effective_freq_min = max(freq_min, settings.spectrogram.freq_min, 1.0)
+    effective_freq_max = min(
+        freq_max,
+        settings.spectrogram.preview_freq_max,
+        settings.spectrogram.freq_max,
+        sample_rate * 0.5,
+    )
     effective_freq_max = max(effective_freq_max, effective_freq_min * 1.001)
 
     # 疎な STFT: セグメント全体から `width` 個の窓を抽出する（スライドしない）。
@@ -400,7 +405,7 @@ def make_spectrogram_stft(
 
     normalized = _normalize_magnitude_db(resized, reference_max=amp_reference)
     normalized = np.flipud(normalized)
-    normalized = _apply_preview_tone(normalized, settings)
+    normalized = _apply_preview_tone(normalized, settings.spectrogram)
     data = (normalized * 255).astype(np.uint8).flatten().tolist()
     return SpectrogramPreview(
         width=width,
@@ -498,9 +503,9 @@ def estimate_cwt_amp_reference(
     if audio_segment.size < 32:
         return 1.0
 
-    effective_freq_min = max(settings.freq_min, 1.0) if freq_min is None else max(freq_min, 1.0)
+    effective_freq_min = max(settings.snap.freq_min, 1.0) if freq_min is None else max(freq_min, 1.0)
     effective_freq_max = (
-        min(settings.freq_max, sample_rate * 0.5) if freq_max is None else min(freq_max, sample_rate * 0.5)
+        min(settings.snap.freq_max, sample_rate * 0.5) if freq_max is None else min(freq_max, sample_rate * 0.5)
     )
     effective_freq_max = max(effective_freq_max, effective_freq_min * 1.001)
 
@@ -521,12 +526,12 @@ def estimate_cwt_amp_reference(
         return 1.0
 
     frequencies = _build_frequencies(
-        AnalysisSettings(
+        SnapSettings(
             freq_min=effective_freq_min,
             freq_max=effective_freq_max,
-            bins_per_octave=settings.bins_per_octave,
-            wavelet_bandwidth=settings.wavelet_bandwidth,
-            wavelet_center_freq=settings.wavelet_center_freq,
+            bins_per_octave=settings.snap.bins_per_octave,
+            wavelet_bandwidth=settings.snap.wavelet_bandwidth,
+            wavelet_center_freq=settings.snap.wavelet_center_freq,
         ),
         max_freq=effective_freq_max,
     )
@@ -534,8 +539,8 @@ def estimate_cwt_amp_reference(
         window,
         sample_rate,
         frequencies,
-        wavelet_bandwidth=settings.wavelet_bandwidth,
-        wavelet_center_freq=settings.wavelet_center_freq,
+        wavelet_bandwidth=settings.snap.wavelet_bandwidth,
+        wavelet_center_freq=settings.snap.wavelet_center_freq,
     )
     max_mag = float(np.max(magnitude)) if magnitude.size else 0.0
     return max_mag if max_mag > 0 else 1.0
@@ -576,7 +581,7 @@ def snap_trace(
         return []
 
     resample_started_at = perf_counter()
-    resampled = _resample_trace(trace, settings.time_resolution_ms)
+    resampled = _resample_trace(trace, settings.snap.time_resolution_ms)
     trace_points = list(resampled)
     resample_ms = (perf_counter() - resample_started_at) * 1000.0
 
@@ -682,14 +687,14 @@ def _snap_trace_tiled(
         tile_freq_min = float(np.min(tile_freqs))
         tile_freq_max = float(np.max(tile_freqs))
         local_freq_min = max(1.0, tile_freq_min / (2.0**freq_window_octaves))
-        local_freq_max = min(settings.freq_max, tile_freq_max * (2.0**freq_window_octaves))
+        local_freq_max = min(settings.snap.freq_max, tile_freq_max * (2.0**freq_window_octaves))
         local_freq_max = max(local_freq_max, local_freq_min * 1.001)
 
         frequencies = _build_frequencies(
-            AnalysisSettings(
+            SnapSettings(
                 freq_min=local_freq_min,
                 freq_max=local_freq_max,
-                bins_per_octave=settings.bins_per_octave,
+                bins_per_octave=settings.snap.bins_per_octave,
             )
         )
 
@@ -708,8 +713,8 @@ def _snap_trace_tiled(
             segment,
             sample_rate,
             frequencies,
-            wavelet_bandwidth=settings.wavelet_bandwidth,
-            wavelet_center_freq=settings.wavelet_center_freq,
+            wavelet_bandwidth=settings.snap.wavelet_bandwidth,
+            wavelet_center_freq=settings.snap.wavelet_center_freq,
         )
         cwt_elapsed_ms += (perf_counter() - cwt_started_at) * 1000.0
         cwt_calls += 1
@@ -819,12 +824,12 @@ def _snap_trace_pointwise(
 
         window = _to_float32(window)
         local_freq_min = max(1.0, freq_in / (2.0**freq_window_octaves))
-        local_freq_max = min(settings.freq_max, freq_in * (2.0**freq_window_octaves))
+        local_freq_max = min(settings.snap.freq_max, freq_in * (2.0**freq_window_octaves))
         frequencies = _build_frequencies(
-            AnalysisSettings(
+            SnapSettings(
                 freq_min=local_freq_min,
                 freq_max=local_freq_max,
-                bins_per_octave=settings.bins_per_octave,
+                bins_per_octave=settings.snap.bins_per_octave,
             )
         )
 
@@ -833,8 +838,8 @@ def _snap_trace_pointwise(
             window,
             sample_rate,
             frequencies,
-            wavelet_bandwidth=settings.wavelet_bandwidth,
-            wavelet_center_freq=settings.wavelet_center_freq,
+            wavelet_bandwidth=settings.snap.wavelet_bandwidth,
+            wavelet_center_freq=settings.snap.wavelet_center_freq,
         )
         cwt_elapsed_ms += (perf_counter() - cwt_started_at) * 1000.0
         cwt_calls += 1
@@ -906,7 +911,7 @@ def _to_float32(audio: np.ndarray) -> np.ndarray:
     return audio.astype(np.float32)
 
 
-def _build_frequencies(settings: AnalysisSettings, max_freq: float | None = None) -> np.ndarray:
+def _build_frequencies(settings: SnapSettings, max_freq: float | None = None) -> np.ndarray:
     min_freq = max(1e-3, settings.freq_min)
     max_freq = max(min_freq * 1.001, settings.freq_max if max_freq is None else min(settings.freq_max, max_freq))
     octaves = np.log2(max_freq / min_freq)
@@ -987,7 +992,7 @@ def _normalize_magnitude_db(magnitude: np.ndarray, reference_max: float | None =
     return np.asarray(np.clip(normalized, 0.0, 1.0), dtype=np.float32)
 
 
-def _apply_preview_tone(normalized: np.ndarray, settings: AnalysisSettings) -> np.ndarray:
+def _apply_preview_tone(normalized: np.ndarray, settings: SpectrogramSettings) -> np.ndarray:
     gain = float(settings.gain)
     if not np.isfinite(gain):
         gain = 1.0

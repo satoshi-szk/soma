@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AnalysisSettingsModal } from './components/modals/AnalysisSettingsModal'
+import { AnalysisSettingsSidebar } from './components/modals/AnalysisSettingsSidebar'
 import { ExportModal } from './components/modals/ExportModal'
 import { PlaybackSettingsSidebar } from './components/modals/PlaybackSettingsSidebar'
 import { HeaderToolbar } from './components/HeaderToolbar'
@@ -27,9 +27,8 @@ function App() {
     freq: 440,
     amp: null,
   })
-  const [showAnalysisModal, setShowAnalysisModal] = useState(false)
   const [showExportModal, setShowExportModal] = useState(false)
-  const [showPlaybackSettings, setShowPlaybackSettings] = useState(false)
+  const [rightSidebar, setRightSidebar] = useState<'none' | 'playback' | 'analysis'>('none')
   const [showStartupOverlay, setShowStartupOverlay] = useState(true)
   const [startupBusy, setStartupBusy] = useState(false)
   const [recentProjects, setRecentProjects] = useState<RecentProjectEntry[]>([])
@@ -67,7 +66,7 @@ function App() {
   const analysis = useAnalysis(reportError)
   const partialsHook = usePartials(reportError)
   const playback = usePlayback(reportError, analysis.analysisState)
-  const viewport = useViewport(analysis.preview, analysis.settings, reportError)
+  const viewport = useViewport(analysis.preview, analysis.settings.spectrogram, reportError)
   const { listRecentProjects, newProject, openProject, openProjectPath, saveProject, saveProjectAs } = analysis
 
   type LoadedProjectResult = {
@@ -204,7 +203,7 @@ function App() {
       return
     }
     if (label === 'Analysis Settings...') {
-      setShowAnalysisModal(true)
+      setRightSidebar('analysis')
       return
     }
     if (label === 'Export...') {
@@ -326,7 +325,6 @@ function App() {
     const settingsToApply = nextSettings ?? analysis.settings
     const success = await analysis.applySettings(settingsToApply)
     if (success) setStatusNote('Settings applied')
-    setShowAnalysisModal(false)
   }
 
   const handleTraceCommit = async (trace: Array<[number, number]>) => {
@@ -482,11 +480,11 @@ function App() {
   }
 
   const handlePlaybackSettingsToggle = () => {
-    setShowPlaybackSettings((prev) => !prev)
+    setRightSidebar((prev) => (prev === 'playback' ? 'none' : 'playback'))
   }
 
   const handleOpenMidiSettings = () => {
-    setShowPlaybackSettings(true)
+    setRightSidebar('playback')
     playback.setPlaybackMode('midi')
   }
 
@@ -563,7 +561,7 @@ function App() {
 
         <div
           className={`grid h-full flex-1 min-h-0 gap-2 ${
-            showPlaybackSettings ? 'grid-cols-[minmax(0,1fr)_320px]' : 'grid-cols-[minmax(0,1fr)]'
+            rightSidebar !== 'none' ? 'grid-cols-[minmax(0,1fr)_320px]' : 'grid-cols-[minmax(0,1fr)]'
           }`}
         >
           <main className="flex flex-1 min-h-0 flex-col gap-2">
@@ -635,7 +633,7 @@ function App() {
             </div>
             </section>
           </main>
-          {showPlaybackSettings ? (
+          {rightSidebar === 'playback' ? (
             <PlaybackSettingsSidebar
               playbackMode={playback.playbackMode}
               mixValue={playback.mixValue}
@@ -651,7 +649,7 @@ function App() {
               midiCcUpdateRateHz={playback.midiCcUpdateRateHz}
               midiBpm={playback.midiBpm}
               controlsDisabled={playback.isPlaying || playback.isPreparingPlayback}
-              onClose={() => setShowPlaybackSettings(false)}
+              onClose={() => setRightSidebar('none')}
               onPlaybackModeChange={playback.setPlaybackMode}
               onMixChange={(value) => void playback.setMixValue(value)}
               onMixCommit={playback.commitMixValue}
@@ -666,6 +664,14 @@ function App() {
               onMidiAmplitudeCurveChange={playback.setMidiAmplitudeCurve}
               onMidiCcUpdateRateChange={playback.setMidiCcUpdateRate}
               onMidiBpmChange={playback.setMidiBpm}
+            />
+          ) : null}
+          {rightSidebar === 'analysis' ? (
+            <AnalysisSettingsSidebar
+              settings={analysis.settings}
+              disabled={analysis.analysisState === 'analyzing' || playback.isPlaying || playback.isPreparingPlayback}
+              onClose={() => setRightSidebar('none')}
+              onApply={handleApplySettings}
             />
           ) : null}
         </div>
@@ -736,14 +742,6 @@ function App() {
             </div>
           </section>
         </div>
-      ) : null}
-
-      {showAnalysisModal ? (
-        <AnalysisSettingsModal
-          settings={analysis.settings}
-          onCancel={() => setShowAnalysisModal(false)}
-          onApply={handleApplySettings}
-        />
       ) : null}
 
       {showExportModal ? (

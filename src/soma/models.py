@@ -41,15 +41,11 @@ class SpectrogramPreview:
 
 
 @dataclass(frozen=True)
-class AnalysisSettings:
+class SpectrogramSettings:
     freq_min: float = 20.0
     freq_max: float = 20000.0
-    bins_per_octave: int = 96
-    time_resolution_ms: float = 10.0
     preview_freq_max: float = 12000.0
-    preview_bins_per_octave: int = 48
-    wavelet_bandwidth: float = 8.0
-    wavelet_center_freq: float = 1.5
+    multires_blend_octaves: float = 1.0
     gain: float = 1.0
     min_db: float = -80.0
     max_db: float = 0.0
@@ -57,6 +53,31 @@ class AnalysisSettings:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True)
+class SnapSettings:
+    freq_min: float = 20.0
+    freq_max: float = 20000.0
+    bins_per_octave: int = 96
+    time_resolution_ms: float = 10.0
+    wavelet_bandwidth: float = 8.0
+    wavelet_center_freq: float = 1.5
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class AnalysisSettings:
+    spectrogram: SpectrogramSettings = field(default_factory=SpectrogramSettings)
+    snap: SnapSettings = field(default_factory=SnapSettings)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "spectrogram": self.spectrogram.to_dict(),
+            "snap": self.snap.to_dict(),
+        }
 
 
 @dataclass(frozen=True)
