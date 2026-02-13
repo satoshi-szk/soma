@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import tempfile
+import threading
 from collections import OrderedDict
 from pathlib import Path
 from typing import cast
@@ -42,6 +43,8 @@ class SpectrogramRenderer:
             write_map.flush()
             del write_map
             self._audio = np.memmap(self._audio_path, dtype=np.float32, mode="r", shape=(self._length,))
+            self._mode_lock = threading.Lock()
+            self._local_cache_lock = threading.Lock()
             self._prefer_local_mode = False
             self._local_cache: OrderedDict[
                 tuple[int, int, int, int, int, int, int, int, int, int, int],
@@ -125,12 +128,13 @@ class SpectrogramRenderer:
     def _should_use_local_mode(self, required_cols_per_sec: float) -> bool:
         enter_threshold = self._TARGET_COLS_PER_SEC * self._LOCAL_ENTER_MULTIPLIER
         exit_threshold = self._TARGET_COLS_PER_SEC * self._LOCAL_EXIT_MULTIPLIER
-        if self._prefer_local_mode:
-            if required_cols_per_sec < exit_threshold:
-                self._prefer_local_mode = False
-        elif required_cols_per_sec > enter_threshold:
-            self._prefer_local_mode = True
-        return self._prefer_local_mode
+        with self._mode_lock:
+            if self._prefer_local_mode:
+                if required_cols_per_sec < exit_threshold:
+                    self._prefer_local_mode = False
+            elif required_cols_per_sec > enter_threshold:
+                self._prefer_local_mode = True
+            return self._prefer_local_mode
 
     def _render_local_tile(
         self,
@@ -152,10 +156,11 @@ class SpectrogramRenderer:
             width=width,
             height=height,
         )
-        cached = self._local_cache.get(cache_key)
-        if cached is not None:
-            self._local_cache.move_to_end(cache_key)
-            return cached
+        with self._local_cache_lock:
+            cached = self._local_cache.get(cache_key)
+            if cached is not None:
+                self._local_cache.move_to_end(cache_key)
+                return cached
 
         total_duration = self._length / float(self._sample_rate) if self._sample_rate > 0 else 0.0
         if self._length == 0 or self._sample_rate <= 0 or time_end <= time_start:
@@ -291,10 +296,11 @@ class SpectrogramRenderer:
         cache_key: tuple[int, int, int, int, int, int, int, int, int, int, int],
         value: tuple[SpectrogramPreview, float],
     ) -> None:
-        self._local_cache[cache_key] = value
-        self._local_cache.move_to_end(cache_key)
-        while len(self._local_cache) > self._LOCAL_CACHE_MAX_ITEMS:
-            self._local_cache.popitem(last=False)
+        with self._local_cache_lock:
+            self._local_cache[cache_key] = value
+            self._local_cache.move_to_end(cache_key)
+            while len(self._local_cache) > self._LOCAL_CACHE_MAX_ITEMS:
+                self._local_cache.popitem(last=False)
 
     def _prepare_global_matrix(self) -> None:
         if self._length == 0 or self._sample_rate <= 0:

@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
+
 import numpy as np
 
 from soma.models import AnalysisSettings, SpectrogramPreview
@@ -219,5 +221,36 @@ def test_compute_local_band_cols_uses_rx_hop_and_pixel_hop() -> None:
         # RX 基準 hop が選ばれるケースでは列数が増えるが、上限でクランプされる。
         cols_capped = renderer._compute_local_band_cols(view_samples=1_048_576.0, width=1024, nperseg=256)
         assert cols_capped == renderer._LOCAL_MAX_INTERNAL_COLS
+    finally:
+        renderer.close()
+
+
+def test_render_tile_is_safe_under_concurrent_requests() -> None:
+    sample_rate = 44100
+    duration_sec = 2.0
+    t = np.arange(int(sample_rate * duration_sec), dtype=np.float64) / float(sample_rate)
+    audio = (0.25 * np.sin(2.0 * np.pi * 330.0 * t)).astype(np.float32)
+    settings = AnalysisSettings()
+    renderer = SpectrogramRenderer(audio=audio, sample_rate=sample_rate)
+    try:
+        def render_once(index: int) -> tuple[int, int, str]:
+            start = 0.1 + (index % 6) * 0.1
+            end = min(start + 0.35, duration_sec)
+            preview, _amp_ref, quality = renderer.render_tile(
+                settings=settings.spectrogram,
+                time_start=start,
+                time_end=end,
+                freq_min=40.0,
+                freq_max=9000.0,
+                width=320,
+                height=128,
+            )
+            return preview.width, preview.height, quality
+
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            results = list(executor.map(render_once, range(40)))
+
+        assert all(width == 320 and height == 128 for width, height, _quality in results)
+        assert all(quality in {"high", "local"} for _width, _height, quality in results)
     finally:
         renderer.close()
