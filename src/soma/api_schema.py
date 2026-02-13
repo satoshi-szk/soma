@@ -10,11 +10,13 @@ class PayloadBase(BaseModel):
 
 
 class SpectrogramSettingsPayload(PayloadBase):
+    method: str = Field(default="multires_stft", pattern="^(multires_stft|reassigned_stft)$")
     freq_min: float = 20.0
     freq_max: float = 20000.0
     preview_freq_max: float = 12000.0
     multires_blend_octaves: float = 1.0
     multires_window_size_scale: float = 1.0
+    reassigned_ref_power: float = Field(default=1e-6, ge=0.0)
     gain: float = 1.0
     min_db: float = -80.0
     max_db: float = 0.0

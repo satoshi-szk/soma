@@ -40,6 +40,8 @@ const buildViewportParamsKey = (params: ViewportParams, settings: SpectrogramSet
     params.timeEnd.toFixed(6),
     params.freqMin.toFixed(3),
     params.freqMax.toFixed(3),
+    settings.method,
+    settings.reassigned_ref_power.toExponential(2),
     settings.gain.toFixed(3),
     settings.min_db.toFixed(3),
     settings.max_db.toFixed(3),

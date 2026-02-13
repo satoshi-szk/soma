@@ -6,6 +6,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import cast
 
+import librosa
 import numpy as np
 
 from soma.analysis import _apply_preview_tone, _normalize_magnitude_db
@@ -58,11 +59,13 @@ class SpectrogramRenderer:
             self._audio = np.memmap(self._audio_path, dtype=np.float32, mode="r", shape=(self._length,))
             self._mode_lock = threading.Lock()
             self._local_cache_lock = threading.Lock()
+            self._reassigned_reference_lock = threading.Lock()
             self._prefer_local_mode = False
             self._local_cache: OrderedDict[
-                tuple[int, int, int, int, int, int, int, int, int, int, int, int],
+                tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int],
                 tuple[SpectrogramPreview, float],
             ] = OrderedDict()
+            self._reassigned_reference_cache: dict[tuple[int, int, int, int, int], float] = {}
             self._prepare_global_matrix()
         except Exception:
             self._temp_dir.cleanup()
@@ -86,6 +89,17 @@ class SpectrogramRenderer:
         stft_amp_reference: float | None = None,
     ) -> tuple[SpectrogramPreview, float]:
         duration = self._length / float(self._sample_rate) if self._sample_rate > 0 else 0.0
+        if settings.method == "reassigned_stft":
+            return self._render_reassigned_tile(
+                settings=settings,
+                time_start=0.0,
+                time_end=duration,
+                freq_min=settings.freq_min,
+                freq_max=min(settings.preview_freq_max, settings.freq_max),
+                width=width,
+                height=height,
+                amp_reference=stft_amp_reference,
+            )
         return self._render_from_global_matrix(
             settings=settings,
             time_start=0.0,
@@ -112,6 +126,20 @@ class SpectrogramRenderer:
         required_cols_per_sec = width / time_span
         use_local = self._should_use_local_mode(required_cols_per_sec)
         amp_reference = stft_amp_reference
+
+        if settings.method == "reassigned_stft":
+            preview, ref = self._render_reassigned_tile(
+                settings=settings,
+                time_start=time_start,
+                time_end=time_end,
+                freq_min=freq_min,
+                freq_max=freq_max,
+                width=width,
+                height=height,
+                amp_reference=amp_reference,
+                use_cache=use_local,
+            )
+            return preview, ref, "local" if use_local else "high"
 
         if use_local:
             preview, ref = self._render_local_tile(
@@ -281,6 +309,271 @@ class SpectrogramRenderer:
         self._store_local_cache(cache_key, result)
         return result
 
+    def _render_reassigned_tile(
+        self,
+        settings: SpectrogramSettings,
+        time_start: float,
+        time_end: float,
+        freq_min: float,
+        freq_max: float,
+        width: int,
+        height: int,
+        amp_reference: float | None,
+        use_cache: bool = False,
+    ) -> tuple[SpectrogramPreview, float]:
+        cache_key: tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int] | None = None
+        if use_cache:
+            cache_key = self._build_local_cache_key(
+                settings=settings,
+                time_start=time_start,
+                time_end=time_end,
+                freq_min=freq_min,
+                freq_max=freq_max,
+                width=width,
+                height=height,
+            )
+            with self._local_cache_lock:
+                cached = self._local_cache.get(cache_key)
+                if cached is not None:
+                    self._local_cache.move_to_end(cache_key)
+                    return cached
+
+        total_duration = self._length / float(self._sample_rate) if self._sample_rate > 0 else 0.0
+        if self._length == 0 or self._sample_rate <= 0 or time_end <= time_start:
+            preview = SpectrogramPreview(
+                width=width,
+                height=height,
+                data=[0] * (width * height),
+                freq_min=freq_min,
+                freq_max=freq_max,
+                duration_sec=total_duration,
+                time_start=time_start,
+                time_end=time_end,
+            )
+            result = (preview, 1.0)
+            if use_cache and cache_key is not None:
+                self._store_local_cache(cache_key, result)
+            return result
+
+        start = max(0.0, min(time_start, total_duration))
+        end = max(start + 1e-6, min(time_end, total_duration))
+        nyquist = float(self._sample_rate) * 0.5
+        effective_min = max(freq_min, settings.freq_min, 20.0)
+        effective_max = min(freq_max, settings.preview_freq_max, settings.freq_max, nyquist)
+        effective_max = max(effective_max, effective_min * 1.001)
+
+        max_nperseg = max(band[2] for band in self._multires_band_specs(float(effective_max)))
+        margin_sec = max((max_nperseg / float(self._sample_rate)) * 0.5, (end - start) * 0.05, 0.01)
+        ext_start = max(0.0, start - margin_sec)
+        ext_end = min(total_duration, end + margin_sec)
+        ext_start_sample = int(np.floor(ext_start * self._sample_rate))
+        ext_end_sample = int(np.ceil(ext_end * self._sample_rate))
+        ext_end_sample = max(ext_end_sample, ext_start_sample + 1)
+        segment = np.asarray(self._audio[ext_start_sample:ext_end_sample], dtype=np.float32)
+        if segment.size < 32:
+            preview = SpectrogramPreview(
+                width=width,
+                height=height,
+                data=[0] * (width * height),
+                freq_min=effective_min,
+                freq_max=effective_max,
+                duration_sec=total_duration,
+                time_start=start,
+                time_end=end,
+            )
+            result = (preview, 1.0)
+            if use_cache and cache_key is not None:
+                self._store_local_cache(cache_key, result)
+            return result
+
+        freq_edges = np.geomspace(effective_min, effective_max, height + 1).astype(np.float64)
+        freq_centers = np.sqrt(freq_edges[:-1] * freq_edges[1:])
+        time_edges = np.linspace(start, end, width + 1, dtype=np.float64)
+        composed_map = self._compute_reassigned_composed_map(
+            settings=settings,
+            segment=segment,
+            time_start=ext_start,
+            time_end=ext_end,
+            view_time_start=start,
+            view_time_end=end,
+            freq_edges=freq_edges,
+            freq_centers=freq_centers,
+            time_edges=time_edges,
+            height=height,
+            width=width,
+            effective_min=effective_min,
+            effective_max=effective_max,
+        )
+
+        global_reference = self._get_reassigned_global_reference(settings)
+        reference = global_reference if amp_reference is None else amp_reference
+        normalized = _normalize_magnitude_db(composed_map, reference_max=reference)
+        normalized = np.flipud(normalized)
+        normalized = _apply_preview_tone(normalized, settings)
+        data = (normalized * 255).astype(np.uint8, copy=False).tobytes()
+        preview = SpectrogramPreview(
+            width=width,
+            height=height,
+            data=data,
+            freq_min=effective_min,
+            freq_max=effective_max,
+            duration_sec=total_duration,
+            time_start=start,
+            time_end=end,
+        )
+        result = (preview, global_reference)
+        if use_cache and cache_key is not None:
+            self._store_local_cache(cache_key, result)
+        return result
+
+    def _get_reassigned_global_reference(self, settings: SpectrogramSettings) -> float:
+        key = (
+            int(round(settings.freq_min * 10.0)),
+            int(round(settings.freq_max * 10.0)),
+            int(round(settings.preview_freq_max * 10.0)),
+            int(round(settings.multires_blend_octaves * 1000.0)),
+            int(round(settings.reassigned_ref_power * 1_000_000_000.0)),
+        )
+        with self._reassigned_reference_lock:
+            cached = self._reassigned_reference_cache.get(key)
+            if cached is not None:
+                return cached
+
+        total_duration = self._length / float(self._sample_rate) if self._sample_rate > 0 else 0.0
+        if total_duration <= 0.0 or self._length == 0 or self._sample_rate <= 0:
+            return 1.0
+        nyquist = float(self._sample_rate) * 0.5
+        effective_min = max(settings.freq_min, 20.0)
+        effective_max = min(settings.preview_freq_max, settings.freq_max, nyquist)
+        effective_max = max(effective_max, effective_min * 1.001)
+
+        global_width = min(2048, max(512, int(np.ceil(total_duration * self._TARGET_COLS_PER_SEC))))
+        global_height = min(512, self._BASE_HEIGHT)
+        segment = np.asarray(self._audio, dtype=np.float32)
+        freq_edges = np.geomspace(effective_min, effective_max, global_height + 1).astype(np.float64)
+        freq_centers = np.sqrt(freq_edges[:-1] * freq_edges[1:])
+        time_edges = np.linspace(0.0, total_duration, global_width + 1, dtype=np.float64)
+        composed_map = self._compute_reassigned_composed_map(
+            settings=settings,
+            segment=segment,
+            time_start=0.0,
+            time_end=total_duration,
+            view_time_start=0.0,
+            view_time_end=total_duration,
+            freq_edges=freq_edges,
+            freq_centers=freq_centers,
+            time_edges=time_edges,
+            height=global_height,
+            width=global_width,
+            effective_min=effective_min,
+            effective_max=effective_max,
+        )
+        reference = float(np.max(composed_map)) if composed_map.size else 1.0
+        if reference <= 0.0:
+            reference = 1.0
+        with self._reassigned_reference_lock:
+            self._reassigned_reference_cache[key] = reference
+        return reference
+
+    def _compute_reassigned_composed_map(
+        self,
+        settings: SpectrogramSettings,
+        segment: np.ndarray,
+        time_start: float,
+        time_end: float,
+        view_time_start: float,
+        view_time_end: float,
+        freq_edges: np.ndarray,
+        freq_centers: np.ndarray,
+        time_edges: np.ndarray,
+        height: int,
+        width: int,
+        effective_min: float,
+        effective_max: float,
+    ) -> np.ndarray:
+        composed_map = np.zeros((height, width), dtype=np.float32)
+        bands = self._multires_band_specs(float(effective_max))
+        weights = self._band_weights(freq_centers, float(effective_max), settings.multires_blend_octaves)
+        ref_power = max(0.0, float(settings.reassigned_ref_power))
+        log_min = float(np.log(effective_min))
+        log_span = max(float(np.log(effective_max)) - log_min, 1e-9)
+        view_time_span = max(view_time_end - view_time_start, 1e-9)
+
+        for band_index, (_band_lo, _band_hi, nperseg, _nfft, hop_samples) in enumerate(bands):
+            n_fft = max(256, int(nperseg))
+            if n_fft & (n_fft - 1) != 0:
+                n_fft = 1 << int(np.floor(np.log2(n_fft)))
+                n_fft = max(256, n_fft)
+            hop_length = min(max(1, int(hop_samples)), n_fft)
+            band_segment = segment
+            if band_segment.size < n_fft:
+                band_segment = np.pad(band_segment, (0, n_fft - band_segment.size), mode="constant")
+
+            freqs, times, d_reassigned = librosa.reassigned_spectrogram(
+                y=band_segment,
+                sr=self._sample_rate,
+                n_fft=n_fft,
+                hop_length=hop_length,
+                win_length=n_fft,
+                window="hann",
+                center=False,
+                reassign_frequencies=True,
+                reassign_times=True,
+                clip=True,
+                ref_power=ref_power,
+                fill_nan=True,
+            )
+            mags = np.abs(d_reassigned).astype(np.float32)
+            if mags.ndim != 2 or mags.shape[1] == 0:
+                continue
+            frame_count = mags.shape[1]
+
+            band_map = np.zeros((height, width), dtype=np.float32)
+            for col in range(mags.shape[1]):
+                col_freqs = freqs[:, col]
+                col_times = times[:, col] + time_start
+                col_mags = mags[:, col]
+                valid = (
+                    np.isfinite(col_freqs)
+                    & np.isfinite(col_times)
+                    & np.isfinite(col_mags)
+                    & (col_freqs >= effective_min)
+                    & (col_freqs <= effective_max)
+                    & (col_times >= view_time_start)
+                    & (col_times <= view_time_end)
+                )
+                if not np.any(valid):
+                    continue
+                valid_freqs = col_freqs[valid].astype(np.float64)
+                valid_times = col_times[valid].astype(np.float64)
+                valid_mags = col_mags[valid].astype(np.float32)
+
+                row_pos = ((np.log(valid_freqs) - log_min) / log_span) * float(height - 1)
+                col_pos = ((valid_times - view_time_start) / view_time_span) * float(width - 1)
+                row_pos = np.clip(row_pos, 0.0, float(height - 1))
+                col_pos = np.clip(col_pos, 0.0, float(width - 1))
+
+                row0 = np.floor(row_pos).astype(np.int32)
+                col0 = np.floor(col_pos).astype(np.int32)
+                row1 = np.minimum(row0 + 1, height - 1)
+                col1 = np.minimum(col0 + 1, width - 1)
+                row_alpha = (row_pos - row0).astype(np.float32)
+                col_alpha = (col_pos - col0).astype(np.float32)
+                w00 = (1.0 - row_alpha) * (1.0 - col_alpha)
+                w01 = (1.0 - row_alpha) * col_alpha
+                w10 = row_alpha * (1.0 - col_alpha)
+                w11 = row_alpha * col_alpha
+                np.add.at(band_map, (row0, col0), valid_mags * w00)
+                np.add.at(band_map, (row0, col1), valid_mags * w01)
+                np.add.at(band_map, (row1, col0), valid_mags * w10)
+                np.add.at(band_map, (row1, col1), valid_mags * w11)
+
+            # フレーム密度で正規化して、ズーム（時間幅）で明るさが変わるのを抑える。
+            density = float(width) / float(max(1, frame_count))
+            band_map *= density
+            composed_map += band_map * weights[band_index][:, None]
+        return composed_map
+
     def _build_local_cache_key(
         self,
         settings: SpectrogramSettings,
@@ -290,7 +583,8 @@ class SpectrogramRenderer:
         freq_max: float,
         width: int,
         height: int,
-    ) -> tuple[int, int, int, int, int, int, int, int, int, int, int, int]:
+    ) -> tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int]:
+        method = 1 if settings.method == "reassigned_stft" else 0
         return (
             int(round(time_start / self._LOCAL_TIME_QUANTUM_SEC)),
             int(round(time_end / self._LOCAL_TIME_QUANTUM_SEC)),
@@ -304,11 +598,13 @@ class SpectrogramRenderer:
             int(round(settings.gamma * 1000.0)),
             int(round(settings.multires_blend_octaves * 1000.0)),
             int(round(settings.multires_window_size_scale * 1000.0)),
+            method,
+            int(round(settings.reassigned_ref_power * 1_000_000_000.0)),
         )
 
     def _store_local_cache(
         self,
-        cache_key: tuple[int, int, int, int, int, int, int, int, int, int, int, int],
+        cache_key: tuple[int, int, int, int, int, int, int, int, int, int, int, int, int, int],
         value: tuple[SpectrogramPreview, float],
     ) -> None:
         with self._local_cache_lock:

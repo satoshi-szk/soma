@@ -2,11 +2,13 @@ import { z } from 'zod'
 
 const analysisSettingsSchema = z.object({
   spectrogram: z.object({
+    method: z.enum(['multires_stft', 'reassigned_stft']),
     freq_min: z.number(),
     freq_max: z.number(),
     preview_freq_max: z.number(),
     multires_blend_octaves: z.number(),
     multires_window_size_scale: z.number(),
+    reassigned_ref_power: z.number(),
     gain: z.number(),
     min_db: z.number(),
     max_db: z.number(),

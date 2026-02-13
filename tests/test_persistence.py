@@ -79,3 +79,9 @@ def test_save_and_load_project(tmp_path: Path) -> None:
     assert loaded_playback_settings.midi_bpm == 96.0
     assert len(loaded_partials) == 1
     assert loaded_partials[0].id == "p1"
+
+
+def test_parse_settings_defaults_new_spectrogram_fields() -> None:
+    loaded_settings = parse_settings({"analysis_settings": {"spectrogram": {}, "snap": {}}})
+    assert loaded_settings.spectrogram.method == "multires_stft"
+    assert loaded_settings.spectrogram.reassigned_ref_power == 1e-6

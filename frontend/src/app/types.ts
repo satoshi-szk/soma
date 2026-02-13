@@ -1,11 +1,13 @@
 export type ApiStatus = 'checking' | 'connected' | 'disconnected'
 
 export type SpectrogramSettings = {
+  method: 'multires_stft' | 'reassigned_stft'
   freq_min: number
   freq_max: number
   preview_freq_max: number
   multires_blend_octaves: number
   multires_window_size_scale: number
+  reassigned_ref_power: number
   gain: number
   min_db: number
   max_db: number

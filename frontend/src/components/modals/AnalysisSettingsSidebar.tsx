@@ -7,13 +7,19 @@ type DraftState = {
 
 const intFields = new Set<string>(['bins_per_octave'])
 const windowSizeScaleOptions = ['0.25', '0.5', '1', '2', '4'] as const
+const spectrogramMethodOptions = [
+  { value: 'multires_stft', label: 'Multi-Res STFT' },
+  { value: 'reassigned_stft', label: 'Reassigned STFT' },
+] as const
 
 const toDraft = (settings: AnalysisSettings): DraftState => ({
   spectrogram_freq_min: String(settings.spectrogram.freq_min),
   spectrogram_freq_max: String(settings.spectrogram.freq_max),
   preview_freq_max: String(settings.spectrogram.preview_freq_max),
+  method: settings.spectrogram.method,
   multires_blend_octaves: String(settings.spectrogram.multires_blend_octaves),
   multires_window_size_scale: String(settings.spectrogram.multires_window_size_scale),
+  reassigned_ref_power: String(settings.spectrogram.reassigned_ref_power),
   gain: String(settings.spectrogram.gain),
   min_db: String(settings.spectrogram.min_db),
   max_db: String(settings.spectrogram.max_db),
@@ -65,6 +71,7 @@ export function AnalysisSettingsSidebar({ settings, disabled, onClose, onApply }
   const buildSettings = (): AnalysisSettings => {
     const spectrogram = { ...settings.spectrogram }
     const snap = { ...settings.snap }
+    spectrogram.method = draft.method === 'reassigned_stft' ? 'reassigned_stft' : 'multires_stft'
 
     const setIf = (key: string, apply: (value: number) => void) => {
       const parsed = parseDraftNumber(key, draft[key] ?? '')
@@ -85,6 +92,9 @@ export function AnalysisSettingsSidebar({ settings, disabled, onClose, onApply }
     })
     setIf('multires_window_size_scale', (value) => {
       spectrogram.multires_window_size_scale = value
+    })
+    setIf('reassigned_ref_power', (value) => {
+      spectrogram.reassigned_ref_power = Math.max(0, value)
     })
     setIf('gain', (value) => {
       spectrogram.gain = value
@@ -124,6 +134,7 @@ export function AnalysisSettingsSidebar({ settings, disabled, onClose, onApply }
   const inputClass = disabled
     ? 'rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2 py-1 text-[11px] text-[var(--muted)] opacity-60'
     : 'rounded-md border border-[var(--panel-border)] bg-[var(--panel-strong)] px-2 py-1 text-[11px] text-[var(--ink)]'
+  const isReassigned = draft.method === 'reassigned_stft'
 
   return (
     <aside className="panel flex h-full w-[320px] min-w-[320px] flex-col rounded-none px-4 py-3">
@@ -142,6 +153,21 @@ export function AnalysisSettingsSidebar({ settings, disabled, onClose, onApply }
         <section className="mb-4">
           <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.14em] text-[var(--muted)]">Spectrogram Settings</h3>
           <div className="grid gap-2">
+            <label className="text-[11px] text-[var(--ink)]">
+              Spectrogram Method
+              <select
+                className={`mt-1 w-full ${inputClass}`}
+                value={draft.method}
+                onChange={(event) => updateField('method', event.target.value)}
+                disabled={disabled}
+              >
+                {spectrogramMethodOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
             <label className="text-[11px] text-[var(--ink)]">
               Min Frequency (Hz)
               <input
@@ -196,6 +222,16 @@ export function AnalysisSettingsSidebar({ settings, disabled, onClose, onApply }
                   </option>
                 ))}
               </select>
+            </label>
+            <label className="text-[11px] text-[var(--ink)]">
+              Reassigned Ref Power
+              <input
+                className={`mt-1 w-full ${inputClass}`}
+                value={draft.reassigned_ref_power}
+                onChange={(event) => updateField('reassigned_ref_power', event.target.value)}
+                onBlur={() => normalizeField('reassigned_ref_power', settings.spectrogram.reassigned_ref_power)}
+                disabled={disabled || !isReassigned}
+              />
             </label>
             <label className="text-[11px] text-[var(--ink)]">
               Gain

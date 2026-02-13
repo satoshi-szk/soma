@@ -72,13 +72,22 @@ def parse_settings(data: dict[str, Any]) -> AnalysisSettings:
 
     legacy_freq_min = float(settings.get("freq_min", 20.0))
     legacy_freq_max = float(settings.get("freq_max", 20000.0))
+    method = str(spectrogram_raw.get("method", "multires_stft"))
+    if method not in {"multires_stft", "reassigned_stft"}:
+        method = "multires_stft"
+    reassigned_ref_power = float(spectrogram_raw.get("reassigned_ref_power", 1e-6))
+    if reassigned_ref_power < 0.0:
+        reassigned_ref_power = 1e-6
+
     return AnalysisSettings(
         spectrogram=SpectrogramSettings(
+            method=method,
             freq_min=float(spectrogram_raw.get("freq_min", legacy_freq_min)),
             freq_max=float(spectrogram_raw.get("freq_max", legacy_freq_max)),
             preview_freq_max=float(spectrogram_raw.get("preview_freq_max", 12000.0)),
             multires_blend_octaves=float(spectrogram_raw.get("multires_blend_octaves", 1.0)),
             multires_window_size_scale=float(spectrogram_raw.get("multires_window_size_scale", 1.0)),
+            reassigned_ref_power=reassigned_ref_power,
             gain=float(spectrogram_raw.get("gain", settings.get("gain", 1.0))),
             min_db=float(spectrogram_raw.get("min_db", settings.get("min_db", -80.0))),
             max_db=float(spectrogram_raw.get("max_db", settings.get("max_db", 0.0))),

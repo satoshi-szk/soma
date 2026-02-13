@@ -119,8 +119,10 @@ class Partial:
 
 1. **Visualization Layer (表示用・低解像度)**
     - **目的:** スペクトログラムの全体描画。
-    - **手法:** **STFT** を用いた高速プレビューをベースラインとして生成する（時間解像度は出力 `width` に合わせて調整）。
-    - **プログレッシブ更新:** 表示窓長 `time_end - time_start` が閾値以下の場合、バックグラウンドで **CWT** による高品質版を生成し差し替える。
+    - **手法:** Analysis Settings で選択したスペクトログラム手法を用いる。
+      - `multires_stft`: 3帯域（Low/Mid/High）のマルチレゾSTFT合成
+      - `reassigned_stft`: `librosa.reassigned_spectrogram` ベースのマルチレゾ再割当STFT合成
+    - **一貫性:** `overview` と `tile` は常に同じ手法で生成する。表示経路で手法を混在させない。
     - **タイミング:** 初期化時（overview）およびズーム/パン完了時（viewport）に fire & forget で生成を要求し、結果は Backend から push 通知する。
     - **Peak List Cache (局所最大リストのキャッシュ)**
         - **廃止:** スナップ処理は `MouseUp` 時に JIT 計算を行う方針に変更されたため、広域の Peak List 事前計算・キャッシュは行わない。
@@ -163,10 +165,27 @@ class Partial:
   },
 
   "analysis_settings": {
-    "freq_min": 20.0,
-    "freq_max": 20000.0,
-    "bins_per_octave": 48,
-    "time_resolution_ms": 10.0
+    "spectrogram": {
+      "method": "multires_stft",
+      "freq_min": 20.0,
+      "freq_max": 20000.0,
+      "preview_freq_max": 12000.0,
+      "multires_blend_octaves": 1.0,
+      "multires_window_size_scale": 1.0,
+      "reassigned_ref_power": 1e-6,
+      "gain": 1.0,
+      "min_db": -80.0,
+      "max_db": 0.0,
+      "gamma": 1.0
+    },
+    "snap": {
+      "freq_min": 20.0,
+      "freq_max": 20000.0,
+      "bins_per_octave": 48,
+      "time_resolution_ms": 10.0,
+      "wavelet_bandwidth": 8.0,
+      "wavelet_center_freq": 1.5
+    }
   },
 
   "data": {
