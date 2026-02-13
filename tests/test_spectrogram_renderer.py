@@ -2,8 +2,17 @@ from __future__ import annotations
 
 import numpy as np
 
-from soma.models import AnalysisSettings
+from soma.models import AnalysisSettings, SpectrogramPreview
 from soma.spectrogram_renderer import SpectrogramRenderer
+
+
+def _preview_matrix(preview: SpectrogramPreview) -> np.ndarray:
+    data = preview.data
+    width = preview.width
+    height = preview.height
+    if isinstance(data, bytes):
+        return np.frombuffer(data, dtype=np.uint8).astype(np.float32).reshape((height, width))
+    return np.asarray(data, dtype=np.float32).reshape((height, width))
 
 
 def test_render_tile_returns_preview_with_expected_shape() -> None:
@@ -79,8 +88,8 @@ def test_adjacent_tiles_are_continuous_for_steady_tone() -> None:
             width=1024,
             height=256,
         )
-        left_data = np.asarray(left.data, dtype=np.float32).reshape((left.height, left.width))
-        right_data = np.asarray(right.data, dtype=np.float32).reshape((right.height, right.width))
+        left_data = _preview_matrix(left)
+        right_data = _preview_matrix(right)
         seam_delta = np.abs(left_data[:, -1] - right_data[:, 0])
         assert float(np.mean(seam_delta)) < 6.0
     finally:
@@ -126,9 +135,9 @@ def test_split_tiles_match_single_render_for_fractional_boundaries() -> None:
             width=400,
             height=192,
         )
-        full_data = np.asarray(full.data, dtype=np.float32).reshape((full.height, full.width))
-        left_data = np.asarray(left.data, dtype=np.float32).reshape((left.height, left.width))
-        right_data = np.asarray(right.data, dtype=np.float32).reshape((right.height, right.width))
+        full_data = _preview_matrix(full)
+        left_data = _preview_matrix(left)
+        right_data = _preview_matrix(right)
         combined = np.concatenate([left_data, right_data], axis=1)
         seam_delta = np.abs(left_data[:, -1] - right_data[:, 0])
         assert float(np.mean(seam_delta)) < 4.0
