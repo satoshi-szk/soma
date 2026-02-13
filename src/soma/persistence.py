@@ -13,7 +13,9 @@ from soma.models import (
     PartialPoint,
     PlaybackSettings,
     ProjectMeta,
+    SnapSettings,
     SourceInfo,
+    SpectrogramSettings,
     generate_bright_color,
 )
 
@@ -58,19 +60,37 @@ def load_project(path: Path) -> dict[str, Any]:
 
 def parse_settings(data: dict[str, Any]) -> AnalysisSettings:
     settings = data.get("analysis_settings", {})
+    if not isinstance(settings, dict):
+        settings = {}
+
+    spectrogram_raw = settings.get("spectrogram", settings)
+    snap_raw = settings.get("snap", settings)
+    if not isinstance(spectrogram_raw, dict):
+        spectrogram_raw = {}
+    if not isinstance(snap_raw, dict):
+        snap_raw = {}
+
+    legacy_freq_min = float(settings.get("freq_min", 20.0))
+    legacy_freq_max = float(settings.get("freq_max", 20000.0))
     return AnalysisSettings(
-        freq_min=float(settings.get("freq_min", 20.0)),
-        freq_max=float(settings.get("freq_max", 20000.0)),
-        bins_per_octave=int(settings.get("bins_per_octave", 48)),
-        time_resolution_ms=float(settings.get("time_resolution_ms", 10.0)),
-        preview_freq_max=float(settings.get("preview_freq_max", 12000.0)),
-        preview_bins_per_octave=int(settings.get("preview_bins_per_octave", 12)),
-        wavelet_bandwidth=float(settings.get("wavelet_bandwidth", 8.0)),
-        wavelet_center_freq=float(settings.get("wavelet_center_freq", 1.5)),
-        gain=float(settings.get("gain", 1.0)),
-        min_db=float(settings.get("min_db", -80.0)),
-        max_db=float(settings.get("max_db", 0.0)),
-        gamma=float(settings.get("gamma", 1.0)),
+        spectrogram=SpectrogramSettings(
+            freq_min=float(spectrogram_raw.get("freq_min", legacy_freq_min)),
+            freq_max=float(spectrogram_raw.get("freq_max", legacy_freq_max)),
+            preview_freq_max=float(spectrogram_raw.get("preview_freq_max", 12000.0)),
+            multires_blend_octaves=float(spectrogram_raw.get("multires_blend_octaves", 1.0)),
+            gain=float(spectrogram_raw.get("gain", settings.get("gain", 1.0))),
+            min_db=float(spectrogram_raw.get("min_db", settings.get("min_db", -80.0))),
+            max_db=float(spectrogram_raw.get("max_db", settings.get("max_db", 0.0))),
+            gamma=float(spectrogram_raw.get("gamma", settings.get("gamma", 1.0))),
+        ),
+        snap=SnapSettings(
+            freq_min=float(snap_raw.get("freq_min", legacy_freq_min)),
+            freq_max=float(snap_raw.get("freq_max", legacy_freq_max)),
+            bins_per_octave=int(snap_raw.get("bins_per_octave", settings.get("bins_per_octave", 96))),
+            time_resolution_ms=float(snap_raw.get("time_resolution_ms", settings.get("time_resolution_ms", 10.0))),
+            wavelet_bandwidth=float(snap_raw.get("wavelet_bandwidth", settings.get("wavelet_bandwidth", 8.0))),
+            wavelet_center_freq=float(snap_raw.get("wavelet_center_freq", settings.get("wavelet_center_freq", 1.5))),
+        ),
     )
 
 

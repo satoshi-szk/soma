@@ -140,6 +140,19 @@
   - `gain`, `min_db`, `max_db`, `gamma`: 画質調整パラメータ (optional)
 - **Response:** JSON（同上の形式、`quality` は常に `"low"`）
 
+### 4.4 設定モデル
+
+設定は `analysis_settings` を以下 2 系統に分離する。
+
+- `spectrogram`: GUI 描画用（STFT ベース）
+  - `freq_min`, `freq_max`, `preview_freq_max`
+  - `multires_blend_octaves`（Low/Mid/High のクロスフェード幅）
+  - `gain`, `min_db`, `max_db`, `gamma`
+- `snap`: スナップ解析用（CWT ベース）
+  - `freq_min`, `freq_max`
+  - `bins_per_octave`, `time_resolution_ms`
+  - `wavelet_bandwidth`, `wavelet_center_freq`
+
 ---
 
 ## 5. フロントエンド制御 (Frontend Strategy)
@@ -187,5 +200,5 @@ Canvas (Konva.js / `react-konva`) 上でのレイヤー構成。
 スペクトログラムの明るさをズームレベル間で一貫させるため、振幅リファレンス値を管理する。
 
 - `_stft_amp_reference`: グローバル行列のピーク値。Overview と Global タイルで共有
-- `_amp_reference`: CWT 解析（snap/trace）で使用するリファレンス値
+- `_snap_amp_reference`: CWT 解析（snap/trace）で使用するリファレンス値
 - タイルレンダリング時にリファレンスが未設定の場合は、そのタイルのピーク値を使用し、以降のリクエストで再利用する

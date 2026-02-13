@@ -16,7 +16,7 @@ from soma.analysis import (  # noqa: E402
     make_spectrogram_stft,
     snap_trace,
 )
-from soma.models import AnalysisSettings  # noqa: E402
+from soma.models import AnalysisSettings, SnapSettings  # noqa: E402
 
 
 def _write_wav(path: Path, sample_rate: int, data: np.ndarray) -> None:
@@ -126,7 +126,7 @@ def test_make_spectrogram() -> None:
     duration = 1.0
     t = np.linspace(0, duration, sample_rate, endpoint=False)
     audio = (0.2 * np.sin(2 * math.pi * 220.0 * t)).astype(np.float32)
-    settings = AnalysisSettings(time_resolution_ms=0.0)
+    settings = AnalysisSettings(snap=SnapSettings(time_resolution_ms=0.0))
 
     preview, amp_reference = make_spectrogram(
         audio=audio,
@@ -134,8 +134,8 @@ def test_make_spectrogram() -> None:
         settings=settings,
         time_start=0.0,
         time_end=duration,
-        freq_min=settings.freq_min,
-        freq_max=min(settings.preview_freq_max, settings.freq_max),
+        freq_min=settings.spectrogram.freq_min,
+        freq_max=min(settings.spectrogram.preview_freq_max, settings.spectrogram.freq_max),
         width=768,
         height=320,
     )
@@ -154,7 +154,7 @@ def test_make_spectrogram_stft() -> None:
     duration = 1.0
     t = np.linspace(0, duration, sample_rate, endpoint=False)
     audio = (0.2 * np.sin(2 * math.pi * 220.0 * t)).astype(np.float32)
-    settings = AnalysisSettings(time_resolution_ms=0.0)
+    settings = AnalysisSettings(snap=SnapSettings(time_resolution_ms=0.0))
 
     preview, amp_reference = make_spectrogram_stft(
         audio=audio,
@@ -162,8 +162,8 @@ def test_make_spectrogram_stft() -> None:
         settings=settings,
         time_start=0.0,
         time_end=duration,
-        freq_min=settings.freq_min,
-        freq_max=min(settings.preview_freq_max, settings.freq_max),
+        freq_min=settings.spectrogram.freq_min,
+        freq_max=min(settings.spectrogram.preview_freq_max, settings.spectrogram.freq_max),
         width=256,
         height=128,
     )
@@ -180,7 +180,7 @@ def test_make_spectrogram_preserves_freq_max_for_longer_window() -> None:
     duration = 5.0
     t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
     audio = (0.2 * np.sin(2 * math.pi * 220.0 * t)).astype(np.float32)
-    settings = AnalysisSettings(time_resolution_ms=0.0)
+    settings = AnalysisSettings(snap=SnapSettings(time_resolution_ms=0.0))
 
     preview, _amp_reference = make_spectrogram(
         audio=audio,
@@ -188,8 +188,8 @@ def test_make_spectrogram_preserves_freq_max_for_longer_window() -> None:
         settings=settings,
         time_start=0.0,
         time_end=duration,
-        freq_min=settings.freq_min,
-        freq_max=min(settings.preview_freq_max, settings.freq_max),
+        freq_min=settings.spectrogram.freq_min,
+        freq_max=min(settings.spectrogram.preview_freq_max, settings.spectrogram.freq_max),
         width=120,
         height=64,
     )
@@ -210,7 +210,7 @@ def test_estimate_cwt_amp_reference_uses_stft_peak(monkeypatch: pytest.MonkeyPat
         assert width == 64
         return 450, 440.0
 
-    def fake_build_frequencies(_: AnalysisSettings, max_freq: float | None = None) -> np.ndarray:
+    def fake_build_frequencies(_: SnapSettings, max_freq: float | None = None) -> np.ndarray:
         return np.array([100.0], dtype=np.float32)
 
     captured: dict[str, np.ndarray] = {}
@@ -251,7 +251,7 @@ def test_snap_trace_returns_points() -> None:
     duration = 0.5
     t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
     audio = (0.8 * np.sin(2 * math.pi * 440.0 * t)).astype(np.float32)
-    settings = AnalysisSettings(time_resolution_ms=0.0)
+    settings = AnalysisSettings(snap=SnapSettings(time_resolution_ms=0.0))
     trace = [(0.1, 450.0), (0.2, 445.0), (0.3, 430.0)]
 
     points = snap_trace(audio, sample_rate, settings, trace)
@@ -265,7 +265,7 @@ def test_snap_trace_returns_points() -> None:
 def test_snap_trace_uses_amp_reference(monkeypatch: pytest.MonkeyPatch) -> None:
     from soma import analysis
 
-    def fake_build_frequencies(_: AnalysisSettings, max_freq: float | None = None) -> np.ndarray:
+    def fake_build_frequencies(_: SnapSettings, max_freq: float | None = None) -> np.ndarray:
         return np.array([100.0, 200.0], dtype=np.float32)
 
     def fake_cwt_magnitude(
@@ -313,7 +313,7 @@ def test_snap_trace_resamples_to_time_resolution(monkeypatch: pytest.MonkeyPatch
     monkeypatch.setattr(analysis, "_cwt_magnitude", fake_cwt_magnitude)
 
     audio = np.ones(1000, dtype=np.float32)
-    settings = AnalysisSettings(time_resolution_ms=50.0)
+    settings = AnalysisSettings(snap=SnapSettings(time_resolution_ms=50.0))
     trace = [(0.0, 150.0), (0.2, 150.0)]
 
     points = analysis.snap_trace(audio, 1000, settings, trace)
@@ -328,9 +328,9 @@ def test_snap_trace_tiled_is_close_to_pointwise_on_freq_and_amp() -> None:
     freq_curve = 440.0 + 60.0 * np.sin(2.0 * math.pi * 0.7 * t) + 8.0 * np.sin(2.0 * math.pi * 5.0 * t)
     phase = 2.0 * math.pi * np.cumsum(freq_curve) / sample_rate
     audio = (0.75 * np.sin(phase)).astype(np.float32)
-    settings = AnalysisSettings(time_resolution_ms=10.0, bins_per_octave=72)
+    settings = AnalysisSettings(snap=SnapSettings(time_resolution_ms=10.0, bins_per_octave=72))
 
-    trace_time = np.arange(0.3, 2.7, settings.time_resolution_ms / 1000.0, dtype=np.float64)
+    trace_time = np.arange(0.3, 2.7, settings.snap.time_resolution_ms / 1000.0, dtype=np.float64)
     trace_freq = 440.0 + 60.0 * np.sin(2.0 * math.pi * 0.7 * trace_time) + 10.0
     trace = list(zip(trace_time.tolist(), trace_freq.tolist(), strict=True))
 
@@ -371,9 +371,9 @@ def test_snap_trace_tiled_boundary_jump_is_controlled() -> None:
     freq_curve = 520.0 + 120.0 * np.sin(2.0 * math.pi * 0.4 * t)
     phase = 2.0 * math.pi * np.cumsum(freq_curve) / sample_rate
     audio = (0.70 * np.sin(phase)).astype(np.float32)
-    settings = AnalysisSettings(time_resolution_ms=10.0, bins_per_octave=72)
+    settings = AnalysisSettings(snap=SnapSettings(time_resolution_ms=10.0, bins_per_octave=72))
 
-    trace_time = np.arange(0.4, 3.6, settings.time_resolution_ms / 1000.0, dtype=np.float64)
+    trace_time = np.arange(0.4, 3.6, settings.snap.time_resolution_ms / 1000.0, dtype=np.float64)
     trace_freq = 520.0 + 120.0 * np.sin(2.0 * math.pi * 0.4 * trace_time) + 14.0
     trace = list(zip(trace_time.tolist(), trace_freq.tolist(), strict=True))
 
@@ -396,15 +396,15 @@ def test_cwt_ridge_is_not_too_broad_for_sine() -> None:
     duration = 1.0
     t = np.linspace(0, duration, int(sample_rate * duration), endpoint=False)
     audio = (0.8 * np.sin(2 * math.pi * 1000.0 * t)).astype(np.float32)
-    settings = AnalysisSettings(freq_min=200.0, freq_max=8000.0, bins_per_octave=48)
+    settings = AnalysisSettings(snap=SnapSettings(freq_min=200.0, freq_max=8000.0, bins_per_octave=48))
 
-    frequencies = analysis._build_frequencies(settings, max_freq=settings.freq_max)
+    frequencies = analysis._build_frequencies(settings.snap, max_freq=settings.snap.freq_max)
     magnitude = analysis._cwt_magnitude(
         audio,
         sample_rate,
         frequencies,
-        wavelet_bandwidth=settings.wavelet_bandwidth,
-        wavelet_center_freq=settings.wavelet_center_freq,
+        wavelet_bandwidth=settings.snap.wavelet_bandwidth,
+        wavelet_center_freq=settings.snap.wavelet_center_freq,
     )
     spectrum = magnitude[:, magnitude.shape[1] // 2]
     peak = float(np.max(spectrum))

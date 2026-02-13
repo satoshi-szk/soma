@@ -71,6 +71,7 @@ class ProjectService:
     def set_settings(self, settings: AnalysisSettings) -> None:
         before = self._history.snapshot_state(include_settings=True)
         self._session.settings = settings
+        self._session._stft_amp_reference = None
         self._session._snap_amp_reference = None
         after = self._history.snapshot_state(include_settings=True)
         self._history.record(before, after)

@@ -83,6 +83,8 @@ class PreviewService:
         time_offset_sec = start_index / float(sample_rate)
         local_trace = [(time_sec - time_offset_sec, freq_hz) for time_sec, freq_hz in trace]
         amp_reference = self._estimate_snap_amp_reference_for_trace(local_audio, sample_rate, settings, trace)
+        with self._session._lock:
+            self._session._snap_amp_reference = amp_reference
         return SnapParams(
             audio=local_audio,
             sample_rate=sample_rate,
@@ -123,15 +125,15 @@ class PreviewService:
             min_freq = min(point[1] for point in trace)
             max_freq = max(point[1] for point in trace)
         else:
-            min_freq = settings.freq_min
-            max_freq = settings.freq_max
+            min_freq = settings.snap.freq_min
+            max_freq = settings.snap.freq_max
         freq_scale = 2.0**_SNAP_FREQ_MARGIN_OCTAVES
-        freq_min = max(settings.freq_min, min_freq / freq_scale)
-        freq_max = min(settings.freq_max, max_freq * freq_scale)
+        freq_min = max(settings.snap.freq_min, min_freq / freq_scale)
+        freq_max = min(settings.snap.freq_max, max_freq * freq_scale)
         freq_max = max(freq_max, freq_min * 1.001)
 
         with self._session._lock:
-            fallback = self._session._amp_reference
+            fallback = self._session._snap_amp_reference
 
         try:
             return estimate_cwt_amp_reference(

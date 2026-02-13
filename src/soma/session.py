@@ -20,7 +20,6 @@ class ProjectSession:
         self.audio_data: np.ndarray | None = None
         self.settings = AnalysisSettings()
         self.preview: SpectrogramPreview | None = None
-        self._amp_reference: float | None = None
         self._stft_amp_reference: float | None = None
         self._snap_amp_reference: float | None = None
         self.preview_state = "idle"
@@ -82,7 +81,6 @@ class ProjectSession:
         self.audio_data = None
         self.settings = AnalysisSettings()
         self.preview = None
-        self._amp_reference = None
         self._stft_amp_reference = None
         self._snap_amp_reference = None
         self.preview_state = "idle"
@@ -126,7 +124,6 @@ class ProjectSession:
         self.audio_data = audio
         self.source_info = source_info
         self.preview = None
-        self._amp_reference = None
         self._stft_amp_reference = None
         self._snap_amp_reference = None
         self.preview_state = "idle"

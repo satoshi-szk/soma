@@ -1,18 +1,24 @@
 import { z } from 'zod'
 
 const analysisSettingsSchema = z.object({
-  freq_min: z.number(),
-  freq_max: z.number(),
-  bins_per_octave: z.number(),
-  time_resolution_ms: z.number(),
-  preview_freq_max: z.number(),
-  preview_bins_per_octave: z.number(),
-  wavelet_bandwidth: z.number(),
-  wavelet_center_freq: z.number(),
-  gain: z.number(),
-  min_db: z.number(),
-  max_db: z.number(),
-  gamma: z.number(),
+  spectrogram: z.object({
+    freq_min: z.number(),
+    freq_max: z.number(),
+    preview_freq_max: z.number(),
+    multires_blend_octaves: z.number(),
+    gain: z.number(),
+    min_db: z.number(),
+    max_db: z.number(),
+    gamma: z.number(),
+  }),
+  snap: z.object({
+    freq_min: z.number(),
+    freq_max: z.number(),
+    bins_per_octave: z.number(),
+    time_resolution_ms: z.number(),
+    wavelet_bandwidth: z.number(),
+    wavelet_center_freq: z.number(),
+  }),
 })
 const playbackSettingsSchema = z.object({
   master_volume: z.number(),

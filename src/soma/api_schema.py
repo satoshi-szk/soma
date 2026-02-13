@@ -9,19 +9,29 @@ class PayloadBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class UpdateSettingsPayload(PayloadBase):
+class SpectrogramSettingsPayload(PayloadBase):
     freq_min: float = 20.0
     freq_max: float = 20000.0
-    bins_per_octave: int = 96
-    time_resolution_ms: float = 10.0
     preview_freq_max: float = 12000.0
-    preview_bins_per_octave: int = 48
-    wavelet_bandwidth: float = 8.0
-    wavelet_center_freq: float = 1.5
+    multires_blend_octaves: float = 1.0
     gain: float = 1.0
     min_db: float = -80.0
     max_db: float = 0.0
     gamma: float = 1.0
+
+
+class SnapSettingsPayload(PayloadBase):
+    freq_min: float = 20.0
+    freq_max: float = 20000.0
+    bins_per_octave: int = 96
+    time_resolution_ms: float = 10.0
+    wavelet_bandwidth: float = 8.0
+    wavelet_center_freq: float = 1.5
+
+
+class UpdateSettingsPayload(PayloadBase):
+    spectrogram: SpectrogramSettingsPayload = Field(default_factory=SpectrogramSettingsPayload)
+    snap: SnapSettingsPayload = Field(default_factory=SnapSettingsPayload)
 
 
 class TracePartialPayload(PayloadBase):

@@ -70,7 +70,7 @@
 
 [Analysis & Settings]
 
-5.  Analysis Settings... (モーダル起動)
+5.  Analysis Settings... (右サイドバーを開く)
 
 6.  Plugin Manager... (将来用)
 
@@ -94,18 +94,25 @@
 
 ---
 
-## 3. Modal Overlays (ポップアップ画面)
+## 3. Sidebars / Modal Overlays
 
 必要な時だけ中央に表示され、背景は暗転（Dimmed）します。
 
-### 3-A. Analysis Settings Modal
+### 3-A. Analysis Settings Sidebar (Right)
 
-プロジェクトの解析パラメータを定義します。
+プロジェクトの解析パラメータを右サイドバーで定義します。
 
-- **Frequency Range:** Min / Max (Hz)
-- **Time Resolution:** Bins per Octave (48, 60, 96...)
-- **Visualization:** Magma (fixed), Brightness, Contrast
-- **[Cancel]** / **[Apply & Re-analyze]**
+- **Spectrogram Settings (STFT):**
+    - Min / Max Frequency (Hz)
+    - Preview Max Frequency
+    - Multi-Resolution Blend Width (oct)
+    - Gain / Min dB / Max dB / Gamma
+- **Snap Settings (CWT):**
+    - Min / Max Frequency (Hz)
+    - Bins per Octave
+    - Time Resolution (ms)
+    - Wavelet Bandwidth / Wavelet Center Frequency
+- **[Apply]** / **[Close]**
 
 ### 3-B. Export Modal
 

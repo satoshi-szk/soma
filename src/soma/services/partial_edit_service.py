@@ -112,8 +112,8 @@ class PartialEditService:
         return self._session.store.hit_test(
             time_sec=time_sec,
             freq_hz=freq_hz,
-            freq_min=self._session.settings.freq_min,
-            freq_max=self._session.settings.freq_max,
+            freq_min=self._session.settings.spectrogram.freq_min,
+            freq_max=self._session.settings.spectrogram.freq_max,
             tolerance=tolerance,
         )
 

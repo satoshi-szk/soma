@@ -25,7 +25,7 @@ def test_render_tile_returns_preview_with_expected_shape() -> None:
     renderer = SpectrogramRenderer(audio=audio, sample_rate=sample_rate)
     try:
         preview, amp_ref, quality = renderer.render_tile(
-            settings=settings,
+            settings=settings.spectrogram,
             time_start=0.0,
             time_end=0.5,
             freq_min=80.0,
@@ -46,7 +46,7 @@ def test_render_overview_with_empty_audio_returns_black_frame() -> None:
     settings = AnalysisSettings()
     renderer = SpectrogramRenderer(audio=np.zeros(0, dtype=np.float32), sample_rate=44100)
     try:
-        preview, amp_ref = renderer.render_overview(settings=settings, width=64, height=32)
+        preview, amp_ref = renderer.render_overview(settings=settings.spectrogram, width=64, height=32)
         assert preview.width == 64
         assert preview.height == 32
         assert set(preview.data) == {0}
@@ -71,7 +71,7 @@ def test_adjacent_tiles_are_continuous_for_steady_tone() -> None:
     renderer = SpectrogramRenderer(audio=audio, sample_rate=sample_rate)
     try:
         left, _, _ = renderer.render_tile(
-            settings=settings,
+            settings=settings.spectrogram,
             time_start=1.0,
             time_end=1.5,
             freq_min=20.0,
@@ -80,7 +80,7 @@ def test_adjacent_tiles_are_continuous_for_steady_tone() -> None:
             height=256,
         )
         right, _, _ = renderer.render_tile(
-            settings=settings,
+            settings=settings.spectrogram,
             time_start=1.5,
             time_end=2.0,
             freq_min=20.0,
@@ -109,7 +109,7 @@ def test_split_tiles_match_single_render_for_fractional_boundaries() -> None:
     renderer = SpectrogramRenderer(audio=audio, sample_rate=sample_rate)
     try:
         full, _, _ = renderer.render_tile(
-            settings=settings,
+            settings=settings.spectrogram,
             time_start=start,
             time_end=end,
             freq_min=20.0,
@@ -118,7 +118,7 @@ def test_split_tiles_match_single_render_for_fractional_boundaries() -> None:
             height=192,
         )
         left, _, _ = renderer.render_tile(
-            settings=settings,
+            settings=settings.spectrogram,
             time_start=start,
             time_end=split,
             freq_min=20.0,
@@ -127,7 +127,7 @@ def test_split_tiles_match_single_render_for_fractional_boundaries() -> None:
             height=192,
         )
         right, _, _ = renderer.render_tile(
-            settings=settings,
+            settings=settings.spectrogram,
             time_start=split,
             time_end=end,
             freq_min=20.0,
@@ -156,7 +156,7 @@ def test_render_tile_switches_to_local_mode_with_hysteresis() -> None:
     renderer = SpectrogramRenderer(audio=audio, sample_rate=sample_rate)
     try:
         _preview1, _ref1, quality1 = renderer.render_tile(
-            settings=settings,
+            settings=settings.spectrogram,
             time_start=0.2,
             time_end=0.7,
             freq_min=60.0,
@@ -167,7 +167,7 @@ def test_render_tile_switches_to_local_mode_with_hysteresis() -> None:
         assert quality1 == "local"
 
         _preview2, _ref2, quality2 = renderer.render_tile(
-            settings=settings,
+            settings=settings.spectrogram,
             time_start=0.0,
             time_end=1.0,
             freq_min=60.0,
@@ -178,7 +178,7 @@ def test_render_tile_switches_to_local_mode_with_hysteresis() -> None:
         assert quality2 == "local"
 
         _preview3, _ref3, quality3 = renderer.render_tile(
-            settings=settings,
+            settings=settings.spectrogram,
             time_start=0.0,
             time_end=1.0,
             freq_min=60.0,

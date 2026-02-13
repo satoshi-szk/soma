@@ -9,7 +9,7 @@ import {
   RULER_HEIGHT,
   AUTOMATION_LANE_HEIGHT,
 } from '../app/constants'
-import type { AnalysisSettings, SpectrogramPreview } from '../app/types'
+import type { SpectrogramPreview, SpectrogramSettings } from '../app/types'
 
 type ViewportParams = {
   timeStart: number
@@ -31,7 +31,7 @@ type ViewportCacheEntry = {
 
 type ReportError = (context: string, message: string) => void
 
-const buildViewportParamsKey = (params: ViewportParams, settings: AnalysisSettings, pixelHeight: number): string =>
+const buildViewportParamsKey = (params: ViewportParams, settings: SpectrogramSettings, pixelHeight: number): string =>
   [
     params.timeStart.toFixed(6),
     params.timeEnd.toFixed(6),
@@ -44,7 +44,11 @@ const buildViewportParamsKey = (params: ViewportParams, settings: AnalysisSettin
     pixelHeight.toString(),
   ].join('|')
 
-export function useViewport(preview: SpectrogramPreview | null, settings: AnalysisSettings, reportError: ReportError) {
+export function useViewport(
+  preview: SpectrogramPreview | null,
+  settings: SpectrogramSettings,
+  reportError: ReportError
+) {
   const [zoomXState, setZoomXState] = useState<number | null>(null)
   const [zoomY, setZoomY] = useState(1)
   const [pan, setPan] = useState({ x: 0, y: 0 })
