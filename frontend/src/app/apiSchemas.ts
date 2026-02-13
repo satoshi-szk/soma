@@ -6,6 +6,7 @@ const analysisSettingsSchema = z.object({
     freq_max: z.number(),
     preview_freq_max: z.number(),
     multires_blend_octaves: z.number(),
+    multires_window_size_scale: z.number(),
     gain: z.number(),
     min_db: z.number(),
     max_db: z.number(),

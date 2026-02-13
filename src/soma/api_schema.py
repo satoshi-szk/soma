@@ -14,6 +14,7 @@ class SpectrogramSettingsPayload(PayloadBase):
     freq_max: float = 20000.0
     preview_freq_max: float = 12000.0
     multires_blend_octaves: float = 1.0
+    multires_window_size_scale: float = 1.0
     gain: float = 1.0
     min_db: float = -80.0
     max_db: float = 0.0

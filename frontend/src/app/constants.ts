@@ -20,6 +20,7 @@ export const DEFAULT_SETTINGS: AnalysisSettings = {
     freq_max: 20000,
     preview_freq_max: 12000,
     multires_blend_octaves: 1.0,
+    multires_window_size_scale: 1.0,
     gain: 1,
     min_db: -80,
     max_db: 0,

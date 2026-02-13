@@ -25,14 +25,27 @@ class SpectrogramRenderer:
     _LOCAL_FREQ_QUANTUM_HZ = 0.1
     _MIN_COLS = 2048
     _MAX_COLS = 320_000
+    _MULTIRES_BANDS_BASE: tuple[tuple[float, float, int, int], ...] = (
+        (20.0, 200.0, 8192, 512),
+        (200.0, 2000.0, 2048, 128),
+        (2000.0, 0.0, 512, 32),  # high band の上限は実行時に Nyquist で置換
+    )
+    _WINDOW_SCALE_OPTIONS: tuple[float, ...] = (0.25, 0.5, 1.0, 2.0, 4.0)
 
-    def __init__(self, audio: np.ndarray, sample_rate: int, global_blend_octaves: float = 1.0) -> None:
+    def __init__(
+        self,
+        audio: np.ndarray,
+        sample_rate: int,
+        global_blend_octaves: float = 1.0,
+        global_window_size_scale: float = 1.0,
+    ) -> None:
         self._sample_rate = sample_rate
         self._length = int(audio.shape[0])
         blend = float(global_blend_octaves)
         if not np.isfinite(blend) or blend <= 0.0:
             blend = 1.0
         self._global_blend_octaves = max(0.01, min(6.0, blend))
+        self._global_window_size_scale = self._resolve_window_scale(global_window_size_scale)
         self._temp_dir = tempfile.TemporaryDirectory(prefix="soma-spec-")
         self._audio_path = Path(self._temp_dir.name) / "audio.dat"
         self._matrix_path = Path(self._temp_dir.name) / "spec.dat"
@@ -47,7 +60,7 @@ class SpectrogramRenderer:
             self._local_cache_lock = threading.Lock()
             self._prefer_local_mode = False
             self._local_cache: OrderedDict[
-                tuple[int, int, int, int, int, int, int, int, int, int, int],
+                tuple[int, int, int, int, int, int, int, int, int, int, int, int],
                 tuple[SpectrogramPreview, float],
             ] = OrderedDict()
             self._prepare_global_matrix()
@@ -185,7 +198,9 @@ class SpectrogramRenderer:
         effective_max = min(freq_max, settings.preview_freq_max, settings.freq_max, nyquist)
         effective_max = max(effective_max, effective_min * 1.001)
 
-        max_nperseg = 4096
+        band_freq_max = max(effective_max, nyquist)
+        bands = self._multires_band_specs(band_freq_max)
+        max_nperseg = max(band[2] for band in bands)
         margin_sec = max((max_nperseg / float(self._sample_rate)) * 0.5, (end - start) * 0.05, 0.01)
         ext_start = max(0.0, start - margin_sec)
         ext_end = min(total_duration, end + margin_sec)
@@ -209,18 +224,17 @@ class SpectrogramRenderer:
             return result
 
         target_log_freqs = np.geomspace(effective_min, effective_max, height).astype(np.float64)
-        band_freq_max = max(effective_max, nyquist)
         weights = self._band_weights(target_log_freqs, band_freq_max, settings.multires_blend_octaves)
         composed = np.zeros((height, width), dtype=np.float32)
         view_samples = max((end - start) * float(self._sample_rate), 1.0)
 
-        bands = [
-            (20.0, 200.0, 4096, 4096),
-            (200.0, 2000.0, 1024, 4096),
-            (2000.0, band_freq_max, 256, 4096),
-        ]
-        for band_index, (_band_lo, _band_hi, nperseg, nfft) in enumerate(bands):
-            band_cols = self._compute_local_band_cols(view_samples=view_samples, width=width, nperseg=nperseg)
+        for band_index, (_band_lo, _band_hi, nperseg, nfft, hop_samples) in enumerate(bands):
+            band_cols = self._compute_local_band_cols(
+                view_samples=view_samples,
+                width=width,
+                nperseg=nperseg,
+                hop_samples=hop_samples,
+            )
             if band_cols <= 1:
                 center_times = np.array([0.5 * (start + end)], dtype=np.float64)
             else:
@@ -276,7 +290,7 @@ class SpectrogramRenderer:
         freq_max: float,
         width: int,
         height: int,
-    ) -> tuple[int, int, int, int, int, int, int, int, int, int, int]:
+    ) -> tuple[int, int, int, int, int, int, int, int, int, int, int, int]:
         return (
             int(round(time_start / self._LOCAL_TIME_QUANTUM_SEC)),
             int(round(time_end / self._LOCAL_TIME_QUANTUM_SEC)),
@@ -289,11 +303,12 @@ class SpectrogramRenderer:
             int(round(settings.max_db * 10.0)),
             int(round(settings.gamma * 1000.0)),
             int(round(settings.multires_blend_octaves * 1000.0)),
+            int(round(settings.multires_window_size_scale * 1000.0)),
         )
 
     def _store_local_cache(
         self,
-        cache_key: tuple[int, int, int, int, int, int, int, int, int, int, int],
+        cache_key: tuple[int, int, int, int, int, int, int, int, int, int, int, int],
         value: tuple[SpectrogramPreview, float],
     ) -> None:
         with self._local_cache_lock:
@@ -351,11 +366,7 @@ class SpectrogramRenderer:
         write_map[:] = 0.0
         centers = np.linspace(0, max(0, self._length - 1), self._matrix_cols, dtype=np.int64)
 
-        bands = [
-            (20.0, 200.0, 4096, 4096),
-            (200.0, 2000.0, 1024, 4096),
-            (2000.0, self._matrix_freq_max, 256, 4096),
-        ]
+        bands = self._multires_band_specs(self._matrix_freq_max)
 
         weights = self._band_weights(self._matrix_log_freqs, self._matrix_freq_max, self._global_blend_octaves)
 
@@ -364,7 +375,7 @@ class SpectrogramRenderer:
             chunk_end = min(self._matrix_cols, chunk_start + chunk_cols)
             chunk_centers = centers[chunk_start:chunk_end]
             composed_chunk = np.zeros((self._BASE_HEIGHT, chunk_end - chunk_start), dtype=np.float32)
-            for band_index, (_band_lo, _band_hi, nperseg, nfft) in enumerate(bands):
+            for band_index, (_band_lo, _band_hi, nperseg, nfft, _hop_samples) in enumerate(bands):
                 band_mag = self._sparse_stft_magnitude(self._audio, centers=chunk_centers, nperseg=nperseg, nfft=nfft)
                 if band_mag.size == 0:
                     continue
@@ -508,15 +519,35 @@ class SpectrogramRenderer:
         mags = np.abs(spectra).astype(np.float32, copy=False)
         return mags.T
 
-    def _compute_local_band_cols(self, view_samples: float, width: int, nperseg: int) -> int:
+    def _compute_local_band_cols(
+        self,
+        view_samples: float,
+        width: int,
+        nperseg: int,
+        hop_samples: float | None = None,
+    ) -> int:
         if width <= 1:
             return 1
         pixel_hop = max(view_samples / float(width), 1.0)
-        rx_hop = max(float(nperseg) / 8.0, 1.0)
+        rx_hop = max(float(nperseg) / 8.0, 1.0) if hop_samples is None else max(float(hop_samples), 1.0)
         hop = min(rx_hop, pixel_hop)
         cols = int(np.floor(view_samples / hop)) + 1
         cols = max(width, cols)
         return min(cols, max(width, self._LOCAL_MAX_INTERNAL_COLS))
+
+    def _multires_band_specs(self, high_band_max: float) -> list[tuple[float, float, int, int, int]]:
+        bands: list[tuple[float, float, int, int, int]] = []
+        for band_lo, band_hi, nperseg, hop_samples in self._MULTIRES_BANDS_BASE:
+            resolved_hi = high_band_max if band_hi <= 0.0 else band_hi
+            scaled_nperseg = int(round(float(nperseg) * self._global_window_size_scale))
+            scaled_nperseg = max(256, scaled_nperseg)
+            bands.append((band_lo, resolved_hi, scaled_nperseg, 4096, hop_samples))
+        return bands
+
+    def _resolve_window_scale(self, value: float) -> float:
+        if not np.isfinite(value):
+            return 1.0
+        return min(self._WINDOW_SCALE_OPTIONS, key=lambda candidate: abs(candidate - float(value)))
 
     def _band_weights(
         self,

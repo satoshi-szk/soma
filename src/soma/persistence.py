@@ -78,6 +78,7 @@ def parse_settings(data: dict[str, Any]) -> AnalysisSettings:
             freq_max=float(spectrogram_raw.get("freq_max", legacy_freq_max)),
             preview_freq_max=float(spectrogram_raw.get("preview_freq_max", 12000.0)),
             multires_blend_octaves=float(spectrogram_raw.get("multires_blend_octaves", 1.0)),
+            multires_window_size_scale=float(spectrogram_raw.get("multires_window_size_scale", 1.0)),
             gain=float(spectrogram_raw.get("gain", settings.get("gain", 1.0))),
             min_db=float(spectrogram_raw.get("min_db", settings.get("min_db", -80.0))),
             max_db=float(spectrogram_raw.get("max_db", settings.get("max_db", 0.0))),

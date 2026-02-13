@@ -6,12 +6,14 @@ type DraftState = {
 }
 
 const intFields = new Set<string>(['bins_per_octave'])
+const windowSizeScaleOptions = ['0.25', '0.5', '1', '2', '4'] as const
 
 const toDraft = (settings: AnalysisSettings): DraftState => ({
   spectrogram_freq_min: String(settings.spectrogram.freq_min),
   spectrogram_freq_max: String(settings.spectrogram.freq_max),
   preview_freq_max: String(settings.spectrogram.preview_freq_max),
   multires_blend_octaves: String(settings.spectrogram.multires_blend_octaves),
+  multires_window_size_scale: String(settings.spectrogram.multires_window_size_scale),
   gain: String(settings.spectrogram.gain),
   min_db: String(settings.spectrogram.min_db),
   max_db: String(settings.spectrogram.max_db),
@@ -80,6 +82,9 @@ export function AnalysisSettingsSidebar({ settings, disabled, onClose, onApply }
     })
     setIf('multires_blend_octaves', (value) => {
       spectrogram.multires_blend_octaves = value
+    })
+    setIf('multires_window_size_scale', (value) => {
+      spectrogram.multires_window_size_scale = value
     })
     setIf('gain', (value) => {
       spectrogram.gain = value
@@ -176,6 +181,21 @@ export function AnalysisSettingsSidebar({ settings, disabled, onClose, onApply }
                 onBlur={() => normalizeField('multires_blend_octaves', settings.spectrogram.multires_blend_octaves)}
                 disabled={disabled}
               />
+            </label>
+            <label className="text-[11px] text-[var(--ink)]">
+              Window Size Scale
+              <select
+                className={`mt-1 w-full ${inputClass}`}
+                value={draft.multires_window_size_scale}
+                onChange={(event) => updateField('multires_window_size_scale', event.target.value)}
+                disabled={disabled}
+              >
+                {windowSizeScaleOptions.map((option) => (
+                  <option key={option} value={option}>
+                    {option}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className="text-[11px] text-[var(--ink)]">
               Gain

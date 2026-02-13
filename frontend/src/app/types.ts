@@ -5,6 +5,7 @@ export type SpectrogramSettings = {
   freq_max: number
   preview_freq_max: number
   multires_blend_octaves: number
+  multires_window_size_scale: number
   gain: number
   min_db: number
   max_db: number
