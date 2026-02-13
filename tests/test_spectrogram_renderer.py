@@ -28,7 +28,7 @@ def test_render_tile_returns_preview_with_expected_shape() -> None:
         assert preview.height == 128
         assert len(preview.data) == 256 * 128
         assert amp_ref > 0.0
-        assert quality == "high"
+        assert quality in {"high", "local"}
     finally:
         renderer.close()
 
@@ -133,5 +133,50 @@ def test_split_tiles_match_single_render_for_fractional_boundaries() -> None:
         seam_delta = np.abs(left_data[:, -1] - right_data[:, 0])
         assert float(np.mean(seam_delta)) < 4.0
         assert float(np.mean(np.abs(combined - full_data))) < 5.0
+    finally:
+        renderer.close()
+
+
+def test_render_tile_switches_to_local_mode_with_hysteresis() -> None:
+    sample_rate = 16000
+    duration_sec = 2.0
+    t = np.arange(int(sample_rate * duration_sec), dtype=np.float64) / float(sample_rate)
+    audio = (0.3 * np.sin(2.0 * np.pi * 330.0 * t)).astype(np.float32)
+    settings = AnalysisSettings()
+
+    renderer = SpectrogramRenderer(audio=audio, sample_rate=sample_rate)
+    try:
+        _preview1, _ref1, quality1 = renderer.render_tile(
+            settings=settings,
+            time_start=0.2,
+            time_end=0.7,
+            freq_min=60.0,
+            freq_max=6000.0,
+            width=256,
+            height=128,
+        )
+        assert quality1 == "local"
+
+        _preview2, _ref2, quality2 = renderer.render_tile(
+            settings=settings,
+            time_start=0.0,
+            time_end=1.0,
+            freq_min=60.0,
+            freq_max=6000.0,
+            width=80,
+            height=128,
+        )
+        assert quality2 == "local"
+
+        _preview3, _ref3, quality3 = renderer.render_tile(
+            settings=settings,
+            time_start=0.0,
+            time_end=1.0,
+            freq_min=60.0,
+            freq_max=6000.0,
+            width=60,
+            height=128,
+        )
+        assert quality3 == "high"
     finally:
         renderer.close()

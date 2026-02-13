@@ -18,9 +18,11 @@ type ViewportParams = {
   freqMax: number
 }
 
+type ViewportQuality = 'low' | 'high' | 'local'
+
 type ViewportCacheEntry = {
   preview: SpectrogramPreview
-  quality: 'low' | 'high'
+  quality: ViewportQuality
   receivedAt: number
   sourceDuration: number
   sourceFreqMin: number
@@ -183,7 +185,7 @@ export function useViewport(preview: SpectrogramPreview | null, settings: Analys
   }, [preview, zoomX, zoomY, viewportCache, baseZoomX])
 
   const upsertViewportPreview = useCallback(
-    (resolved: SpectrogramPreview, quality: 'low' | 'high') => {
+    (resolved: SpectrogramPreview, quality: ViewportQuality) => {
       if (!preview) return
       const entry: ViewportCacheEntry = {
         preview: resolved,
@@ -194,19 +196,19 @@ export function useViewport(preview: SpectrogramPreview | null, settings: Analys
         sourceFreqMax: preview.freq_max,
       }
       setViewportCache((prev) => {
-        const hasHigh = prev.some(
+        const hasDetailed = prev.some(
           (item) =>
-            item.quality === 'high' &&
+            item.quality !== 'low' &&
             Math.abs(item.preview.time_start - resolved.time_start) < 0.001 &&
             Math.abs(item.preview.time_end - resolved.time_end) < 0.001 &&
             Math.abs(item.preview.freq_min - resolved.freq_min) < 0.1 &&
             Math.abs(item.preview.freq_max - resolved.freq_max) < 0.1
         )
-        if (quality === 'low' && hasHigh) {
+        if (quality === 'low' && hasDetailed) {
           return prev
         }
         const filtered =
-          quality === 'high'
+          quality !== 'low'
             ? prev.filter(
                 (item) =>
                   !(
@@ -258,9 +260,14 @@ export function useViewport(preview: SpectrogramPreview | null, settings: Analys
                 reportError('Viewport', result.message ?? 'Failed to request viewport preview')
                 return
               }
-              upsertViewportPreview(result.preview, result.quality === 'high' ? 'high' : 'low')
-            } catch {
+              const quality: ViewportQuality =
+                result.quality === 'local' ? 'local' : result.quality === 'high' ? 'high' : 'low'
+              upsertViewportPreview(result.preview, quality)
+            } catch (error) {
               requestedTileKeysRef.current.delete(key)
+              console.error('[Viewport] request_spectrogram_tile failed', error)
+              const message = error instanceof Error ? error.message : String(error)
+              reportError('Viewport', `Failed to request viewport preview: ${message}`)
             }
           })()
         )

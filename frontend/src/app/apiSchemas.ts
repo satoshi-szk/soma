@@ -288,7 +288,7 @@ export const apiSchemas = {
     response: z.union([
       z.object({
         status: z.literal('ok'),
-        quality: z.enum(['low', 'high']).optional(),
+        quality: z.enum(['low', 'high', 'local']).optional(),
         preview: spectrogramPreviewSchema,
       }),
       errorStatusSchema,
