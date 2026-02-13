@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import logging
+import threading
 import time
 import uuid
 from dataclasses import dataclass
@@ -14,6 +15,9 @@ from PIL import Image
 from soma.models import SpectrogramPreview
 
 logger = logging.getLogger(__name__)
+_CLEANUP_TRIGGER_MARGIN = 16
+_cleanup_states: dict[str, _CleanupState] = {}
+_cleanup_states_lock = threading.Lock()
 
 
 @dataclass(frozen=True)
@@ -21,6 +25,15 @@ class PreviewCacheConfig:
     dir_path: Path
     url_prefix: str
     max_entries: int = 200
+
+
+class _CleanupState:
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.running = False
+        self.approx_entries = 0
+        self.needs_initial_scan = True
+        self.writes_during_run = 0
 
 
 def build_preview_payload(
@@ -49,7 +62,7 @@ def _write_preview_file(
         filename = f"{safe_hint}-{stamp}-{suffix}.jpg" if safe_hint else f"preview-{stamp}-{suffix}.jpg"
         file_path = cache.dir_path / filename
         file_path.write_bytes(_render_preview_jpeg(preview))
-        _cleanup_cache(cache)
+        _notify_cache_write(cache)
         image_path = _join_url(cache.url_prefix, filename)
         return {
             "width": preview.width,
@@ -67,7 +80,56 @@ def _write_preview_file(
         return None
 
 
-def _cleanup_cache(cache: PreviewCacheConfig) -> None:
+def _notify_cache_write(cache: PreviewCacheConfig) -> None:
+    state = _cleanup_state(cache)
+    should_start = False
+    margin = (
+        0
+        if cache.max_entries <= _CLEANUP_TRIGGER_MARGIN
+        else min(_CLEANUP_TRIGGER_MARGIN, cache.max_entries // 10)
+    )
+    with state.lock:
+        state.approx_entries += 1
+        if state.running:
+            state.writes_during_run += 1
+        over_limit = state.approx_entries > (cache.max_entries + margin)
+        if state.needs_initial_scan:
+            over_limit = True
+        if over_limit and not state.running:
+            state.running = True
+            state.writes_during_run = 0
+            should_start = True
+    if should_start:
+        thread = threading.Thread(
+            target=_run_cleanup_worker,
+            args=(cache, state),
+            name="soma-preview-cleanup",
+            daemon=True,
+        )
+        thread.start()
+
+
+def _cleanup_state(cache: PreviewCacheConfig) -> _CleanupState:
+    key = str(cache.dir_path.resolve())
+    with _cleanup_states_lock:
+        state = _cleanup_states.get(key)
+        if state is None:
+            state = _CleanupState()
+            _cleanup_states[key] = state
+    return state
+
+
+def _run_cleanup_worker(cache: PreviewCacheConfig, state: _CleanupState) -> None:
+    kept_count = _cleanup_cache(cache)
+    with state.lock:
+        extra_writes = state.writes_during_run
+        state.running = False
+        state.needs_initial_scan = False
+        state.writes_during_run = 0
+        state.approx_entries = kept_count + extra_writes
+
+
+def _cleanup_cache(cache: PreviewCacheConfig) -> int:
     try:
         entries = sorted(
             (path for path in cache.dir_path.glob("*.jpg") if path.is_file()),
@@ -75,14 +137,16 @@ def _cleanup_cache(cache: PreviewCacheConfig) -> None:
             reverse=True,
         )
         if len(entries) <= cache.max_entries:
-            return
+            return len(entries)
         for path in entries[cache.max_entries :]:
             try:
                 path.unlink()
             except Exception:
                 logger.debug("failed to remove cached preview: %s", path, exc_info=True)
+        return cache.max_entries
     except Exception:
         logger.debug("failed to cleanup preview cache", exc_info=True)
+        return max(0, cache.max_entries)
 
 
 def _join_url(prefix: str, filename: str) -> str:

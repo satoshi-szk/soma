@@ -149,6 +149,8 @@ def _validated_payload[PayloadT: PayloadBase](
 
 
 class SomaApi:
+    _MAX_ACTIVE_TILE_REQUESTS = 3
+
     def __init__(self) -> None:
         self._session = ProjectSession(event_sink=_dispatch_frontend_event)
         self._playback_service = PlaybackService(self._session)
@@ -173,6 +175,9 @@ class SomaApi:
             self._history_service,
             on_partials_changed=self._playback_service.invalidate_cache,
         )
+        self._tile_request_lock = threading.Lock()
+        self._active_tile_requests = 0
+        self._latest_viewport_id = -1
         self._last_audio_path: str | None = None
         self._frontend_log_path = get_session_log_dir("soma") / "frontend.log"
         self._recent_projects = RecentProjectStore(default_recent_projects_path(), limit=10)
@@ -756,26 +761,44 @@ class SomaApi:
         parsed = _validated_payload(RequestSpectrogramTilePayload, payload, "request_spectrogram_tile")
         if isinstance(parsed, dict):
             return parsed
-        settings = self._session.settings
-        if any(
-            value is not None
-            for value in (parsed.gain, parsed.min_db, parsed.max_db, parsed.gamma)
-        ):
-            spectrogram = settings.spectrogram
-            settings = AnalysisSettings(
-                spectrogram=SpectrogramSettings(
-                    **{
-                        **spectrogram.to_dict(),
-                        "gain": spectrogram.gain if parsed.gain is None else float(parsed.gain),
-                        "min_db": spectrogram.min_db if parsed.min_db is None else float(parsed.min_db),
-                        "max_db": spectrogram.max_db if parsed.max_db is None else float(parsed.max_db),
-                        "gamma": spectrogram.gamma if parsed.gamma is None else float(parsed.gamma),
-                    }
-                ),
-                snap=settings.snap,
-            )
+        viewport_id = parsed.viewport_id
+        with self._tile_request_lock:
+            if viewport_id is not None and viewport_id > self._latest_viewport_id:
+                self._latest_viewport_id = viewport_id
+            if viewport_id is not None and viewport_id < self._latest_viewport_id:
+                return {"status": "error", "message": "Stale tile request dropped.", "error_code": "stale_tile"}
+            if self._active_tile_requests >= self._MAX_ACTIVE_TILE_REQUESTS:
+                return {
+                    "status": "error",
+                    "message": "Tile queue saturated. Retry latest viewport.",
+                    "error_code": "tile_saturated",
+                }
+            self._active_tile_requests += 1
 
+        settings = self._session.settings
         try:
+            if viewport_id is not None:
+                with self._tile_request_lock:
+                    if viewport_id < self._latest_viewport_id:
+                        return {"status": "error", "message": "Stale tile request dropped.", "error_code": "stale_tile"}
+            if any(
+                value is not None
+                for value in (parsed.gain, parsed.min_db, parsed.max_db, parsed.gamma)
+            ):
+                spectrogram = settings.spectrogram
+                settings = AnalysisSettings(
+                    spectrogram=SpectrogramSettings(
+                        **{
+                            **spectrogram.to_dict(),
+                            "gain": spectrogram.gain if parsed.gain is None else float(parsed.gain),
+                            "min_db": spectrogram.min_db if parsed.min_db is None else float(parsed.min_db),
+                            "max_db": spectrogram.max_db if parsed.max_db is None else float(parsed.max_db),
+                            "gamma": spectrogram.gamma if parsed.gamma is None else float(parsed.gamma),
+                        }
+                    ),
+                    snap=settings.snap,
+                )
+
             preview, ref, quality = renderer.render_tile(
                 settings=settings.spectrogram,
                 time_start=parsed.time_start,
@@ -790,6 +813,9 @@ class SomaApi:
         except Exception as exc:
             logger.exception("request_spectrogram_tile failed")
             return {"status": "error", "message": str(exc)}
+        finally:
+            with self._tile_request_lock:
+                self._active_tile_requests = max(0, self._active_tile_requests - 1)
 
         preview_payload = build_preview_payload(preview, _preview_cache, hint="tile")
         return {"status": "ok", "preview": preview_payload, "quality": quality}

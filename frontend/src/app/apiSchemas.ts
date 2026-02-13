@@ -73,7 +73,11 @@ const partialSchema = z.object({
 
 const okStatusSchema = z.object({ status: z.literal('ok') })
 const cancelledStatusSchema = z.object({ status: z.literal('cancelled') })
-const errorStatusSchema = z.object({ status: z.literal('error'), message: z.string().optional() })
+const errorStatusSchema = z.object({
+  status: z.literal('error'),
+  message: z.string().optional(),
+  error_code: z.string().optional(),
+})
 
 const loadResponseSchema = z.union([
   z.object({
@@ -286,6 +290,7 @@ export const apiSchemas = {
       freq_max: z.number(),
       width: z.number(),
       height: z.number(),
+      viewport_id: z.number().int().optional(),
       gain: z.number().optional(),
       min_db: z.number().optional(),
       max_db: z.number().optional(),
