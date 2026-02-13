@@ -92,3 +92,25 @@ def test_parse_payload_accepts_export_mpe_cc_update_rate() -> None:
     assert error is None
     assert parsed is not None
     assert parsed.cc_update_rate_hz == 400
+
+
+def test_parse_payload_accepts_spectrogram_method_and_reassigned_ref_power() -> None:
+    payload = {
+        "spectrogram": {"method": "reassigned_stft", "reassigned_ref_power": 1e-5},
+        "snap": {},
+    }
+    parsed, error = parse_payload(UpdateSettingsPayload, payload)
+    assert error is None
+    assert parsed is not None
+    assert parsed.spectrogram.method == "reassigned_stft"
+    assert parsed.spectrogram.reassigned_ref_power == 1e-5
+
+
+def test_parse_payload_rejects_invalid_spectrogram_method() -> None:
+    payload = {
+        "spectrogram": {"method": "invalid_method"},
+        "snap": {},
+    }
+    parsed, error = parse_payload(UpdateSettingsPayload, payload)
+    assert parsed is None
+    assert error is not None

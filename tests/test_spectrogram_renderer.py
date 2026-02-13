@@ -4,7 +4,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 
-from soma.models import AnalysisSettings, SpectrogramPreview
+from soma.models import AnalysisSettings, SpectrogramPreview, SpectrogramSettings
 from soma.spectrogram_renderer import SpectrogramRenderer
 
 
@@ -39,6 +39,38 @@ def test_render_tile_returns_preview_with_expected_shape() -> None:
         assert preview.height == 128
         assert len(preview.data) == 256 * 128
         assert amp_ref > 0.0
+        assert quality in {"high", "local"}
+    finally:
+        renderer.close()
+
+
+def test_reassigned_render_uses_same_method_for_overview_and_tile() -> None:
+    sample_rate = 16000
+    duration_sec = 1.0
+    t = np.arange(int(sample_rate * duration_sec), dtype=np.float64) / float(sample_rate)
+    audio = (0.2 * np.sin(2.0 * np.pi * 440.0 * t)).astype(np.float32)
+    settings = AnalysisSettings(spectrogram=SpectrogramSettings(method="reassigned_stft", reassigned_ref_power=1e-6))
+
+    renderer = SpectrogramRenderer(audio=audio, sample_rate=sample_rate)
+    try:
+        overview, overview_ref = renderer.render_overview(settings=settings.spectrogram, width=128, height=64)
+        tile, tile_ref, quality = renderer.render_tile(
+            settings=settings.spectrogram,
+            time_start=0.0,
+            time_end=0.5,
+            freq_min=40.0,
+            freq_max=4000.0,
+            width=128,
+            height=64,
+        )
+        assert overview.width == 128
+        assert overview.height == 64
+        assert len(overview.data) == 128 * 64
+        assert overview_ref > 0.0
+        assert tile.width == 128
+        assert tile.height == 64
+        assert len(tile.data) == 128 * 64
+        assert tile_ref > 0.0
         assert quality in {"high", "local"}
     finally:
         renderer.close()

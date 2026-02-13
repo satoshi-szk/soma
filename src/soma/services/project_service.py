@@ -82,7 +82,12 @@ class ProjectService:
         blend_changed = (
             prev_settings.spectrogram.multires_blend_octaves != settings.spectrogram.multires_blend_octaves
         )
-        if blend_changed and self._session.audio_data is not None and self._session.audio_info is not None:
+        window_scale_changed = (
+            prev_settings.spectrogram.multires_window_size_scale != settings.spectrogram.multires_window_size_scale
+        )
+        if (
+            blend_changed or window_scale_changed
+        ) and self._session.audio_data is not None and self._session.audio_info is not None:
             self._session._close_spectrogram_renderer()
             self._session._spectrogram_renderer = self._build_spectrogram_renderer(
                 audio=self._session.audio_data,
@@ -180,4 +185,5 @@ class ProjectService:
             audio=audio,
             sample_rate=sample_rate,
             global_blend_octaves=self._session.settings.spectrogram.multires_blend_octaves,
+            global_window_size_scale=self._session.settings.spectrogram.multires_window_size_scale,
         )

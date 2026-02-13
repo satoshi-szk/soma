@@ -54,7 +54,9 @@ A GUI application that extracts partials specified by humans on a spectrogram an
     - On `MouseUp`, send the path to the backend, detect ridges (local maxima) via JIT analysis, then snap.
     - **Important:** Snapping must be done only with CWT-based JIT analysis, and must never use STFT (STFT is GUI preview only).
 - Spectrogram (preview) generation
-    - **Policy:** First show a low-quality STFT preview, and only when the display window length `time_end - time_start` is below a threshold, replace it in the background with a high-quality CWT preview.
+    - **Policy:** Generate both `overview` and `tile` with the spectrogram method selected in Analysis Settings.
+      - `multires_stft` or `reassigned_stft` (librosa-based reassigned STFT)
+      - Do not mix methods between `overview` and `tile`.
     - **Comms:** The frontend sends fire-and-forget requests on init/zoom, and the backend pushes preview updates (no frontend polling).
 - Undo / Redo
     - Only changes to the document (partials + analysis settings) are subject to Undo/Redo.

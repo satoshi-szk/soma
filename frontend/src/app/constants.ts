@@ -16,10 +16,13 @@ export const TOOL_LIST: { id: ToolId; label: string }[] = [
 
 export const DEFAULT_SETTINGS: AnalysisSettings = {
   spectrogram: {
+    method: "multires_stft",
     freq_min: 20,
     freq_max: 20000,
     preview_freq_max: 12000,
     multires_blend_octaves: 1.0,
+    multires_window_size_scale: 1.0,
+    reassigned_ref_power: 1e-6,
     gain: 1,
     min_db: -80,
     max_db: 0,
