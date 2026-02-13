@@ -19,6 +19,7 @@ class SpectrogramRenderer:
     _LOCAL_ENTER_MULTIPLIER = 1.10
     _LOCAL_EXIT_MULTIPLIER = 0.90
     _LOCAL_CACHE_MAX_ITEMS = 24
+    _LOCAL_MAX_INTERNAL_COLS = 4096
     _LOCAL_TIME_QUANTUM_SEC = 0.001
     _LOCAL_FREQ_QUANTUM_HZ = 0.1
     _MIN_COLS = 2048
@@ -202,23 +203,25 @@ class SpectrogramRenderer:
             self._store_local_cache(cache_key, result)
             return result
 
-        if width <= 1:
-            center_times = np.array([0.5 * (start + end)], dtype=np.float64)
-        else:
-            center_times = np.linspace(start, end, width, dtype=np.float64)
-        centers = np.rint(center_times * float(self._sample_rate)).astype(np.int64) - np.int64(ext_start_idx)
         target_log_freqs = np.geomspace(effective_min, effective_max, height).astype(np.float64)
         band_freq_max = max(effective_max, nyquist)
         weights = self._band_weights(target_log_freqs, band_freq_max, settings.multires_blend_octaves)
         composed = np.zeros((height, width), dtype=np.float32)
+        view_samples = max((end - start) * float(self._sample_rate), 1.0)
 
         bands = [
-            (20.0, 200.0, 4096),
-            (200.0, 2000.0, 1024),
-            (2000.0, band_freq_max, 256),
+            (20.0, 200.0, 4096, 4096),
+            (200.0, 2000.0, 1024, 4096),
+            (2000.0, band_freq_max, 256, 4096),
         ]
-        for band_index, (_band_lo, _band_hi, nperseg) in enumerate(bands):
-            band_mag = self._sparse_stft_magnitude(local_audio, centers=centers, nperseg=nperseg)
+        for band_index, (_band_lo, _band_hi, nperseg, nfft) in enumerate(bands):
+            band_cols = self._compute_local_band_cols(view_samples=view_samples, width=width, nperseg=nperseg)
+            if band_cols <= 1:
+                center_times = np.array([0.5 * (start + end)], dtype=np.float64)
+            else:
+                center_times = np.linspace(start, end, band_cols, dtype=np.float64)
+            centers = np.rint(center_times * float(self._sample_rate)).astype(np.int64) - np.int64(ext_start_idx)
+            band_mag = self._sparse_stft_magnitude(local_audio, centers=centers, nperseg=nperseg, nfft=nfft)
             if band_mag.size == 0:
                 continue
             fft_freqs = np.fft.rfftfreq(
@@ -230,6 +233,13 @@ class SpectrogramRenderer:
                 source_matrix=band_mag,
                 target_freqs=target_log_freqs,
             )
+            if band_cols != width:
+                band_image = self._resample_time_matrix(
+                    source=band_image,
+                    width=width,
+                    relative_start_col=0.0,
+                    relative_end_col=float(max(0, band_cols - 1)),
+                )
             composed += band_image * weights[band_index][:, None]
 
         computed_amp_reference = self._matrix_max
@@ -336,9 +346,9 @@ class SpectrogramRenderer:
         centers = np.linspace(0, max(0, self._length - 1), self._matrix_cols, dtype=np.int64)
 
         bands = [
-            (20.0, 200.0, 4096),
-            (200.0, 2000.0, 1024),
-            (2000.0, self._matrix_freq_max, 256),
+            (20.0, 200.0, 4096, 4096),
+            (200.0, 2000.0, 1024, 4096),
+            (2000.0, self._matrix_freq_max, 256, 4096),
         ]
 
         weights = self._band_weights(self._matrix_log_freqs, self._matrix_freq_max, self._global_blend_octaves)
@@ -348,8 +358,8 @@ class SpectrogramRenderer:
             chunk_end = min(self._matrix_cols, chunk_start + chunk_cols)
             chunk_centers = centers[chunk_start:chunk_end]
             composed_chunk = np.zeros((self._BASE_HEIGHT, chunk_end - chunk_start), dtype=np.float32)
-            for band_index, (_band_lo, _band_hi, nperseg) in enumerate(bands):
-                band_mag = self._sparse_stft_magnitude(self._audio, centers=chunk_centers, nperseg=nperseg)
+            for band_index, (_band_lo, _band_hi, nperseg, nfft) in enumerate(bands):
+                band_mag = self._sparse_stft_magnitude(self._audio, centers=chunk_centers, nperseg=nperseg, nfft=nfft)
                 if band_mag.size == 0:
                     continue
                 fft_freqs = np.fft.rfftfreq(
@@ -464,13 +474,22 @@ class SpectrogramRenderer:
         )
         return preview, computed_amp_reference
 
-    def _sparse_stft_magnitude(self, audio_segment: np.ndarray, centers: np.ndarray, nperseg: int) -> np.ndarray:
+    def _sparse_stft_magnitude(
+        self,
+        audio_segment: np.ndarray,
+        centers: np.ndarray,
+        nperseg: int,
+        nfft: int | None = None,
+    ) -> np.ndarray:
         if centers.size == 0:
             return np.zeros((0, 0), dtype=np.float32)
         n = int(min(nperseg, max(256, audio_segment.size)))
         if n & (n - 1) != 0:
             n = 1 << int(np.floor(np.log2(n)))
             n = max(256, n)
+        fft_size = n
+        if nfft is not None:
+            fft_size = max(int(nfft), n)
         window = np.hanning(n).astype(np.float32)
         half = n // 2
         source = audio_segment.astype(np.float64, copy=False)
@@ -479,9 +498,19 @@ class SpectrogramRenderer:
         starts = np.clip(starts, 0, max(0, padded.size - n))
         frame_indices = starts[:, None] + np.arange(n, dtype=np.int64)[None, :]
         frames = padded[frame_indices]
-        spectra = np.fft.rfft(frames * window[None, :], n=n, axis=1)
+        spectra = np.fft.rfft(frames * window[None, :], n=fft_size, axis=1)
         mags = np.abs(spectra).astype(np.float32, copy=False)
         return mags.T
+
+    def _compute_local_band_cols(self, view_samples: float, width: int, nperseg: int) -> int:
+        if width <= 1:
+            return 1
+        pixel_hop = max(view_samples / float(width), 1.0)
+        rx_hop = max(float(nperseg) / 8.0, 1.0)
+        hop = min(rx_hop, pixel_hop)
+        cols = int(np.floor(view_samples / hop)) + 1
+        cols = max(width, cols)
+        return min(cols, max(width, self._LOCAL_MAX_INTERNAL_COLS))
 
     def _band_weights(
         self,
