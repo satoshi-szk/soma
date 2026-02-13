@@ -5,6 +5,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+import numpy as np
+
 from soma.models import AnalysisSettings, AudioInfo, Partial, SourceInfo
 from soma.persistence import (
     build_project_payload,
@@ -62,17 +64,30 @@ class ProjectService:
             source_info=source_info,
             initial_mix_buffer=self._playback.mix_buffer(0.5),
         )
-        from soma.spectrogram_renderer import SpectrogramRenderer
-
-        self._session._spectrogram_renderer = SpectrogramRenderer(audio=audio, sample_rate=info.sample_rate)
+        self._session._spectrogram_renderer = self._build_spectrogram_renderer(
+            audio=audio,
+            sample_rate=info.sample_rate,
+        )
         self._playback.invalidate_cache()
         return info
 
     def set_settings(self, settings: AnalysisSettings) -> None:
         before = self._history.snapshot_state(include_settings=True)
+        prev_settings = self._session.settings
         self._session.settings = settings
         self._session._stft_amp_reference = None
         self._session._snap_amp_reference = None
+        # マルチレゾのブレンド幅はグローバル行列生成時に反映されるため、
+        # 値が変わった場合はレンダラーを作り直して overview/high タイルにも適用する。
+        blend_changed = (
+            prev_settings.spectrogram.multires_blend_octaves != settings.spectrogram.multires_blend_octaves
+        )
+        if blend_changed and self._session.audio_data is not None and self._session.audio_info is not None:
+            self._session._close_spectrogram_renderer()
+            self._session._spectrogram_renderer = self._build_spectrogram_renderer(
+                audio=self._session.audio_data,
+                sample_rate=self._session.audio_info.sample_rate,
+            )
         after = self._history.snapshot_state(include_settings=True)
         self._history.record(before, after)
 
@@ -157,3 +172,12 @@ class ProjectService:
 
     def partials(self) -> list[Partial]:
         return self._session.store.all()
+
+    def _build_spectrogram_renderer(self, *, audio: np.ndarray, sample_rate: int) -> Any:
+        from soma.spectrogram_renderer import SpectrogramRenderer
+
+        return SpectrogramRenderer(
+            audio=audio,
+            sample_rate=sample_rate,
+            global_blend_octaves=self._session.settings.spectrogram.multires_blend_octaves,
+        )

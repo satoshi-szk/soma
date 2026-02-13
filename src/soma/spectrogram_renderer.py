@@ -24,9 +24,13 @@ class SpectrogramRenderer:
     _MIN_COLS = 2048
     _MAX_COLS = 320_000
 
-    def __init__(self, audio: np.ndarray, sample_rate: int) -> None:
+    def __init__(self, audio: np.ndarray, sample_rate: int, global_blend_octaves: float = 1.0) -> None:
         self._sample_rate = sample_rate
         self._length = int(audio.shape[0])
+        blend = float(global_blend_octaves)
+        if not np.isfinite(blend) or blend <= 0.0:
+            blend = 1.0
+        self._global_blend_octaves = max(0.01, min(6.0, blend))
         self._temp_dir = tempfile.TemporaryDirectory(prefix="soma-spec-")
         self._audio_path = Path(self._temp_dir.name) / "audio.dat"
         self._matrix_path = Path(self._temp_dir.name) / "spec.dat"
@@ -337,7 +341,7 @@ class SpectrogramRenderer:
             (2000.0, self._matrix_freq_max, 256),
         ]
 
-        weights = self._band_weights(self._matrix_log_freqs, self._matrix_freq_max, 1.0)
+        weights = self._band_weights(self._matrix_log_freqs, self._matrix_freq_max, self._global_blend_octaves)
 
         chunk_cols = 256
         for chunk_start in range(0, self._matrix_cols, chunk_cols):

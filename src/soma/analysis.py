@@ -220,8 +220,8 @@ def make_spectrogram(
         ), 1.0
 
     # 周波数範囲を有効な境界内に収める。
-    effective_freq_min = max(freq_min, settings.spectrogram.freq_min, 1.0)
-    effective_freq_max = min(freq_max, settings.spectrogram.freq_max, sample_rate * 0.5)
+    effective_freq_min = max(freq_min, settings.snap.freq_min, 1.0)
+    effective_freq_max = min(freq_max, settings.snap.freq_max, sample_rate * 0.5)
     effective_freq_max = max(effective_freq_max, effective_freq_min * 1.001)
 
     # 出力 1px あたりの時間サンプル数を確保しつつ、要求 freq_max の
